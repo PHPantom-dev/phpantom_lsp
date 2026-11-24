@@ -258,6 +258,7 @@ fn merge_scanned_file(
     for fqcn in scan.classes {
         let class_short_name = crate::util::short_name(&fqcn).to_owned();
         let mut origin_wins = false;
+        let mut lost = None;
         result
             .classmap
             .entry(fqcn.clone())
@@ -265,14 +266,19 @@ fn merge_scanned_file(
                 let existing_stem = existing.file_stem().and_then(|s| s.to_str()).unwrap_or("");
                 let new_stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
                 if existing_stem != class_short_name && new_stem == class_short_name {
-                    *existing = path.to_path_buf();
+                    lost = Some(std::mem::replace(existing, path.to_path_buf()));
                     origin_wins = true;
+                } else if existing != path {
+                    lost = Some(path.to_path_buf());
                 }
             })
             .or_insert_with(|| {
                 origin_wins = true;
                 path.to_path_buf()
             });
+        if let Some(lost) = lost {
+            result.class_alternates.push((fqcn.clone(), lost));
+        }
         if origin_wins {
             result.class_origins.insert(fqcn, origin);
         }
@@ -634,8 +640,7 @@ fn read_phpstorm_stubs_map(
         function_origins,
         constant_index,
         constant_origins,
-        package_roots: Vec::new(),
-        globals: Vec::new(),
+        ..Default::default()
     })
 }
 

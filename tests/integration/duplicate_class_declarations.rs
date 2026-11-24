@@ -5,8 +5,9 @@
 //! (Carbon's `DatePeriodBase`, Symfony's polyfilled `RoundingMode`), and
 //! the analyzer parses files in parallel, so "whichever parse finished
 //! last" made the members such a name resolved to differ from run to run.
-//! The lowest-sorting URI wins instead, and the declarations that lost are
-//! kept so the name survives the winning file dropping it.
+//! A declaration PHP always runs beats one behind a guard, the
+//! lowest-sorting URI wins among equals, and the declarations that lost
+//! are kept so the name survives the winning file dropping it.
 
 use crate::common::create_test_backend;
 
@@ -270,4 +271,104 @@ async fn real_declaration_loaded_on_demand_after_a_double_brings_its_inherited_m
         "src/Other.php sorts before the double and declares Lib\\Store too: {after:?}"
     );
     drop(dir);
+}
+
+const GUARDED_WIDGET: &str = "<?php\nnamespace Acme;\nif (!class_exists(Widget::class)) {\n    class Widget { public function old(): void {} }\n}\n";
+const REAL_WIDGET: &str = "<?php\nnamespace Acme;\nclass Widget { public function old(): void {} public function render(): string { return ''; } }\n";
+const WIDGET_CALLER: &str =
+    "<?php\nfunction f(\\Acme\\Widget $w): void { $w->old(); $w->render(); }\n";
+
+/// PHP only runs a declaration behind a `class_exists` guard when the
+/// autoloader found no other file for the name, so the unconditional
+/// declaration wins even where the guarded file sorts first.
+#[tokio::test]
+async fn unconditional_declaration_beats_a_guarded_one() {
+    for (first, second) in [
+        (
+            ("file:///a_guard.php", GUARDED_WIDGET),
+            ("file:///b_real.php", REAL_WIDGET),
+        ),
+        (
+            ("file:///b_real.php", REAL_WIDGET),
+            ("file:///a_guard.php", GUARDED_WIDGET),
+        ),
+    ] {
+        let backend = create_test_backend();
+        backend.update_ast(first.0, first.1);
+        backend.update_ast(second.0, second.1);
+
+        let uri = backend.fqn_uri_index().read().get("Acme\\Widget").cloned();
+        assert_eq!(uri.as_deref(), Some("file:///b_real.php"));
+        let unknown = unknown_members(&backend, "file:///caller.php", WIDGET_CALLER);
+        assert!(
+            unknown.is_empty(),
+            "render() is on the real Widget: {unknown:?}"
+        );
+    }
+}
+
+/// A guarded declaration nothing replaces is what PHP runs, so it stays.
+#[tokio::test]
+async fn guarded_declaration_stands_alone() {
+    let backend = create_test_backend();
+    backend.update_ast("file:///a_guard.php", GUARDED_WIDGET);
+
+    let unknown = unknown_members(&backend, "file:///caller.php", WIDGET_CALLER);
+    assert_eq!(unknown.len(), 1, "only old() is declared: {unknown:?}");
+}
+
+/// A guarded copy of a vendor class in the project's `autoload.files`, and
+/// the real class under the vendor package's PSR-4 root.  The guarded copy
+/// is indexed eagerly; the real class is found through the package scan
+/// and loaded once the guarded copy turns out to be what the name
+/// resolved to.
+#[tokio::test]
+async fn guarded_autoload_file_does_not_hide_the_vendor_class() {
+    use std::fs;
+    use tower_lsp_server::LanguageServer;
+    use tower_lsp_server::gen_lsp_types::InitializedParams;
+
+    for guard in ["!class_exists(Widget::class)", "false"] {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let root = dir.path();
+        let write = |relative: &str, content: &str| {
+            let path = root.join(relative);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, content).unwrap();
+        };
+        write(
+            "composer.json",
+            r#"{ "autoload": { "psr-4": { "App\\": "src/" }, "files": ["stubs/polyfill.php"] } }"#,
+        );
+        write(
+            "stubs/polyfill.php",
+            &format!(
+                "<?php\nnamespace Acme;\nif ({guard}) {{\n    class Widget {{ public function old(): void {{}} }}\n}}\n"
+            ),
+        );
+        write("vendor/acme/lib/src/Widget.php", REAL_WIDGET);
+        write(
+            "vendor/composer/installed.json",
+            r#"{ "packages": [ {
+                "name": "acme/lib",
+                "install-path": "../acme/lib",
+                "autoload": { "psr-4": { "Acme\\": "src/" } }
+            } ] }"#,
+        );
+        write(
+            "vendor/composer/autoload_files.php",
+            "<?php\n$vendorDir = dirname(__DIR__);\n$baseDir = dirname($vendorDir);\nreturn array(\n    'abc' => $baseDir . '/stubs/polyfill.php',\n);\n",
+        );
+
+        let backend = create_test_backend();
+        *backend.workspace_root().write() = Some(root.to_path_buf());
+        backend.initialized(InitializedParams {}).await;
+
+        let caller = crate::common::file_uri(&root.join("src/caller.php"));
+        let unknown = unknown_members(&backend, &caller, WIDGET_CALLER);
+        assert!(
+            unknown.is_empty(),
+            "guard `{guard}`: render() is on the vendor Widget: {unknown:?}"
+        );
+    }
 }

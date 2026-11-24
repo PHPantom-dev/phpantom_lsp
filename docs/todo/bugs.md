@@ -65,51 +65,34 @@ No outstanding items.
 
 ## Name resolution
 
-### B761. A guarded copy of a vendor class hides the real one
+### B762. `$this` in a class declared twice reads the other declaration
 
-**Impact: Medium · Complexity: Medium**
+**Impact: Low · Complexity: Medium**
 
 ```php
-// stubs/polyfill.php, listed under "autoload": {"files": [...]}
-namespace Acme;
-if (!class_exists(Widget::class)) {      // or `if (false)`
-    class Widget { public function old(): void {} }
-}
+// a.php
+namespace V;
+class Variant {}
 
-// vendor/acme/lib/src/Widget.php, found through PSR-4
-namespace Acme;
-class Widget { public function old(): void {} public function render(): string { return ''; } }
-
-// src/UseIt.php
-$w->render();   // "Method Acme\Widget::render() not found"
+// b.php
+namespace V;
+class Variant { private int $x = 1; public function f(): int { return $this->x; } }
+// "Property V\Variant::$x not found"
 ```
 
-PHP never runs the guarded declaration here: `class_exists()` autoloads
-the PSR-4 file first, and an `if (false)` body never runs at all. PHPantom
-resolves `Acme\Widget` to the guarded copy instead, so every member only
-the real class has is reported unknown, and hover, completion and
-go-to-definition all read the stub. It happens wherever the guarded file
-sits on disk and whichever guard it uses, as long as the real class is
-reached through a vendor package's PSR-4 mapping. The same probe with the
-real class under the project's own PSR-4 root resolved correctly.
+When more than one file declares a class, the class index keeps one
+declaration for the name (the lowest-sorting file, or the one that does
+not wait for the autoloader behind a `class_exists` guard). Inside the
+body of a declaration that lost, `$this`, `self` and `static` resolve
+by name to that winner, so every member only the losing declaration has
+is reported unknown in its own file, and hover and completion there show
+the other declaration's members. Polyfills and version-specific variants
+of a class (`symfony/polyfill-*`, Carbon's `DatePeriodBase`) are where
+this shows up in real code.
 
-The parser descends into `if` and block bodies on purpose
-(`src/parser/classes/mod.rs`, so Doctrine's `ServiceEntityRepository`,
-declared only under a guard, is indexed), but nothing records that the
-declaration was conditional. A file from `autoload.files` is indexed
-eagerly, so its copy is in the class index before the vendor PSR-4 file
-is ever looked up, and the lookup stops there.
-
-**Fix:** record on the declaration that it sits inside a conditional
-block, and when such a declaration is the one a name resolves to, try
-the Composer autoloader (classmap, then PSR-4) for an unconditional
-declaration of the same name and prefer it, as PHP's autoloader does.
-Keep the guarded declaration when the autoloader finds nothing, which is
-the Doctrine case. Tusk PHP reported false positives from the same kind of
-guarded declaration in Symfony's MongoDB and PHPUnit bridges and
-Magento's Redis adapter (its CHANGELOG, "A class
-declared inside a block"), which are the real-code places to verify the
-fix against.
+**Fix:** resolve `$this`, `self` and `static` inside a class body to the
+declaration that encloses them in the current file, not to whatever the
+class index holds for the name.
 
 ## Code actions
 

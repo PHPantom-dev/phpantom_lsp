@@ -281,7 +281,7 @@ impl Backend {
         // for edge cases.  This is the fastest path — no disk I/O, no
         // parsing — so it runs before any file-based resolution.
         if let Some(cls) = self.find_class_in_uri_classes_index(class_name) {
-            return Some(cls);
+            return Some(self.prefer_autoloaded(class_name, last_segment, cls, scope.as_deref()));
         }
 
         // ── Phase 0.5: built-in names resolve to the embedded stubs ──
@@ -326,7 +326,8 @@ impl Backend {
                 .iter()
                 .find(|c| c.name.eq_ignore_ascii_case(last_segment))
         {
-            return Some(Arc::clone(cls));
+            let cls = Arc::clone(cls);
+            return Some(self.prefer_autoloaded(class_name, last_segment, cls, scope.as_deref()));
         }
 
         // ── Phase 2: Try PSR-4 resolution ──
@@ -382,6 +383,66 @@ impl Backend {
             .write()
             .insert(class_name);
         None
+    }
+
+    /// `found`, unless it is a declaration that yields to the autoloader
+    /// ([`ClassInfo::yields_to_autoloader`]) and another file declares
+    /// `class_name`.
+    ///
+    /// PHP only runs a declaration such as
+    /// `if (! class_exists(Foo::class)) { class Foo {} }` when the
+    /// autoloader has no file for the name, so the file the autoloader
+    /// would load wins: one discovery found declaring the name too (the
+    /// classmap), then the PSR-4 candidates.  Loading it records its
+    /// declaration, which the class index then ranks above the guarded
+    /// one.  A guarded declaration nothing else replaces is kept.
+    fn prefer_autoloaded(
+        &self,
+        class_name: &str,
+        last_segment: &str,
+        found: Arc<ClassInfo>,
+        scope: Option<&ProjectScope>,
+    ) -> Arc<ClassInfo> {
+        if !found.yields_to_autoloader {
+            return found;
+        }
+        let autoloaded = |classes: Vec<Arc<ClassInfo>>| {
+            classes
+                .into_iter()
+                .find(|c| !c.yields_to_autoloader && c.name.eq_ignore_ascii_case(last_segment))
+        };
+        let sees = |uri: &str| scope.is_none_or(|scope| scope.sees(uri));
+        for uri in self.symbols.alternate_class_uris(class_name) {
+            if !sees(&uri) {
+                continue;
+            }
+            let classes = self
+                .shared_classes_for_uri(&uri)
+                .or_else(|| self.parse_and_cache_uri(&uri));
+            if let Some(cls) = classes.and_then(autoloaded) {
+                return cls;
+            }
+        }
+        let Some(workspace_root) = self.workspace.workspace_root.read().clone() else {
+            return found;
+        };
+        let paths: Vec<_> = {
+            let mappings = self.workspace.psr4_mappings.read();
+            composer::psr4_class_files(&mappings, &workspace_root, class_name).collect()
+        };
+        for path in paths {
+            let uri = crate::util::path_to_uri(&path);
+            if !sees(&uri) {
+                continue;
+            }
+            let classes = self
+                .shared_classes_for_uri(&uri)
+                .or_else(|| self.parse_and_cache_file(&path));
+            if let Some(cls) = classes.and_then(autoloaded) {
+                return cls;
+            }
+        }
+        found
     }
 
     /// The declaration of `class_name` that `scope` sees, other than the

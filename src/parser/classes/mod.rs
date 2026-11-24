@@ -89,13 +89,29 @@ impl Backend {
         classes: &mut Vec<ClassInfo>,
         doc_ctx: Option<&DocblockCtx<'a>>,
     ) {
+        Self::extract_classes_nested(statements, classes, doc_ctx, AutoloadGuard::None);
+    }
+
+    /// [`extract_classes_from_statements`](Self::extract_classes_from_statements)
+    /// for statements under `guard`, which marks the named class-likes it
+    /// applies to with [`ClassInfo::yields_to_autoloader`].
+    fn extract_classes_nested<'a>(
+        statements: impl Iterator<Item = &'a Statement<'a>>,
+        classes: &mut Vec<ClassInfo>,
+        doc_ctx: Option<&DocblockCtx<'a>>,
+        guard: AutoloadGuard<'a>,
+    ) {
+        let named = |mut class: ClassInfo| {
+            class.yields_to_autoloader = guard.applies_to(&class.name);
+            class
+        };
         for statement in statements {
             match statement {
                 Statement::Class(class) => {
                     if removed_in_target_version(class, doc_ctx) {
                         continue;
                     }
-                    classes.push(class_likes::extract_class(class, doc_ctx));
+                    classes.push(named(class_likes::extract_class(class, doc_ctx)));
                     // Walk method bodies for anonymous classes.
                     Self::find_anonymous_classes_in_members(class.members.iter(), classes, doc_ctx);
                 }
@@ -103,14 +119,14 @@ impl Backend {
                     if removed_in_target_version(iface, doc_ctx) {
                         continue;
                     }
-                    classes.push(class_likes::extract_interface(iface, doc_ctx));
+                    classes.push(named(class_likes::extract_interface(iface, doc_ctx)));
                     Self::find_anonymous_classes_in_members(iface.members.iter(), classes, doc_ctx);
                 }
                 Statement::Trait(trait_def) => {
                     if removed_in_target_version(trait_def, doc_ctx) {
                         continue;
                     }
-                    classes.push(class_likes::extract_trait(trait_def, doc_ctx));
+                    classes.push(named(class_likes::extract_trait(trait_def, doc_ctx)));
                     Self::find_anonymous_classes_in_members(
                         trait_def.members.iter(),
                         classes,
@@ -121,7 +137,7 @@ impl Backend {
                     if removed_in_target_version(enum_def, doc_ctx) {
                         continue;
                     }
-                    classes.push(class_likes::extract_enum(enum_def, doc_ctx));
+                    classes.push(named(class_likes::extract_enum(enum_def, doc_ctx)));
                     Self::find_anonymous_classes_in_members(
                         enum_def.members.iter(),
                         classes,
@@ -138,8 +154,20 @@ impl Backend {
                 // discovered by name. Anonymous classes nested in the
                 // non-container statements within these bodies are still
                 // collected via the `_` arm when the recursion reaches them.
+                Statement::If(if_stmt) => {
+                    let (when_true, when_false) = AutoloadGuard::of_condition(if_stmt.condition);
+                    let (then_guard, else_guard) = (guard.or(when_true), guard.or(when_false));
+                    let mut branch = 0;
+                    for_each_nested_statement_list(statement, |statements| {
+                        // The first list visited is the `if` body itself;
+                        // its `elseif` and `else` bodies run when the
+                        // condition does not hold.
+                        let guard = if branch == 0 { then_guard } else { else_guard };
+                        branch += 1;
+                        Self::extract_classes_nested(statements.iter(), classes, doc_ctx, guard);
+                    });
+                }
                 Statement::Namespace(_)
-                | Statement::If(_)
                 | Statement::Block(_)
                 | Statement::Try(_)
                 | Statement::Switch(_)
@@ -148,7 +176,7 @@ impl Backend {
                 | Statement::For(_)
                 | Statement::Foreach(_) => {
                     for_each_nested_statement_list(statement, |statements| {
-                        Self::extract_classes_from_statements(statements.iter(), classes, doc_ctx);
+                        Self::extract_classes_nested(statements.iter(), classes, doc_ctx, guard);
                     });
                 }
                 _ => {
@@ -158,6 +186,107 @@ impl Backend {
                     Self::find_anonymous_classes_in_statement(statement, classes, doc_ctx);
                 }
             }
+        }
+    }
+}
+
+/// A condition under which PHP only runs a class declaration when the
+/// autoloader has no other file for the name, or never runs it.
+#[derive(Clone, Copy)]
+enum AutoloadGuard<'a> {
+    None,
+    /// `if (! class_exists(Foo::class)) { class Foo {} }`: the check
+    /// autoloads `Foo` first, so the declaration below only runs when no
+    /// file declares it.  Holds the short name checked.
+    Autoloads(&'a str),
+    /// `if (false) { class Foo {} }`: a declaration for tools to read,
+    /// which PHP never runs.
+    Never,
+}
+
+impl<'a> AutoloadGuard<'a> {
+    /// The guards an `if` condition puts on the body that runs when it
+    /// holds and on the bodies that run when it does not.
+    ///
+    /// Only conditions that settle the question count: an existence check
+    /// with autoloading off (`class_exists(Foo::class, false)`) is how a
+    /// file Composer loads at bootstrap defines the class itself before
+    /// anything could autoload it, and a version check picks the variant
+    /// that runs.
+    fn of_condition(condition: &'a Expression<'a>) -> (Self, Self) {
+        use crate::parser::unwrap_parens;
+        match unwrap_parens(condition) {
+            Expression::Literal(Literal::False(_)) => (Self::Never, Self::None),
+            Expression::Literal(Literal::True(_)) => (Self::None, Self::Never),
+            Expression::UnaryPrefix(prefix) if prefix.operator.is_not() => {
+                let (when_true, when_false) = Self::of_condition(prefix.operand);
+                (when_false, when_true)
+            }
+            Expression::Call(Call::Function(call)) => match Self::existence_check(call) {
+                Some(name) => (Self::None, Self::Autoloads(name)),
+                None => (Self::None, Self::None),
+            },
+            _ => (Self::None, Self::None),
+        }
+    }
+
+    /// The short name `call` checks the existence of, when it is a
+    /// `class_exists`-like check that autoloads the name first.
+    fn existence_check(call: &'a FunctionCall<'a>) -> Option<&'a str> {
+        use crate::parser::unwrap_parens;
+        let Expression::Identifier(function) = call.function else {
+            return None;
+        };
+        let function = crate::atom::bytes_to_str(function.value());
+        let function = function.strip_prefix('\\').unwrap_or(function);
+        if ![
+            "class_exists",
+            "interface_exists",
+            "trait_exists",
+            "enum_exists",
+        ]
+        .iter()
+        .any(|f| function.eq_ignore_ascii_case(f))
+        {
+            return None;
+        }
+        let mut arguments = call.argument_list.arguments.iter();
+        let checked = arguments.next()?.value();
+        // Autoloading is on unless the second argument says otherwise.
+        if let Some(autoload) = arguments.next()
+            && !matches!(
+                unwrap_parens(autoload.value()),
+                Expression::Literal(Literal::True(_))
+            )
+        {
+            return None;
+        }
+        let name = match crate::parser::class_fetch_identifier(checked) {
+            Some(ident) => crate::atom::bytes_to_str(ident.value()),
+            None => match checked {
+                Expression::Literal(Literal::String(string)) => {
+                    crate::atom::literal_bytes_to_str(string.value?)?
+                }
+                _ => return None,
+            },
+        };
+        Some(crate::util::short_name(name))
+    }
+
+    /// `self`, unless it puts no guard on the body and `inner` does.
+    fn or(self, inner: Self) -> Self {
+        match self {
+            Self::None => inner,
+            _ => self,
+        }
+    }
+
+    /// Whether the guard applies to a declaration of `short_name`.
+    fn applies_to(self, short_name: &str) -> bool {
+        match self {
+            Self::None => false,
+            Self::Never => true,
+            Self::Autoloads(checked) => checked.eq_ignore_ascii_case(short_name),
         }
     }
 }
@@ -248,6 +377,40 @@ if (\PHP_VERSION_ID >= 80000) {
             "conditional class should carry its `@extends Repo<Entity>` generics, got {:?}",
             conditional.extends_generics,
         );
+    }
+
+    /// Only a guard that defers to the autoloader, or one that never
+    /// runs, marks the declarations under it, and an autoloading check
+    /// only marks the name it checks.
+    #[test]
+    fn declarations_behind_an_autoloading_guard_yield_to_the_autoloader() {
+        let src = r#"<?php
+namespace Acme {
+    class Plain {}
+    if (!class_exists(Checked::class)) { class Checked {} class Other {} }
+    if (!\interface_exists('Acme\\Iface')) { while (true) { interface Iface {} } }
+    if (!(trait_exists(Tr::class, true))) { trait Tr {} }
+    if (!class_exists(NoAutoload::class, false)) { class NoAutoload {} }
+    if (false) { enum Never {} }
+    if (\PHP_VERSION_ID >= 80000) { class Versioned {} }
+    if (class_exists(InElse::class)) {} else { class InElse {} }
+    if (!class_exists(Loaded::class)) {} else { class Loaded {} }
+}
+"#;
+        let classes = Backend::parse_php_versioned_with_namespaces(src, None);
+        let yields = |name: &str| {
+            classes
+                .iter()
+                .find(|(c, _)| c.name == atom(name))
+                .map(|(c, _)| c.yields_to_autoloader)
+                .unwrap_or_else(|| panic!("{name} should be indexed"))
+        };
+        for name in ["Checked", "Iface", "Tr", "Never", "InElse"] {
+            assert!(yields(name), "{name} should yield to the autoloader");
+        }
+        for name in ["Plain", "Other", "NoAutoload", "Versioned", "Loaded"] {
+            assert!(!yields(name), "{name} should not yield to the autoloader");
+        }
     }
 
     /// When the same class name is declared in both branches of a conditional

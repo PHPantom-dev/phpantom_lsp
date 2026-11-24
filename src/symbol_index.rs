@@ -308,6 +308,7 @@ impl SymbolIndex {
         let WorkspaceScanResult {
             classmap,
             class_origins,
+            class_alternates,
             function_index,
             function_origins,
             constant_index,
@@ -359,6 +360,9 @@ impl SymbolIndex {
                 OnConflict::Replace,
                 Some(&mut |fqn: &str, uri: String| push_alternate(&mut alternates, fqn, uri)),
             );
+            record_scan_alternates(&index, &mut alternates, class_alternates, |path| {
+                crate::util::path_to_uri(path)
+            });
             // A name the rescan no longer declares falls to another file
             // that does, as it would for a parsed duplicate.
             for fqn in purged {
@@ -443,6 +447,7 @@ impl SymbolIndex {
         let WorkspaceScanResult {
             classmap,
             class_origins,
+            class_alternates,
             function_index,
             function_origins,
             constant_index,
@@ -456,7 +461,7 @@ impl SymbolIndex {
                 tags.add(path, names);
             }
         }
-        if !classmap.is_empty() {
+        if !classmap.is_empty() || !class_alternates.is_empty() {
             let mut index = self.fqn_uri_index.write();
             let mut origins = self.fqn_origin_index.write();
             let mut alternates = self.class_alternates.write();
@@ -465,10 +470,11 @@ impl SymbolIndex {
                 &mut *origins,
                 classmap,
                 class_origins,
-                class_uri,
+                &class_uri,
                 OnConflict::Keep,
                 Some(&mut |fqn: &str, uri: String| push_alternate(&mut alternates, fqn, uri)),
             );
+            record_scan_alternates(&index, &mut alternates, class_alternates, class_uri);
         }
         if !function_index.is_empty() {
             let mut index = self.autoload_function_index.write();
@@ -877,9 +883,10 @@ impl SymbolIndex {
 /// The class indexes, mutated together.
 ///
 /// A class name can be declared by more than one file, which is how a
-/// package ships a variant behind a `class_exists` guard.  The lowest
-/// sorting URI wins, so the name resolves to the same declaration however
-/// the parse workers were scheduled, and the declarations that lost are
+/// package ships a variant behind a `class_exists` guard.  A declaration
+/// beats one that [yields to the autoloader](ClassInfo::yields_to_autoloader),
+/// and among equals the lowest sorting URI wins, so the name resolves to the same declaration
+/// however the parse workers were scheduled, and the declarations that lost are
 /// kept so the name survives the winner withdrawing it.
 pub(crate) struct ClassDeclarations<'a> {
     uris: &'a mut CiMap<String>,
@@ -1055,12 +1062,22 @@ impl ClassDeclarations<'_> {
     }
 
     /// Mirror the lowest-sorting declaration of `fqn` into the lookup
-    /// indexes, dropping the name entirely once nothing declares it.
+    /// indexes, passing over any that yield to the autoloader while
+    /// another does not, and drop the name entirely once nothing
+    /// declares it.
+    ///
+    /// A declaration behind `if (! class_exists(Foo::class))` is what PHP
+    /// falls back to when the autoloader finds nothing, so it only wins
+    /// when no other file declares the name.
     fn publish_winner(&mut self, fqn: &str) {
         let Some(decls) = self.dupes.get(fqn) else {
             return;
         };
-        match decls.iter().next() {
+        let winner = decls
+            .iter()
+            .find(|(_, class)| !class.yields_to_autoloader)
+            .or_else(|| decls.iter().next());
+        match winner {
             Some((uri, class)) => {
                 let (uri, class) = (uri.clone(), Arc::clone(class));
                 self.uris.insert(fqn, uri);
@@ -1089,6 +1106,22 @@ fn push_alternate(alternates: &mut CiMap<Vec<String>>, fqn: &str, uri: String) {
         }
         None => {
             alternates.insert(fqn, vec![uri]);
+        }
+    }
+}
+
+/// Record the files a scan found declaring a class besides the one its
+/// classmap kept, other than the one `index` already names.
+fn record_scan_alternates(
+    index: &CiMap<String>,
+    alternates: &mut CiMap<Vec<String>>,
+    found: Vec<(String, PathBuf)>,
+    class_uri: impl Fn(&Path) -> String,
+) {
+    for (fqn, path) in found {
+        let uri = class_uri(&path);
+        if index.get(&fqn) != Some(&uri) {
+            push_alternate(alternates, &fqn, uri);
         }
     }
 }

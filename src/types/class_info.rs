@@ -401,6 +401,12 @@ pub struct ClassInfo {
     /// not declare is no unknown member.  Like [`Self::is_readonly`], the
     /// inheritance merge propagates the flag down the parent chain.
     pub allows_dynamic_properties: bool,
+    /// Whether PHP only runs the declaration when the autoloader has no
+    /// other file for the name, or never runs it: one behind
+    /// `if (! class_exists(Foo::class))`, which autoloads `Foo` first, or
+    /// behind `if (false)`.  Another file's declaration of the same name is
+    /// preferred over it, as PHP's autoloader would load that one.
+    pub yields_to_autoloader: bool,
     /// Whether the class comes from the stub of an extension php-src does not
     /// ship, whose parameter names follow the installed release of the
     /// extension rather than the stub (see
@@ -846,6 +852,7 @@ impl ClassInfo {
             || self.is_abstract != other.is_abstract
             || self.is_readonly != other.is_readonly
             || self.allows_dynamic_properties != other.allows_dynamic_properties
+            || self.yields_to_autoloader != other.yields_to_autoloader
             || self.deprecation_message != other.deprecation_message
             || self.deprecated_replacement != other.deprecated_replacement
             || self.attribute_targets != other.attribute_targets

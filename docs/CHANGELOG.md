@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **DNF types are spelled as PHP writes them.** A union holding an intersection shows as `(A&B)|null` in hover and anywhere else a type is written out, instead of `A&B|null`, which is not valid PHP.
 - **`clamp()` returns its arguments' types.** The result of `clamp($value, $min, $max)` is typed from its arguments instead of `mixed`.
 - **No unknown members on a class whose parent cannot be found.** When a parent class, interface, or trait is missing, such as a test extending PHPUnit's `TestCase` before `composer install`, the missing class is reported once instead of every member it would have supplied.
+- **A guarded copy of a class no longer hides the real one.** A fallback declared behind `if (! class_exists(Foo::class))` or `if (false)` gives way to the class Composer would autoload, so members only the real class has are no longer reported unknown.
 
 ## [1.1.0] - 2026-11-24
 

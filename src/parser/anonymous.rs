@@ -101,6 +101,7 @@ impl Backend {
                 &anon.attribute_lists,
                 doc_ctx,
             ),
+            yields_to_autoloader: false,
             from_unbundled_extension: false,
             since: None,
             deprecation_message: None,

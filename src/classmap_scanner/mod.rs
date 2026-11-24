@@ -187,6 +187,10 @@ pub struct WorkspaceScanResult {
     /// enums. Populated from the package a file was collected under, so
     /// no second pass over the classmap is needed to classify origins.
     pub(crate) class_origins: HashMap<String, crate::ClassCompletionOrigin>,
+    /// Other files found declaring a class `classmap` already places
+    /// elsewhere, which a lookup falls back to when the declaration it
+    /// resolved to turns out to sit behind a guard.
+    pub(crate) class_alternates: Vec<(String, PathBuf)>,
     /// FQN → file path for standalone functions.
     pub function_index: HashMap<String, PathBuf>,
     /// FQN → completion origin tier for standalone functions.
@@ -240,7 +244,8 @@ impl WorkspaceScanResult {
     /// Fold `other`'s classes, functions and constants into `self`,
     /// keeping `self`'s entry when both define the same name, unless
     /// `other`'s function file [outranks](crate::wordpress::function_file_outranks)
-    /// `self`'s, and add its `@global` tags.
+    /// `self`'s, and add its `@global` tags.  A class file that loses is
+    /// kept among the [`class_alternates`](Self::class_alternates).
     ///
     /// Origins ride alongside the winning path: one is only recorded for
     /// an entry of `other` that actually wins, so a symbol's recorded
@@ -276,6 +281,12 @@ impl WorkspaceScanResult {
             }
         }
         let never = |_: &Path, _: &Path| false;
+        self.class_alternates.extend(other.class_alternates);
+        for (name, path) in &other.classmap {
+            if self.classmap.get(name).is_some_and(|kept| kept != path) {
+                self.class_alternates.push((name.clone(), path.clone()));
+            }
+        }
         absorb(
             &mut self.classmap,
             &mut self.class_origins,
