@@ -11,13 +11,13 @@ use tower_lsp_server::gen_lsp_types::Position;
 use std::cell::OnceCell;
 
 use crate::completion::source::code_context::{CodeContext, OpenBracket, Operator};
-use crate::symbol_map::StringKeyKind;
 use crate::symbol_map::extraction::laravel::{
     MethodReceiver, argument_takes_name_keys, argument_takes_name_list,
     facade_static_call_arg_kind, facade_static_call_array_key_kind,
     helper_function_accepts_name_list, helper_function_first_arg_kind, instance_method_arg_kind,
     is_can_method, is_middleware_method,
 };
+use crate::symbol_map::{MiddlewarePart, ReceiverClass, StringKeyKind};
 use crate::text_position::position_to_offset;
 use crate::text_scan::{CodeOffsets, is_escaped, scan_ident_backward, skip_php_trivia};
 
@@ -724,7 +724,9 @@ pub(super) fn detect_laravel_string_key_context(
 ) -> Option<LaravelStringKeyContext<'_>> {
     let cursor_offset = position_to_offset(content, position) as usize;
     let code = crate::completion::source::code_context::code_context_at(content, cursor_offset)?;
-    detect_laravel_string_key_context_inner(content, position, &code, None, None, None, &|_| false)
+    detect_laravel_string_key_context_inner(content, position, &code, None, None, None, &|_, _| {
+        false
+    })
 }
 
 /// `code` is the lexical position of `position`
@@ -736,7 +738,7 @@ pub(super) fn detect_laravel_string_key_context_inner<'a>(
     resolved_names: Option<&'a crate::names::OwnedResolvedNames>,
     indexed_function_exists: Option<&dyn Fn(&str) -> bool>,
     indexed_class_exists: Option<&dyn Fn(&str) -> bool>,
-    typed_actor: &dyn Fn(&Operator) -> bool,
+    receiver_is: &dyn Fn(&Operator, ReceiverClass) -> bool,
 ) -> Option<LaravelStringKeyContext<'a>> {
     let cursor_offset = position_to_offset(content, position) as usize;
     let (quote_pos, quote) = code.open_string?;
@@ -771,7 +773,7 @@ pub(super) fn detect_laravel_string_key_context_inner<'a>(
         resolved_names,
         indexed_function_exists,
         indexed_class_exists,
-        typed_actor,
+        receiver_is,
     };
     let before_name = before_paren[..name_start].trim_end();
     let key = if let Some(before_colons) = before_name.strip_suffix("::") {
@@ -824,10 +826,16 @@ struct StringCall<'a, 'f> {
     indexed_function_exists: Option<&'f dyn Fn(&str) -> bool>,
     indexed_class_exists: Option<&'f dyn Fn(&str) -> bool>,
     /// Confirms the type of the receiver before this call's access operator.
-    typed_actor: &'f dyn Fn(&Operator) -> bool,
+    receiver_is: &'f dyn Fn(&Operator, ReceiverClass) -> bool,
 }
 
 impl StringCall<'_, '_> {
+    fn has_receiver(&self, class: ReceiverClass) -> bool {
+        self.argument
+            .operator
+            .is_some_and(|op| (self.receiver_is)(op, class))
+    }
+
     /// Whether the string can name a `kind` in the shape it was written in:
     /// as a scalar, as a bare entry of a list the call takes (a value under
     /// `'key' =>` is not one), or as a key of an array whose keys are the
@@ -1010,25 +1018,14 @@ fn instance_call_key<'a>(
     if is_middleware_method(call.name)
         && slot.is_first_or_named("middleware")
         && call.argument.shape != StringArgumentShape::ArrayKey
+        && (receiver.roots_at_route()
+            || (receiver.is_this()
+                && call.name.eq_ignore_ascii_case("middleware")
+                && call.has_receiver(ReceiverClass::LaravelControllerMiddleware(
+                    MiddlewarePart::Alias,
+                ))))
     {
-        if receiver.roots_at_route() {
-            return middleware_key(call.literal);
-        }
-        // The class `$this->middleware()` is typed into may not parse yet,
-        // so `$this` reads as a controller the way it reads as a console
-        // command.  Its guards stay with the symbol map's rule, which only
-        // reads them off a route registration.
-        if receiver.is_this() {
-            return middleware_key(call.literal).filter(|key| {
-                matches!(
-                    key,
-                    StringKey::Middleware {
-                        kind: StringKeyKind::Middleware,
-                        ..
-                    }
-                )
-            });
-        }
+        return middleware_key(call.literal);
     }
     let index = match slot {
         ArgumentSlot::Positional(index) => index,
@@ -1198,11 +1195,7 @@ impl MethodReceiver for TextReceiver<'_, '_, '_> {
                 .is_some_and(|suffix| suffix.eq_ignore_ascii_case("user()"))
             || (self.call.argument.slot.is_first_or_named("abilities")
                 && self.call.shape_fits(&StringKeyKind::GateAbility)
-                && self
-                    .call
-                    .argument
-                    .operator
-                    .is_some_and(self.call.typed_actor))
+                && self.call.has_receiver(ReceiverClass::LaravelAuthorizable))
     }
 
     fn roots_at_gate(&self) -> bool {

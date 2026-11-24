@@ -392,6 +392,19 @@ class Bakery extends ParentController
         } else {
             assert!(aliases.is_empty() && guards.is_empty(), "{diags:?}");
         }
+        for (prefix, expected) in [
+            ("['ad", "admin"),
+            ("auth:w", "web"),
+            ("auth:web,ad", "admin"),
+        ] {
+            let pos = position_after(source, prefix);
+            let labels = complete_labels_at_opened(&backend, &uri, pos.line, pos.character).await;
+            assert_eq!(
+                labels.iter().any(|l| l == expected),
+                is_controller,
+                "{path} {prefix} {labels:?}"
+            );
+        }
         for prefix in ["can:pub", "throttle:up"] {
             let pos = position_after(source, prefix);
             let defs = definition_locations(
@@ -434,4 +447,12 @@ class Bakery extends ParentController
             .any(|location| location.uri.path().ends_with("/src/Pipeline.php")),
         "{refs:?}"
     );
+
+    let uri = Uri::from_file_path(dir.path().join("src/Bakery.php")).unwrap();
+    let (before_call, _) = controller.split_once("$this->middleware(").unwrap();
+    let unfinished = format!("{before_call}$this->middleware('auth:ad");
+    let pos = position_after(&unfinished, "auth:ad");
+    open_php_str(&backend, uri.as_str(), &unfinished).await;
+    let labels = complete_labels_at_opened(&backend, &uri, pos.line, pos.character).await;
+    assert!(labels.iter().any(|l| l == "admin"), "{labels:?}");
 }
