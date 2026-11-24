@@ -32,6 +32,12 @@ pub(crate) struct ExternalToolWorker {
     /// scan-time results can never clobber a fresher single-file result
     /// that landed while the project-wide run was still in flight.
     generations: Arc<Mutex<HashMap<String, u64>>>,
+    /// The editor text each URI's single-file result was computed on.
+    ///
+    /// A result with no entry here, or whose text has since changed, may
+    /// no longer hold for the file; see
+    /// [`Backend::client_unions_published_sets`](crate::Backend::client_unions_published_sets).
+    computed_on: Arc<Mutex<HashMap<String, Arc<String>>>>,
 }
 
 impl ExternalToolWorker {
@@ -41,19 +47,36 @@ impl ExternalToolWorker {
             pending_uri: Arc::new(Mutex::new(None)),
             last_diags: Arc::new(Mutex::new(HashMap::new())),
             generations: Arc::new(Mutex::new(HashMap::new())),
+            computed_on: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
     /// Store a single-file run's result and mark the URI as freshly
     /// written, superseding any project-wide run still in flight.
+    ///
+    /// `computed_on` is the editor text the tool was run on, if known.
     pub(crate) fn store_file_result(
         &self,
         uri: &str,
         diags: Vec<tower_lsp_server::gen_lsp_types::Diagnostic>,
+        computed_on: Option<Arc<String>>,
     ) {
         let mut cache = self.last_diags.lock();
         cache.insert(uri.to_string(), diags);
         *self.generations.lock().entry(uri.to_string()).or_insert(0) += 1;
+        let mut texts = self.computed_on.lock();
+        match computed_on {
+            Some(text) => texts.insert(uri.to_string(), text),
+            None => texts.remove(uri),
+        };
+    }
+
+    /// Whether `uri`'s cached result was computed on `text`.
+    pub(crate) fn computed_on(&self, uri: &str, text: &Arc<String>) -> bool {
+        self.computed_on
+            .lock()
+            .get(uri)
+            .is_some_and(|known| Arc::ptr_eq(known, text) || known == text)
     }
 
     /// Snapshot the per-URI write counters, to be handed back to
@@ -80,6 +103,7 @@ impl ExternalToolWorker {
             return false;
         }
         cache.insert(uri.to_string(), diags);
+        self.computed_on.lock().remove(uri);
         true
     }
 
@@ -87,6 +111,7 @@ impl ExternalToolWorker {
     pub(crate) fn forget(&self, uri: &str) {
         self.last_diags.lock().remove(uri);
         self.generations.lock().remove(uri);
+        self.computed_on.lock().remove(uri);
     }
 }
 
@@ -97,6 +122,7 @@ impl Clone for ExternalToolWorker {
             pending_uri: Arc::clone(&self.pending_uri),
             last_diags: Arc::clone(&self.last_diags),
             generations: Arc::clone(&self.generations),
+            computed_on: Arc::clone(&self.computed_on),
         }
     }
 }

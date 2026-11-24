@@ -25,6 +25,7 @@ mod builtin_return_types;
 mod call_hierarchy;
 mod callable_invocation;
 mod classmap_scanner;
+mod claude_code_diagnostics;
 mod client_settings;
 mod code_action_add_iterable_type;
 mod code_action_add_override;

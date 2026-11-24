@@ -34,6 +34,32 @@ impl Drop for WorkerAlive {
 }
 
 impl Backend {
+    /// Whether every set published to the client must hold only what is
+    /// true of the file's current text.
+    ///
+    /// The protocol says a publish replaces the file's previous set, which
+    /// is what lets the Phase 1 snapshot carry the last pass's cached slow
+    /// and external results until fresh ones replace them.  Claude Code
+    /// instead shows its agent the union of every set published since the
+    /// agent's last action, and starts afresh at each edit it makes, so a
+    /// result computed on the text before that edit reaches the agent as a
+    /// new finding, at line numbers that no longer match the file.
+    pub(crate) fn client_unions_published_sets(&self) -> bool {
+        self.client_is_claude_code()
+    }
+
+    /// Cache a file's slow results along with the text they describe.
+    fn store_slow_result(&self, uri: &str, diagnostics: Vec<Diagnostic>, content: &Arc<String>) {
+        self.diag
+            .last_slow
+            .lock()
+            .insert(uri.to_string(), diagnostics);
+        self.diag
+            .slow_computed_on
+            .lock()
+            .insert(uri.to_string(), Arc::clone(content));
+    }
+
     /// Deliver diagnostics for a single file.
     ///
     /// Called from the background diagnostic worker after debouncing.
@@ -63,6 +89,7 @@ impl Backend {
         if !self.diagnostics_enabled() {
             self.diag.last_fast.lock().remove(uri_str);
             self.diag.last_slow.lock().remove(uri_str);
+            self.diag.slow_computed_on.lock().remove(uri_str);
             self.assemble_and_refresh(uri_str).await;
             return;
         }
@@ -172,9 +199,15 @@ impl Backend {
         // A pull held for this file answers with this set, so it needs no
         // refresh, and VS Code would cancel and re-send that pull on one,
         // which would hide the fast set until the slow phase is done.
+        //
+        // The snapshot still holds the last pass's slow results, so a
+        // client that never lets a later publish replace it gets none.
         let held_pull_answers = self.diag.pull_generations.lock().contains_key(uri_str)
             && self.fast_phase_answers_pulls();
-        if self.assemble_and_push(uri_str).await && !held_pull_answers {
+        if !self.client_unions_published_sets()
+            && self.assemble_and_push(uri_str).await
+            && !held_pull_answers
+        {
             self.request_diagnostic_refresh().await;
         }
         {
@@ -209,10 +242,7 @@ impl Backend {
             return;
         }
 
-        {
-            let mut cache = self.diag.last_slow.lock();
-            cache.insert(uri_str.to_string(), slow_diagnostics);
-        }
+        self.store_slow_result(uri_str, slow_diagnostics, content);
         // A pass that cannot serve as a baseline leaves the previous one in
         // place: it still describes the text it was computed on, and the
         // next pass checks that nothing else moved since.
@@ -245,13 +275,13 @@ impl Backend {
     async fn publish_resource_diagnostics(&self, uri_str: &str, content: &Arc<String>) {
         let backend = self.clone_for_blocking();
         let uri = uri_str.to_string();
-        let content = Arc::clone(content);
+        let text = Arc::clone(content);
         let diagnostics =
             crate::server::run_blocking_cancel_safe("resource diagnostics", move || {
                 let _project_guard = backend.enter_project_scope(&uri);
                 crate::util::catch_panic_unwind_safe("resource diagnostics", &uri, None, || {
                     let mut out = Vec::new();
-                    backend.collect_resource_diagnostics(&uri, &content, &mut out);
+                    backend.collect_resource_diagnostics(&uri, &text, &mut out);
                     out
                 })
             })
@@ -265,10 +295,7 @@ impl Backend {
             return;
         }
         self.diag.last_fast.lock().remove(uri_str);
-        self.diag
-            .last_slow
-            .lock()
-            .insert(uri_str.to_string(), diagnostics);
+        self.store_slow_result(uri_str, diagnostics, content);
         self.assemble_and_refresh(uri_str).await;
     }
 
@@ -324,6 +351,23 @@ impl Backend {
         };
         let assemble_guard = assemble_lock.lock();
 
+        // The slow results still describe the text before an edit until
+        // the pass the edit queued replaces them, and that pass publishes.
+        let current_text = self.open_files.read().get(uri_str).cloned();
+        let unions = self.client_unions_published_sets();
+        if unions
+            && self.diag.last_slow.lock().contains_key(uri_str)
+            && !current_text.as_ref().is_some_and(|text| {
+                self.diag
+                    .slow_computed_on
+                    .lock()
+                    .get(uri_str)
+                    .is_some_and(|known| Arc::ptr_eq(known, text) || known == text)
+            })
+        {
+            return false;
+        }
+
         // ── Read all per-source caches ──────────────────────────────
         let mut full = Vec::new();
         let enabled = self.diagnostics_enabled();
@@ -341,9 +385,18 @@ impl Backend {
             }
         }
 
+        // An external tool's result is kept until its next run, which may
+        // be well after the edit that made it stale.
+        let holds = |tool: &crate::backend::external_tool_worker::ExternalToolWorker| {
+            !unions
+                || current_text
+                    .as_ref()
+                    .is_some_and(|text| tool.computed_on(uri_str, text))
+        };
+
         // Left out while diagnostics are off, so the pruning below keeps
         // PHPStan's results for when they are switched back on.
-        let phpstan_before: Vec<Diagnostic> = if enabled {
+        let phpstan_before: Vec<Diagnostic> = if enabled && holds(&self.phpstan_tool) {
             let cache = self.phpstan_tool.last_diags.lock();
             cache.get(uri_str).cloned().unwrap_or_default()
         } else {
@@ -376,25 +429,25 @@ impl Backend {
             full.extend(filtered);
         }
 
-        {
+        if holds(&self.phpcs_tool) {
             let cache = self.phpcs_tool.last_diags.lock();
             if let Some(phpcs_diags) = cache.get(uri_str) {
                 full.extend(phpcs_diags.iter().cloned());
             }
         }
-        {
+        if holds(&self.phpmd_tool) {
             let cache = self.phpmd_tool.last_diags.lock();
             if let Some(phpmd_diags) = cache.get(uri_str) {
                 full.extend(phpmd_diags.iter().cloned());
             }
         }
-        {
+        if holds(&self.mago_lint_tool) {
             let cache = self.mago_lint_tool.last_diags.lock();
             if let Some(mago_diags) = cache.get(uri_str) {
                 full.extend(mago_diags.iter().cloned());
             }
         }
-        {
+        if holds(&self.mago_analyze_tool) {
             let cache = self.mago_analyze_tool.last_diags.lock();
             if let Some(mago_diags) = cache.get(uri_str) {
                 full.extend(mago_diags.iter().cloned());
@@ -909,6 +962,7 @@ impl Backend {
         self.forget_kept_parse(uri_str);
         self.diag.last_fast.lock().remove(uri_str);
         self.diag.last_slow.lock().remove(uri_str);
+        self.diag.slow_computed_on.lock().remove(uri_str);
         self.diag.slow_baselines.lock().remove(uri_str);
         self.diag.bodies_read_from.lock().remove(uri_str);
         self.diag.full_slow_pass_requested.lock().remove(uri_str);

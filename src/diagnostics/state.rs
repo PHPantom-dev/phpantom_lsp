@@ -58,6 +58,8 @@ pub(crate) struct DiagnosticState {
     pub(crate) pull_seq: Arc<AtomicU64>,
     /// Last-published slow diagnostics per file URI.
     pub(crate) last_slow: Arc<Mutex<HashMap<String, Vec<Diagnostic>>>>,
+    /// The text each file's `last_slow` entry was computed on.
+    pub(crate) slow_computed_on: Arc<Mutex<HashMap<String, Arc<String>>>>,
     /// What each open file's next slow pass can start from instead of
     /// diagnosing the whole file again.  See
     /// [`crate::diagnostics::incremental`].
@@ -143,6 +145,7 @@ impl DiagnosticState {
             pull_generations: Arc::new(Mutex::new(HashMap::new())),
             pull_seq: Arc::new(AtomicU64::new(0)),
             last_slow: Arc::new(Mutex::new(HashMap::new())),
+            slow_computed_on: Arc::new(Mutex::new(HashMap::new())),
             slow_baselines: Arc::new(Mutex::new(HashMap::new())),
             full_slow_pass_requested: Arc::new(Mutex::new(HashSet::new())),
             epoch: Arc::default(),

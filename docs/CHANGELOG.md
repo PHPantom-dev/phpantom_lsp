@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Claude Code no longer sees outdated diagnostics after an edit.** Results from before an edit, at line numbers that no longer match the file, are not reported to the agent as new findings.
+- **Claude Code follows files changed by shell commands.** A file rewritten or deleted by a command the agent runs, such as a formatter or `git checkout`, is picked up within a second instead of keeping its old contents until the agent next edits it.
+
 ## [1.1.0] - 2026-11-24
 
 ### Added

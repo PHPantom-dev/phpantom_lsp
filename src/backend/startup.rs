@@ -461,6 +461,13 @@ impl Backend {
             });
         }
 
+        if self.client_is_claude_code() {
+            let disk_sync_backend = self.clone_for_blocking();
+            tokio::spawn(async move {
+                disk_sync_backend.disk_sync_watcher().await;
+            });
+        }
+
         // ── Dynamic capability registration ─────────────────────────
         // Type hierarchy is registered here only for a client that
         // supports it; any other client got the static

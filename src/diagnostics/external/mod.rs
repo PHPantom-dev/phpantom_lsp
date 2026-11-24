@@ -137,6 +137,7 @@ impl Backend {
             // call, this task is suspended (not occupying a runtime
             // thread) and no re-entry can happen until it resolves.
             let shutdown_flag = Arc::clone(&self.shutdown_flag);
+            let ran_on = Arc::clone(&content);
             let diags = {
                 let result = crate::server::run_blocking_cancel_safe(label, move || {
                     run(&content, &file_path, &workspace_root, &shutdown_flag)
@@ -166,7 +167,7 @@ impl Backend {
                 }
             }
 
-            tool.store_file_result(&uri, diags);
+            tool.store_file_result(&uri, diags, Some(ran_on));
 
             // Assemble and push so the editor sees fresh results merged
             // with cached native diagnostics. In pull mode this also

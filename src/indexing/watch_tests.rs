@@ -900,3 +900,104 @@ fn a_client_extension_update_updates_the_registered_watcher_state() {
         "a client-forwarded extension must be watched"
     );
 }
+
+/// Open `path` with `text` the way `didOpen` would.
+fn open_on_disk(backend: &Backend, path: &Path, text: &str) -> String {
+    let uri = crate::util::path_to_uri(path);
+    backend
+        .open_files
+        .write()
+        .insert(uri.clone(), std::sync::Arc::new(text.to_string()));
+    backend.update_ast(&uri, text);
+    uri
+}
+
+/// A shell command that rewrites an open file reaches the index through
+/// the disk sync, which a client without file watchers never triggers.
+#[tokio::test]
+async fn disk_sync_reloads_an_open_file_rewritten_on_disk() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("Service.php");
+    let before = "<?php\nclass Service { public function foo(): void {} }\n";
+    std::fs::write(&path, before).unwrap();
+    let backend = Backend::new_test();
+    let uri = open_on_disk(&backend, &path, before);
+
+    let (seen, changes) = backend.disk_sync_sweep(&std::collections::HashMap::new());
+    assert!(
+        changes.rewritten.is_empty(),
+        "the text on disk is the open text"
+    );
+
+    let after = "<?php\nclass Service { public function bar(): void {} }\n";
+    std::fs::write(&path, after).unwrap();
+    let (_, changes) = backend.disk_sync_sweep(&seen);
+    backend.apply_disk_changes(changes).await;
+
+    assert_eq!(
+        backend
+            .open_files
+            .read()
+            .get(&uri)
+            .map(|text| text.as_str()),
+        Some(after)
+    );
+}
+
+/// An open file deleted on disk is closed, but a buffer that was never
+/// saved is not mistaken for one.
+#[tokio::test]
+async fn disk_sync_closes_only_files_that_were_on_disk() {
+    let dir = tempfile::tempdir().unwrap();
+    let deleted = dir.path().join("Deleted.php");
+    std::fs::write(&deleted, "<?php\n").unwrap();
+    let backend = Backend::new_test();
+    let deleted_uri = open_on_disk(&backend, &deleted, "<?php\n");
+    let unsaved_uri = open_on_disk(&backend, &dir.path().join("Unsaved.php"), "<?php\n");
+
+    let (seen, _) = backend.disk_sync_sweep(&std::collections::HashMap::new());
+    std::fs::remove_file(&deleted).unwrap();
+    let (_, changes) = backend.disk_sync_sweep(&seen);
+
+    assert_eq!(changes.removed, vec![deleted_uri]);
+    assert!(!changes.removed.contains(&unsaved_uri));
+}
+
+/// A parsed file that is not open is reported the way a client's file
+/// watcher would report it.
+#[test]
+fn disk_sync_reports_parsed_files_as_watched_events() {
+    let dir = tempfile::tempdir().unwrap();
+    let changed = dir.path().join("Changed.php");
+    let deleted = dir.path().join("Gone.php");
+    std::fs::write(&changed, "<?php\nclass Changed {}\n").unwrap();
+    std::fs::write(&deleted, "<?php\nclass Gone {}\n").unwrap();
+    let backend = Backend::new_test();
+    for path in [&changed, &deleted] {
+        backend
+            .parsed_uris
+            .write()
+            .insert(crate::util::path_to_uri(path));
+    }
+
+    let (seen, changes) = backend.disk_sync_sweep(&std::collections::HashMap::new());
+    assert!(changes.watched.is_empty(), "a first sweep only takes stock");
+
+    std::fs::write(&changed, "<?php\nclass Changed { public $x; }\n").unwrap();
+    std::fs::remove_file(&deleted).unwrap();
+    let (_, changes) = backend.disk_sync_sweep(&seen);
+
+    let mut events: Vec<(String, FileChangeType)> = changes
+        .watched
+        .iter()
+        .map(|event| (event.uri.to_string(), event.kind))
+        .collect();
+    events.sort_by(|a, b| a.0.cmp(&b.0));
+    assert_eq!(
+        events,
+        vec![
+            (crate::util::path_to_uri(&changed), FileChangeType::Changed),
+            (crate::util::path_to_uri(&deleted), FileChangeType::Deleted),
+        ]
+    );
+}

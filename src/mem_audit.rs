@@ -2086,6 +2086,7 @@ pub(crate) fn report(backend: &Backend, runner_content_bytes: usize) {
         *backend.diag.in_flight_uris.lock() = Default::default();
         *backend.diag.pull_generations.lock() = Default::default();
         *backend.diag.last_slow.lock() = Default::default();
+        *backend.diag.slow_computed_on.lock() = Default::default();
         *backend.diag.last_fast.lock() = Default::default();
         *backend.diag.last_full.lock() = Default::default();
         *backend.diag.result_ids.lock() = Default::default();

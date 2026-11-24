@@ -2239,7 +2239,9 @@ mod tests {
 
         // While it is running, the user edits the file and the per-file
         // worker writes a corrected (empty) result.
-        backend.phpstan_tool.store_file_result(uri_str, Vec::new());
+        backend
+            .phpstan_tool
+            .store_file_result(uri_str, Vec::new(), None);
 
         // The project-wide run now lands with its scan-time findings.
         let mut results = HashMap::new();
@@ -2275,7 +2277,9 @@ mod tests {
         }
 
         let generations = backend.phpstan_tool.generation_snapshot();
-        backend.phpstan_tool.store_file_result(edited, Vec::new());
+        backend
+            .phpstan_tool
+            .store_file_result(edited, Vec::new(), None);
 
         let mut results = HashMap::new();
         results.insert(edited_path, vec![diag("argument.type", 5)]);

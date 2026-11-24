@@ -208,4 +208,14 @@ impl Backend {
     pub(crate) fn caps(&self) -> crate::backend::ClientCaps {
         *self.client_caps.read()
     }
+
+    /// Whether the client is Claude Code, which departs from what the
+    /// protocol lets a server assume in ways no capability reports; see
+    /// [`Self::client_unions_published_sets`] and
+    /// [`Self::disk_sync_watcher`].
+    pub(crate) fn client_is_claude_code(&self) -> bool {
+        let name = self.client_name.lock();
+        name.get(.."Claude Code".len())
+            .is_some_and(|head| head.eq_ignore_ascii_case("Claude Code"))
+    }
 }

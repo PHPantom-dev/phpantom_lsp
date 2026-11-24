@@ -104,11 +104,18 @@ impl TransportClient {
     /// Complete the `initialize` / `initialized` handshake with the given
     /// client capabilities, as request id 1.
     pub async fn initialize(&mut self, capabilities: serde_json::Value) {
+        self.initialize_with(serde_json::json!({ "capabilities": capabilities }))
+            .await;
+    }
+
+    /// [`Self::initialize`] with the whole `initialize` params, e.g. to
+    /// name the client in `clientInfo`.
+    pub async fn initialize_with(&mut self, params: serde_json::Value) {
         self.send(
             "initialize",
             serde_json::json!({
                 "jsonrpc": "2.0", "id": 1, "method": "initialize",
-                "params": { "capabilities": capabilities }
+                "params": params
             }),
         )
         .await;

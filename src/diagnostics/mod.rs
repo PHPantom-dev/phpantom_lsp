@@ -1148,4 +1148,93 @@ pub(crate) mod tests {
                 .any(|d| d.message == "from phpstan".to_string().into())
         );
     }
+
+    /// Claude Code is shown every set published since its agent last acted,
+    /// so a PHPStan result from before the agent's edit, which an editor
+    /// would show until PHPStan runs again, is left out of what it gets.
+    #[tokio::test]
+    async fn claude_code_gets_no_external_result_for_an_older_text() {
+        let uri = "file:///edited.php";
+        let before = Arc::new("<?php\n$a = 1;\n".to_string());
+        let after = Arc::new("<?php\n\n$a = 1;\n".to_string());
+        let from_phpstan = Diagnostic {
+            range: Range::new(Position::new(1, 0), Position::new(1, 1)),
+            message: "from phpstan".to_string().into(),
+            ..Default::default()
+        };
+        let shows_phpstan = |backend: &Backend| {
+            backend
+                .diag
+                .last_full
+                .lock()
+                .get(uri)
+                .is_some_and(|set| set.iter().any(|d| d.message == from_phpstan.message))
+        };
+
+        for (client, text, expected) in [
+            ("Claude Code", &before, true),
+            ("Claude Code", &after, false),
+            ("Zed", &after, true),
+        ] {
+            let backend = Backend::new_test();
+            *backend.client_name.lock() = client.to_string();
+            backend
+                .open_files
+                .write()
+                .insert(uri.to_string(), Arc::clone(text));
+            backend.phpstan_tool.store_file_result(
+                uri,
+                vec![from_phpstan.clone()],
+                Some(Arc::clone(&before)),
+            );
+            backend.assemble_and_push(uri).await;
+            assert_eq!(shows_phpstan(&backend), expected, "{client}, {text:?}");
+        }
+    }
+
+    /// A publish between Claude Code's edit and the slow pass it queued,
+    /// such as an external tool finishing, would carry the slow results of
+    /// the text before the edit, so it waits for that pass.
+    #[tokio::test]
+    async fn claude_code_gets_no_slow_results_for_an_older_text() {
+        let uri = "file:///edited.php";
+        let before = Arc::new("<?php\n$a = 1;\n".to_string());
+        let after = Arc::new("<?php\n\n$a = 1;\n".to_string());
+        let slow = Diagnostic {
+            range: Range::new(Position::new(1, 0), Position::new(1, 1)),
+            message: "from the slow pass".to_string().into(),
+            ..Default::default()
+        };
+
+        for (client, text, expected) in [
+            ("Claude Code", &before, true),
+            ("Claude Code", &after, false),
+            ("Zed", &after, true),
+        ] {
+            let backend = Backend::new_test();
+            *backend.client_name.lock() = client.to_string();
+            backend
+                .open_files
+                .write()
+                .insert(uri.to_string(), Arc::clone(text));
+            backend
+                .diag
+                .last_slow
+                .lock()
+                .insert(uri.to_string(), vec![slow.clone()]);
+            backend
+                .diag
+                .slow_computed_on
+                .lock()
+                .insert(uri.to_string(), Arc::clone(&before));
+            backend.assemble_and_push(uri).await;
+            let published = backend
+                .diag
+                .last_full
+                .lock()
+                .get(uri)
+                .is_some_and(|set| set.iter().any(|d| d.message == slow.message));
+            assert_eq!(published, expected, "{client}, {text:?}");
+        }
+    }
 }

@@ -831,6 +831,195 @@ impl Backend {
             self.reload_config(&root);
         }
     }
+
+    /// Follow changes made on disk behind the back of a client that
+    /// reports none.
+    ///
+    /// Claude Code registers no file watchers, and the files its agent
+    /// edits stay open, so a file rewritten by a shell command (a
+    /// formatter, `git checkout`, a code generator) would otherwise keep
+    /// its old text and declarations until the agent next edits it.  It
+    /// also saves every edit as it makes it, so unlike an editor buffer an
+    /// open file never holds unsaved work, and the text on disk can be
+    /// taken as the file's own.
+    ///
+    /// Each sweep stats the open and parsed files.  An open file whose
+    /// text on disk differs is put through `didChange` and `didSave`, as if
+    /// the client had sent them; one gone from disk is closed.  A parsed
+    /// file that is not open is reported as a watched-file event.
+    pub(crate) async fn disk_sync_watcher(&self) {
+        let mut seen = std::collections::HashMap::new();
+        loop {
+            if self.shutdown_flag.load(Ordering::Acquire) {
+                return;
+            }
+            tokio::time::sleep(DISK_SYNC_POLL_INTERVAL).await;
+            if self.shutdown_flag.load(Ordering::Acquire) {
+                return;
+            }
+
+            let backend = self.clone_for_blocking();
+            let previous = std::mem::take(&mut seen);
+            let Some((next, changes)) = crate::server::run_blocking_cancel_safe("disk sync", {
+                move || backend.disk_sync_sweep(&previous)
+            })
+            .await
+            else {
+                continue;
+            };
+            seen = next;
+            self.apply_disk_changes(changes).await;
+        }
+    }
+
+    /// Stat the open and parsed files against what the previous sweep saw.
+    fn disk_sync_sweep(
+        &self,
+        seen: &std::collections::HashMap<String, DiskStamp>,
+    ) -> (std::collections::HashMap<String, DiskStamp>, DiskChanges) {
+        let open: Vec<(String, std::sync::Arc<String>)> = self
+            .open_files
+            .read()
+            .iter()
+            .map(|(uri, text)| (uri.clone(), std::sync::Arc::clone(text)))
+            .collect();
+        let parsed: Vec<String> = self.parsed_uris.read().iter().cloned().collect();
+
+        let mut next = std::collections::HashMap::with_capacity(open.len() + parsed.len());
+        let mut changes = DiskChanges::default();
+
+        for (uri, text) in open {
+            let Some(path) = crate::util::uri_to_path(&uri) else {
+                continue;
+            };
+            let stamp = disk_stamp(&path);
+            let previous = seen.get(&uri).copied();
+            next.insert(uri.clone(), stamp);
+            if previous == Some(stamp) {
+                continue;
+            }
+            // A file first seen is compared too: it may have been rewritten
+            // between being opened and this sweep.
+            match stamp {
+                Some(_) => {
+                    if let Some(disk) = crate::util::read_php_source(&path)
+                        && disk != *text
+                    {
+                        changes.rewritten.push((uri, text, disk));
+                    }
+                }
+                // Never on disk is a buffer not yet saved, not a deletion.
+                None if previous.flatten().is_some() => changes.removed.push(uri),
+                None => {}
+            }
+        }
+
+        for uri in parsed {
+            if next.contains_key(&uri) {
+                continue;
+            }
+            let Ok(parsed_uri) = uri.parse::<Uri>() else {
+                continue;
+            };
+            let Some(path) = crate::util::url_to_path(&parsed_uri) else {
+                continue;
+            };
+            let stamp = disk_stamp(&path);
+            if let Some(previous) = seen.get(&uri)
+                && *previous != stamp
+            {
+                let typ = if stamp.is_some() {
+                    FileChangeType::Changed
+                } else {
+                    FileChangeType::Deleted
+                };
+                changes.watched.push(FileEvent::new(parsed_uri, typ));
+            }
+            next.insert(uri, stamp);
+        }
+
+        (next, changes)
+    }
+
+    /// Hand what [`Self::disk_sync_sweep`] found to the handlers the
+    /// client's own notifications would have reached.
+    async fn apply_disk_changes(&self, changes: DiskChanges) {
+        for (uri, compared, disk) in changes.rewritten {
+            // The client changed the file itself since the sweep read it.
+            let unchanged = self
+                .open_files
+                .read()
+                .get(&uri)
+                .is_some_and(|current| std::sync::Arc::ptr_eq(current, &compared));
+            let Ok(uri) = uri.parse::<Uri>() else {
+                continue;
+            };
+            if !unchanged {
+                continue;
+            }
+            tracing::info!("PHPantom: {} changed on disk, reloading it", uri.as_str());
+            self.on_did_change(DidChangeTextDocumentParams {
+                text_document: VersionedTextDocumentIdentifier {
+                    text_document_identifier: TextDocumentIdentifier { uri: uri.clone() },
+                    version: 0,
+                },
+                content_changes: vec![
+                    TextDocumentContentChangeEvent::TextDocumentContentChangeWholeDocument(
+                        TextDocumentContentChangeWholeDocument { text: disk },
+                    ),
+                ],
+            })
+            .await;
+            self.on_did_save(DidSaveTextDocumentParams {
+                text_document: TextDocumentIdentifier { uri },
+                text: None,
+            })
+            .await;
+        }
+
+        for uri in changes.removed {
+            let Ok(uri) = uri.parse::<Uri>() else {
+                continue;
+            };
+            tracing::info!("PHPantom: {} was deleted, closing it", uri.as_str());
+            self.on_did_close(DidCloseTextDocumentParams {
+                text_document: TextDocumentIdentifier { uri },
+            })
+            .await;
+        }
+
+        if !changes.watched.is_empty() {
+            self.on_did_change_watched_files(DidChangeWatchedFilesParams {
+                changes: changes.watched,
+            })
+            .await;
+        }
+    }
+}
+
+/// How often [`Backend::disk_sync_watcher`] sweeps the open and parsed
+/// files.  Each sweep is one `stat` per file, and an agent rarely acts
+/// again within a second of the shell command that changed a file.
+const DISK_SYNC_POLL_INTERVAL: Duration = Duration::from_secs(1);
+
+/// A file's modification time and size, or `None` if it is not on disk.
+type DiskStamp = Option<(std::time::SystemTime, u64)>;
+
+fn disk_stamp(path: &Path) -> DiskStamp {
+    let meta = std::fs::metadata(path).ok()?;
+    Some((meta.modified().ok()?, meta.len()))
+}
+
+/// What one [`Backend::disk_sync_sweep`] found.
+#[derive(Default)]
+struct DiskChanges {
+    /// Open files whose text on disk differs: the URI, the open text it
+    /// was compared with, and the text on disk.
+    rewritten: Vec<(String, std::sync::Arc<String>, String)>,
+    /// Open files that were on disk and no longer are.
+    removed: Vec<String>,
+    /// Parsed files that are not open and changed or went away.
+    watched: Vec<FileEvent>,
 }
 
 #[cfg(test)]
