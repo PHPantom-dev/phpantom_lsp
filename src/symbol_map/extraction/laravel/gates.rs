@@ -227,7 +227,7 @@ impl MiddlewareSpans<'_> {
                 start,
                 end,
                 kind: SymbolKind::StringKey {
-                    kind: part.controller_target().1,
+                    kind: part.key_kind(),
                     key: key.to_owned(),
                     is_write: false,
                     is_optional: false,

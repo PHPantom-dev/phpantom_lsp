@@ -1533,6 +1533,11 @@ impl MiddlewarePart {
             Self::Limiter => &(CONTROLLER, StringKeyKind::RateLimiter),
         }
     }
+
+    /// The kind of string key this part names.
+    pub(crate) fn key_kind(self) -> StringKeyKind {
+        self.controller_target().1
+    }
 }
 
 /// The classes or traits whose behavior makes a receiver's call or property
