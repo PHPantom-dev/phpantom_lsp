@@ -1437,3 +1437,26 @@ async fn test_removed_class_excluded_from_class_name_completion() {
         class_names
     );
 }
+
+/// A heredoc or nowdoc whose closing label is followed by more code on the
+/// same line (`SQL);`) must not stop completion later in the file.
+#[tokio::test]
+async fn test_completion_function_name_after_nowdoc_closed_inside_parens() {
+    for (opener, closer) in [
+        ("<<<'SQL'", "SQL);"),
+        ("<<<SQL", "SQL);"),
+        ("<<<\"SQL\"", "SQL);"),
+        ("<<<'SQL'", "SQL, 1);"),
+    ] {
+        let backend = create_test_backend_with_function_stubs();
+        let uri = Uri::parse("file:///nowdoc_paren.php").unwrap();
+        let text =
+            format!("<?php\n\nf({opener}\n        select * from users\n    {closer}\n\narray_\n");
+        let items = complete_at(&backend, &uri, &text, 6, 6).await;
+        assert!(
+            items.iter().any(|i| i.label.starts_with("array_map")),
+            "array_map should be offered after {opener} closed by `{closer}`, got: {:?}",
+            items.iter().map(|i| &i.label).collect::<Vec<_>>()
+        );
+    }
+}

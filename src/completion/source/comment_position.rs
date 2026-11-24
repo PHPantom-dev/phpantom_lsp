@@ -188,11 +188,12 @@ fn lexical_state_at(bytes: &[u8], target: usize) -> LexicalAt {
                 {
                     // Possible heredoc / nowdoc
                     i += 3;
-                    while i < len && bytes[i] == b' ' {
+                    while i < len && (bytes[i] == b' ' || bytes[i] == b'\t') {
                         i += 1;
                     }
                     let is_nowdoc = i < len && bytes[i] == b'\'';
-                    if is_nowdoc {
+                    let is_quoted_heredoc = i < len && bytes[i] == b'"';
+                    if is_nowdoc || is_quoted_heredoc {
                         i += 1;
                     }
                     heredoc_label.clear();
@@ -207,6 +208,9 @@ fn lexical_state_at(bytes: &[u8], target: usize) -> LexicalAt {
                             }
                             state = Lexical::Nowdoc;
                         } else {
+                            if is_quoted_heredoc && i < len && bytes[i] == b'"' {
+                                i += 1;
+                            }
                             state = Lexical::Heredoc;
                             brace_depth = 0;
                         }
@@ -277,11 +281,12 @@ fn lexical_state_at(bytes: &[u8], target: usize) -> LexicalAt {
                     if i + heredoc_label.len() <= len
                         && &bytes[i..i + heredoc_label.len()] == heredoc_label.as_slice()
                     {
+                        // Since PHP 7.3 the label may be followed by anything
+                        // that cannot continue an identifier (`SQL);`, `SQL,`).
                         let after_label = i + heredoc_label.len();
                         if after_label >= len
-                            || bytes[after_label] == b';'
-                            || bytes[after_label] == b'\n'
-                            || bytes[after_label] == b'\r'
+                            || !(bytes[after_label].is_ascii_alphanumeric()
+                                || bytes[after_label] == b'_')
                         {
                             i = after_label;
                             state = Lexical::Code;

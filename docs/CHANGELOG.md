@@ -28,6 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Go to a global class's member from a file with a same-named class.** `\Tag::make()` written in a file that declares `App\Tag` now jumps to the global `Tag`, not the class in the current file.
 - **Linux binary crashing on older x86_64 CPUs.** The 1.0.0 Linux x86_64 binary stopped at startup with "Illegal instruction" on processors without AVX2. Release binaries for x86_64 run on any 64-bit x86 CPU again.
+- **Completion after a heredoc or nowdoc closed mid-line.** A heredoc or nowdoc whose closing label is followed by more code on the same line, as in `User::raw(<<<'SQL' … SQL);`, no longer stops completion for the rest of the file.
 
 ### Internal
 
