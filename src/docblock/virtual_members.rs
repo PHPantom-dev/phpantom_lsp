@@ -209,6 +209,7 @@ pub fn extract_method_tags_from_info(info: &DocblockInfo) -> Vec<MethodInfo> {
             is_virtual: true,
             is_macro: false,
             is_inferred_return: false,
+            since: None,
             is_pure: false,
             is_impure: false,
             reads_func_args: false,

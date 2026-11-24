@@ -298,7 +298,14 @@ impl Backend {
         // wrong whenever a legacy variant wins (enum cases would
         // resolve to int constants).  The stub is the authoritative
         // definition of a built-in, so it wins over classmap entries.
+        //
+        // Unless the target PHP version does not have the built-in yet:
+        // then a polyfill is what runs, and the stub is only the fallback
+        // of Phase 3.
         if expected_ns.is_none()
+            && self
+                .newer_stub_version(crate::stubs::StubSymbolKind::Class, last_segment)
+                .is_none()
             && let Some(cls) = self.load_stub_class(last_segment)
         {
             return Some(cls);

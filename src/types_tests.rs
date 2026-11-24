@@ -14,6 +14,7 @@ fn prop(name: &str, type_hint: &str) -> PropertyInfo {
 /// Helper: create a minimal ConstantInfo for testing signature_eq.
 fn constant(name: &str) -> ConstantInfo {
     ConstantInfo {
+        since: None,
         name: crate::atom::atom(name),
         name_offset: 0,
         type_hint: Some(PhpType::parse("string")),

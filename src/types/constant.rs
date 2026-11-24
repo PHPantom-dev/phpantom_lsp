@@ -28,6 +28,10 @@ pub struct ConstantInfo {
     ///
     /// `None` when no replacement is specified.
     pub deprecated_replacement: Option<String>,
+    /// The PHP version the constant was added in, from the `@since` tag of a
+    /// bundled extension's embedded stub.  `None` for every other
+    /// declaration: a library's `@since` names its own releases.
+    pub since: Option<PhpVersion>,
     /// Symbol and URL references from `@see` tags in the constant's docblock.
     ///
     /// Each entry's `text` is what follows `@see`, which may be a symbol

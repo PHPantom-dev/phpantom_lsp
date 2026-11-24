@@ -102,6 +102,7 @@ impl Backend {
                 doc_ctx,
             ),
             from_unbundled_extension: false,
+            since: None,
             deprecation_message: None,
             deprecated_replacement: None,
             template_params: vec![],

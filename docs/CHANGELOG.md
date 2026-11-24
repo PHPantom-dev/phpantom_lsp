@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### Diagnostics
 
+- **Built-ins newer than the project's PHP version.** A function, class, method, or constant the target PHP version does not have yet, such as `str_contains()` on a project requiring PHP 7.4, is reported with the version it needs and left out of completion. A polyfill's declaration takes precedence, and code behind `function_exists()`, `class_exists()`, `method_exists()`, `defined()`, or a `PHP_VERSION_ID` check is not reported.
 - **Named arguments to a class without a constructor.** `new Point(x: 1)`, or an attribute written the same way, on a class that neither declares nor inherits a constructor is reported, the same error PHP throws. A class whose parent or trait cannot be found is left alone.
 
 #### Laravel
@@ -35,11 +36,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Linux binary crashing on older x86_64 CPUs.** The 1.0.0 Linux x86_64 binary stopped at startup with "Illegal instruction" on processors without AVX2. Release binaries for x86_64 run on any 64-bit x86 CPU again.
 - **Completion after a heredoc or nowdoc closed mid-line.** A heredoc or nowdoc whose closing label is followed by more code on the same line, as in `User::raw(<<<'SQL' … SQL);`, no longer stops completion for the rest of the file.
 - **Trailing comments no longer fold the code beside them.** Comments at the end of consecutive lines of code, as in `$a = 1; // first`, used to fold as a comment block that hid the code on the following lines.
+- **Framework names passed to a nullable or union receiver.** A template, service, route or other name passed to a call on a `?Factory` or `Factory|Mailer` receiver now navigates, completes and is checked the same as one on a plain `Factory`.
 
 ### Internal
 
 - **Faster CI builds and benchmarks.** Test runners share a compiled suite and matching benchmark builds are reused. Performance checks keep the same thresholds and wait for background diagnostics before measuring memory. Contributed by @shuvroroy.
-- **Nullable and union receivers name their string keys.** A template, service, route or other name passed to a call on a `?Factory` or `Factory|Mailer` receiver now navigates, completes and is checked the same as one on a plain `Factory`.
 
 ## [1.0.0] - 2026-11-23
 

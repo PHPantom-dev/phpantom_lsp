@@ -90,6 +90,10 @@ pub struct MethodInfo {
     /// When `true`, hover appends "(inferred)" to the return type line
     /// so the user knows the type is best-effort, not authoritative.
     pub is_inferred_return: bool,
+    /// The PHP version the method was added in, from the `@since` tag of a
+    /// bundled extension's embedded stub.  `None` for every other
+    /// declaration: a library's `@since` names its own releases.
+    pub since: Option<PhpVersion>,
     /// Whether the method is declared side-effect free via `@pure`,
     /// `@phpstan-pure` or `@psalm-pure`.
     ///
@@ -493,6 +497,7 @@ impl MethodInfo {
             is_virtual: true,
             is_macro: false,
             is_inferred_return: false,
+            since: None,
             is_pure: false,
             is_impure: false,
             reads_func_args: false,

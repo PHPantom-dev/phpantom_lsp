@@ -348,9 +348,11 @@ impl Backend {
         }
 
         // ── 3. Built-in PHP functions from stubs ────────────────────
+        // A built-in the target PHP version does not have yet is left out.
         let stub_fn_idx = self.stub_function_index.read();
+        let newer = self.newer_stubs.read();
         for (folded, name, _) in stub_fn_idx.iter_folded() {
-            if !folded.contains(&prefix_lower) {
+            if !folded.contains(&prefix_lower) || newer.functions.contains_key(name) {
                 continue;
             }
             if crate::blade::is_synthetic_function(name) {

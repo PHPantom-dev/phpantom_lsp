@@ -44,6 +44,7 @@ fn virtual_members_not_empty_with_constant() {
         methods: Vec::new(),
         properties: Vec::new(),
         constants: vec![ConstantInfo {
+            since: None,
             name: crate::atom::atom("FOO"),
             name_offset: 0,
             type_hint: None,
@@ -1867,6 +1868,7 @@ fn resolve_class_fully_merges_transitive_interface_constants() {
     let mut unit_value = make_class("Carbon\\Constants\\UnitValue");
     unit_value.kind = ClassLikeKind::Interface;
     unit_value.constants.push(Arc::new(ConstantInfo {
+        since: None,
         name: crate::atom::atom("JANUARY"),
         name_offset: 0,
         type_hint: Some(PhpType::parse("int")),

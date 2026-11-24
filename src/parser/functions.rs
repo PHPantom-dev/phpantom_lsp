@@ -256,6 +256,11 @@ impl Backend {
 
                     let reads_func_args = body_reads_func_args(func.body.statements.iter());
 
+                    let since = info
+                        .as_ref()
+                        .filter(|_| doc_ctx.is_some_and(|ctx| ctx.reads_since))
+                        .and_then(docblock::extract_since_version_from_info);
+
                     // Merge overloaded function declarations: when a
                     // function with the same name already exists (common
                     // in phpstorm-stubs for functions like `strtr`,
@@ -296,6 +301,7 @@ impl Backend {
                             template_param_defaults: func_template_param_defaults,
                             throws,
                             is_polyfill: false,
+                            since,
                             from_unbundled_extension: false,
                             overloads: Vec::new(),
                             is_pure,

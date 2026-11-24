@@ -87,6 +87,11 @@ pub(crate) struct DocblockCtx<'a> {
     /// parsing phpstorm-stubs; left as `None` for user code (where the
     /// attribute is never used).
     pub php_version: Option<PhpVersion>,
+    /// Whether `@since` tags name the PHP version a declaration was added
+    /// in, and are recorded as its `since`.  Only true for the stub of a
+    /// bundled extension (see
+    /// [`crate::stubs::is_bundled_extension_stub_file`]).
+    pub reads_since: bool,
     /// Use-statement map for the file being parsed.
     ///
     /// Maps short (imported or aliased) names to their fully-qualified
@@ -242,6 +247,10 @@ impl Backend {
         Vec<(ClassInfo, Option<String>, Option<usize>)>,
         Vec<NamespaceSpan>,
     ) {
+        // Read before the parse, which hands the closure its own copy of
+        // the text.
+        let reads_since =
+            php_version.is_some() && crate::stubs::is_bundled_extension_stub_file(content);
         with_parsed_program(content, "parse_php", |program, content| {
             let mut use_map = HashMap::new();
             Self::extract_use_statements_from_statements(
@@ -256,6 +265,7 @@ impl Backend {
                 trivias: program.trivia.as_slice(),
                 content,
                 php_version,
+                reads_since,
                 use_map,
                 namespace,
             };
@@ -278,6 +288,7 @@ impl Backend {
                             trivias: doc_ctx.trivias,
                             content: doc_ctx.content,
                             php_version: doc_ctx.php_version,
+                            reads_since: doc_ctx.reads_since,
                             use_map: span.use_map.clone(),
                             namespace: span.namespace.clone(),
                         });
@@ -333,6 +344,8 @@ impl Backend {
         content: &str,
         php_version: Option<PhpVersion>,
     ) -> Vec<FunctionInfo> {
+        let reads_since =
+            php_version.is_some() && crate::stubs::is_bundled_extension_stub_file(content);
         with_parsed_program(content, "parse_functions", |program, content| {
             let mut use_map = HashMap::new();
             Self::extract_use_statements_from_statements(
@@ -346,6 +359,7 @@ impl Backend {
                 trivias: program.trivia.as_slice(),
                 content,
                 php_version,
+                reads_since,
                 use_map,
                 namespace,
             };

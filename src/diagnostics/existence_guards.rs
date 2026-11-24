@@ -1,7 +1,7 @@
 //! The constructs that make a missing symbol legitimate: an
-//! `isset()`/`empty()` argument, and an existence check
-//! (`function_exists`, `class_exists`, `method_exists`) a call is written
-//! under.
+//! `isset()`/`empty()` argument, an existence check (`function_exists`,
+//! `class_exists`, `method_exists`, `defined`) a call is written under, and
+//! a check of the running PHP version.
 //!
 //! The callers only judge spans the symbol map recorded, which come from
 //! the same parse, so these are read from the AST.
@@ -53,6 +53,14 @@ pub(crate) struct ExistenceGuards {
     /// Method names guarded by `method_exists($obj, 'name')`.
     /// Maps method name (lowercase) to list of guarded byte ranges.
     pub method_guards: HashMap<String, Vec<ByteRange>>,
+    /// Constant names guarded by `defined('NAME')`, with a leading `\`
+    /// dropped.  Maps constant name to list of guarded byte ranges.
+    pub constant_guards: HashMap<String, Vec<ByteRange>>,
+    /// The code written under a check of the running PHP version
+    /// (`PHP_VERSION_ID`, `version_compare(PHP_VERSION, …)`): every branch
+    /// of the `if` or ternary the check is the condition of, or the rest
+    /// of its own statement.  Such code copes with what the version lacks.
+    pub version_guards: Vec<ByteRange>,
 }
 
 impl ExistenceGuards {
@@ -85,7 +93,30 @@ impl ExistenceGuards {
             .get(&name.to_lowercase())
             .is_some_and(|ranges| in_any(ranges, offset))
     }
+
+    /// Check whether a constant reference at `offset` is guarded by
+    /// `defined()`.
+    pub fn is_constant_guarded(&self, name: &str, offset: u32) -> bool {
+        self.constant_guards
+            .get(name.strip_prefix('\\').unwrap_or(name))
+            .is_some_and(|ranges| in_any(ranges, offset))
+    }
+
+    /// Check whether `offset` is in code written under a check of the
+    /// running PHP version.
+    pub fn is_version_guarded(&self, offset: u32) -> bool {
+        in_any(&self.version_guards, offset)
+    }
 }
+
+/// The constants a check of the running PHP version reads.
+const PHP_VERSION_CONSTANTS: &[&str] = &[
+    "PHP_VERSION_ID",
+    "PHP_VERSION",
+    "PHP_MAJOR_VERSION",
+    "PHP_MINOR_VERSION",
+    "PHP_RELEASE_VERSION",
+];
 
 fn in_any(ranges: &[ByteRange], offset: u32) -> bool {
     let offset = offset as usize;
@@ -101,6 +132,9 @@ fn in_any(ranges: &[ByteRange], offset: u32) -> bool {
 /// - `function_exists('name')` / `function_exists("name")`
 /// - `class_exists(Name::class)` / `class_exists('Name')` / `class_exists("Name")`
 /// - `method_exists($var, 'name')` / `method_exists($var, "name")`
+/// - `defined('NAME')`
+/// - a read of `PHP_VERSION_ID` or another version constant (see
+///   [`ExistenceGuards::version_guards`])
 ///
 /// A check guards the body of the `if` or `elseif` whose condition holds
 /// it, and otherwise the rest of its own statement
@@ -113,6 +147,16 @@ pub(crate) fn compute_existence_guards(content: &str) -> ExistenceGuards {
         let mut guards = ExistenceGuards::default();
         let file_end = content.len();
         crate::parser::for_each_node_with_ancestors(Node::Program(program), |node, ancestors| {
+            if let Node::ConstantAccess(access) = node {
+                let name = bytes_to_str(access.name.value());
+                let name = name.strip_prefix('\\').unwrap_or(name);
+                if PHP_VERSION_CONSTANTS.contains(&name)
+                    && let Some(range) = version_checked_range(access.span(), ancestors, file_end)
+                {
+                    guards.version_guards.push(range);
+                }
+                return;
+            }
             let Node::FunctionCall(call) = node else {
                 return;
             };
@@ -130,6 +174,10 @@ pub(crate) fn compute_existence_guards(content: &str) -> ExistenceGuards {
                 ),
                 ExistenceKind::Class => (&mut guards.class_guards, name),
                 ExistenceKind::Method => (&mut guards.method_guards, name.to_lowercase()),
+                ExistenceKind::Constant => (
+                    &mut guards.constant_guards,
+                    name.strip_prefix('\\').unwrap_or(&name).to_string(),
+                ),
             };
             map.entry(key).or_default().push(range);
         });
@@ -142,6 +190,7 @@ enum ExistenceKind {
     Function,
     Class,
     Method,
+    Constant,
 }
 
 /// The kind of check `call` is and the name it checks, or `None` when it is
@@ -158,6 +207,8 @@ fn existence_check(call: &FunctionCall<'_>) -> Option<(ExistenceKind, String)> {
         (ExistenceKind::Class, 0)
     } else if function.eq_ignore_ascii_case("method_exists") {
         (ExistenceKind::Method, 1)
+    } else if function.eq_ignore_ascii_case("defined") {
+        (ExistenceKind::Constant, 0)
     } else {
         return None;
     };
@@ -269,6 +320,71 @@ fn guarded_range(
         _ => None,
     })?;
     Some((call.end.offset as usize, statement_end as usize))
+}
+
+/// The byte range a read of a PHP version constant at `read` guards, given
+/// the nodes enclosing it (outermost first).
+///
+/// Whichever way the check goes, the code under it was written knowing
+/// the version, so every branch is covered: the whole `if` (with its
+/// `elseif` and `else`) or ternary the read is the condition of.  An `if`
+/// that leaves early (`if (PHP_VERSION_ID < 80000) { return; }`) also
+/// covers the rest of its block.  A read in no condition covers the rest
+/// of its statement (`PHP_VERSION_ID >= 80000 && str_contains($a, $b)`).
+fn version_checked_range(
+    read: mago_span::Span,
+    ancestors: &[Node<'_, '_>],
+    file_end: usize,
+) -> Option<ByteRange> {
+    let within = |span: mago_span::Span| {
+        span.start.offset <= read.start.offset && read.end.offset <= span.end.offset
+    };
+    for (depth, node) in ancestors.iter().enumerate().rev() {
+        match node {
+            Node::Conditional(conditional) if within(conditional.condition.span()) => {
+                let span = conditional.span();
+                return Some((span.start.offset as usize, span.end.offset as usize));
+            }
+            Node::If(if_stmt) => {
+                let in_condition = within(if_stmt.condition.span())
+                    || if_stmt
+                        .body
+                        .else_if_clauses()
+                        .iter()
+                        .any(|(condition, _)| within(condition.span()));
+                if !in_condition {
+                    continue;
+                }
+                let span = if_stmt.span();
+                let exits_early = match &if_stmt.body {
+                    IfBody::Statement(body) => ThenBody::Statement(body.statement),
+                    IfBody::ColonDelimited(body) => {
+                        ThenBody::Statements(body.statements.as_slice())
+                    }
+                }
+                .exits_early();
+                let end = if exits_early {
+                    ancestors[..depth]
+                        .iter()
+                        .rev()
+                        .find_map(|node| match node {
+                            Node::Block(block) => Some(block.right_brace.start.offset as usize),
+                            _ => None,
+                        })
+                        .unwrap_or(file_end)
+                } else {
+                    span.end.offset as usize
+                };
+                return Some((span.start.offset as usize, end));
+            }
+            _ => {}
+        }
+    }
+    let statement_end = ancestors.iter().rev().find_map(|node| match node {
+        Node::Statement(statement) => Some(statement.span().end.offset),
+        _ => None,
+    })?;
+    Some((read.end.offset as usize, statement_end as usize))
 }
 
 /// The branch an `if` takes when its condition holds.

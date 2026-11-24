@@ -111,6 +111,10 @@ fn extract_constants(
     let const_description = const_docblock_info
         .as_ref()
         .and_then(crate::hover::extract_description_from_info);
+    let since = const_docblock_info
+        .as_ref()
+        .filter(|_| doc_ctx.is_some_and(|ctx| ctx.reads_since))
+        .and_then(docblock::extract_since_version_from_info);
     for item in constant.items.iter() {
         let value = doc_ctx.and_then(|ctx| {
             let start = item.value.span().start.offset as usize;
@@ -124,6 +128,7 @@ fn extract_constants(
             visibility,
             deprecation_message: deprecation_message.clone(),
             deprecated_replacement: constant_deprecated_replacement.clone(),
+            since,
             see_refs: const_see_refs.clone(),
             description: const_description.clone(),
             is_enum_case: false,
@@ -165,6 +170,10 @@ fn extract_enum_case(
         visibility: Visibility::Public,
         deprecation_message: depr_info.message,
         deprecated_replacement: depr_info.replacement,
+        since: case_docblock_info
+            .as_ref()
+            .filter(|_| doc_ctx.is_some_and(|ctx| ctx.reads_since))
+            .and_then(docblock::extract_since_version_from_info),
         see_refs: Vec::new(),
         description: None,
         is_enum_case: true,

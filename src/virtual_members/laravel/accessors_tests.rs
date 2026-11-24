@@ -154,6 +154,7 @@ fn modern_setters_are_read_from_the_returned_attribute() {
                 trivias: program.trivia.as_slice(),
                 content,
                 php_version: None,
+                reads_since: false,
                 use_map: [("Value".to_string(), ATTRIBUTE_CAST_FQN.to_string())]
                     .into_iter()
                     .collect(),

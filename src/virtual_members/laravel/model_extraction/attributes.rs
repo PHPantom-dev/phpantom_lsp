@@ -378,6 +378,7 @@ mod tests {
             trivias: &[],
             content: "",
             php_version: None,
+            reads_since: false,
             use_map: Default::default(),
             namespace: None,
         };

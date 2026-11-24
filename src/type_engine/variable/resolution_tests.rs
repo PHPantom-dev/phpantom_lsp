@@ -2417,6 +2417,7 @@ function test() {
 /// simulating what the real backend produces from phpstorm-stubs.
 fn stub_function_info(name: &str, return_type: Option<PhpType>) -> crate::types::FunctionInfo {
     crate::types::FunctionInfo {
+        since: None,
         name: crate::atom::atom(name),
         name_offset: 0,
         parameters: Vec::new().into(),

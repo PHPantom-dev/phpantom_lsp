@@ -705,10 +705,15 @@ impl Backend {
                     // stand down.
                     //
                     // A stub path is exempt: what it declares is meant to
-                    // win over the embedded stubs.
+                    // win over the embedded stubs.  So is a built-in the
+                    // target PHP version does not have yet: there the
+                    // polyfill is what runs.
                     if (func_info.is_polyfill || !fqn.contains('\\'))
                         && self.stub_function_index.read().contains_key(fqn.as_str())
                         && !stubs.contains_uri(&update.uri)
+                        && self
+                            .newer_stub_version(crate::stubs::StubSymbolKind::Function, &fqn)
+                            .is_none()
                     {
                         continue;
                     }
@@ -786,7 +791,22 @@ impl Backend {
                 }
 
                 let from_stub = !stubs.is_empty() && stubs.contains_uri(&update.uri);
+                let from_embedded_stub = crate::stubs::is_embedded_stub_uri(&update.uri);
                 for (name, define) in std::mem::take(&mut update.defines) {
+                    // Parsing an embedded stub publishes every constant
+                    // the file declares, not just the one looked up.  One
+                    // the target PHP version does not have yet keeps the
+                    // project's own declaration, its polyfill.
+                    if from_embedded_stub
+                        && dmap
+                            .get(&name)
+                            .is_some_and(|held| !crate::stubs::is_embedded_stub_uri(&held.file_uri))
+                        && self
+                            .newer_stub_version(crate::stubs::StubSymbolKind::Constant, &name)
+                            .is_some()
+                    {
+                        continue;
+                    }
                     // A constant a stub path declares keeps the stub's
                     // declaration: that is the one its lookup reads back.
                     if !from_stub

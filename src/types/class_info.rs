@@ -407,6 +407,10 @@ pub struct ClassInfo {
     /// [`crate::stubs::is_unbundled_extension_stub`]).  A named argument is
     /// not checked against them.
     pub from_unbundled_extension: bool,
+    /// The PHP version the class was added in, from the `@since` tag of a
+    /// bundled extension's embedded stub.  `None` for every other
+    /// declaration: a library's `@since` names its own releases.
+    pub since: Option<PhpVersion>,
     /// Deprecation message from the `@deprecated` PHPDoc tag.
     ///
     /// `None` means not deprecated. `Some("")` means deprecated without a

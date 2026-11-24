@@ -84,6 +84,10 @@ static SLOW_COLLECTORS: &[SlowCollector] = &[
         Backend::collect_unknown_function_diagnostics_with_context,
     ),
     always(
+        "requires_newer_php",
+        Backend::collect_newer_builtin_diagnostics_with_context,
+    ),
+    always(
         "argument_count_mismatch",
         Backend::collect_argument_count_diagnostics_with_context,
     ),
