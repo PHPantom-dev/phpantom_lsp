@@ -6220,6 +6220,9 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 </ul>
 <h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Go to a global class's member from a file with a same-named class.</strong> <code>\Tag::make()</code> written in a file that declares <code>App\Tag</code> now jumps to the global <code>Tag</code>, not the class in the current file.</li>
+</ul>
 <h3 id="internal">Internal<a class="headerlink" href="#internal" title="Permanent link">&para;</a></h3>
 <ul>
 <li><strong>Faster CI builds and benchmarks.</strong> Test runners share a compiled suite and matching benchmark builds are reused. Performance checks keep the same thresholds and wait for background diagnostics before measuring memory. Contributed by @shuvroroy.</li>

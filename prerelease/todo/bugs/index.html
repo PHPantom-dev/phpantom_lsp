@@ -988,23 +988,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Name resolution">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b735-find_class_file_uri-finds-a-global-class-in-any-file-with-a-class-of-its-short-name" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B735. <code>find_class_file_uri</code> finds a global class in any file with a class of its short name
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1628,23 +1611,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Name resolution">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b735-find_class_file_uri-finds-a-global-class-in-any-file-with-a-class-of-its-short-name" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B735. <code>find_class_file_uri</code> finds a global class in any file with a class of its short name
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1734,26 +1700,7 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <h2 id="framework-names-in-strings">Framework names in strings<a class="headerlink" href="#framework-names-in-strings" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="name-resolution">Name resolution<a class="headerlink" href="#name-resolution" title="Permanent link">&para;</a></h2>
-<h3 id="b735-find_class_file_uri-finds-a-global-class-in-any-file-with-a-class-of-its-short-name">B735. <code>find_class_file_uri</code> finds a global class in any file with a class of its short name<a class="headerlink" href="#b735-find_class_file_uri-finds-a-global-class-in-any-file-with-a-class-of-its-short-name" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low-Medium · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">// Tag.php</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">class Tag {}</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">// app.php</span>
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="x">namespace App;</span>
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="x">class Tag {}</span>
-<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="x">// find_class_file_uri("Tag", "app.php") answers app.php</span>
-</code></pre></div>
-<p>Asked for an unqualified (global) name, the lookup matches any class whose
-short name is the same, namespace ignored, and checks the calling file
-first. So a navigation that hands it a global FQN lands in the calling
-file whenever that file declares a namespaced class of the same short name.
-The namespaced case compares the namespace already; the global case should
-require the class to be in no namespace the same way. Some callers may
-pass a short name for a namespaced class and rely on the loose match, so
-those need finding before the check tightens.</p>
-<p><strong>Where to look:</strong> <code>src/definition/member/file_lookup.rs</code>
-(<code>find_class_file_uri</code>, the <code>None</code> arm of <code>class_in_file</code>).</p>
+<p>No outstanding items.</p>
 <h2 id="code-actions">Code actions<a class="headerlink" href="#code-actions" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
