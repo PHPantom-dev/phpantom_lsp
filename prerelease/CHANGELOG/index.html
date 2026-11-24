@@ -6214,6 +6214,7 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 </ul>
 <h4 id="diagnostics">Diagnostics<a class="headerlink" href="#diagnostics" title="Permanent link">&para;</a></h4>
 <ul>
+<li><strong>Built-ins newer than the project's PHP version.</strong> A function, class, method, or constant the target PHP version does not have yet, such as <code>str_contains()</code> on a project requiring PHP 7.4, is reported with the version it needs and left out of completion. A polyfill's declaration takes precedence, and code behind <code>function_exists()</code>, <code>class_exists()</code>, <code>method_exists()</code>, <code>defined()</code>, or a <code>PHP_VERSION_ID</code> check is not reported.</li>
 <li><strong>Named arguments to a class without a constructor.</strong> <code>new Point(x: 1)</code>, or an attribute written the same way, on a class that neither declares nor inherits a constructor is reported, the same error PHP throws. A class whose parent or trait cannot be found is left alone.</li>
 </ul>
 <h4 id="laravel">Laravel<a class="headerlink" href="#laravel" title="Permanent link">&para;</a></h4>
@@ -6232,11 +6233,11 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 <li><strong>Linux binary crashing on older x86_64 CPUs.</strong> The 1.0.0 Linux x86_64 binary stopped at startup with "Illegal instruction" on processors without AVX2. Release binaries for x86_64 run on any 64-bit x86 CPU again.</li>
 <li><strong>Completion after a heredoc or nowdoc closed mid-line.</strong> A heredoc or nowdoc whose closing label is followed by more code on the same line, as in <code>User::raw(&lt;&lt;&lt;'SQL' … SQL);</code>, no longer stops completion for the rest of the file.</li>
 <li><strong>Trailing comments no longer fold the code beside them.</strong> Comments at the end of consecutive lines of code, as in <code>$a = 1; // first</code>, used to fold as a comment block that hid the code on the following lines.</li>
+<li><strong>Framework names passed to a nullable or union receiver.</strong> A template, service, route or other name passed to a call on a <code>?Factory</code> or <code>Factory|Mailer</code> receiver now navigates, completes and is checked the same as one on a plain <code>Factory</code>.</li>
 </ul>
 <h3 id="internal">Internal<a class="headerlink" href="#internal" title="Permanent link">&para;</a></h3>
 <ul>
 <li><strong>Faster CI builds and benchmarks.</strong> Test runners share a compiled suite and matching benchmark builds are reused. Performance checks keep the same thresholds and wait for background diagnostics before measuring memory. Contributed by @shuvroroy.</li>
-<li><strong>Nullable and union receivers name their string keys.</strong> A template, service, route or other name passed to a call on a <code>?Factory</code> or <code>Factory|Mailer</code> receiver now navigates, completes and is checked the same as one on a plain <code>Factory</code>.</li>
 </ul>
 <h2 id="100-2026-11-23"><a href="https://github.com/PHPantom-dev/phpantom_lsp/compare/0.11.1...1.0.0">1.0.0</a> - 2026-11-23<a class="headerlink" href="#100-2026-11-23" title="Permanent link">&para;</a></h2>
 <h3 id="added_1">Added<a class="headerlink" href="#added_1" title="Permanent link">&para;</a></h3>

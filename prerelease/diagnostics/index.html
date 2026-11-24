@@ -1616,6 +1616,11 @@ expects to be declared somewhere, but is not, is always <code>invalid_</code>.</
 <td>A function call that cannot be resolved.</td>
 </tr>
 <tr>
+<td><code>requires_newer_php</code></td>
+<td>Error</td>
+<td>A built-in function, class, method, or constant added in a PHP version newer than the project targets. Code under <code>function_exists()</code>, <code>class_exists()</code>, <code>method_exists()</code>, <code>defined()</code>, or a <code>PHP_VERSION_ID</code> check is left alone, and so is a name a polyfill declares.</td>
+</tr>
+<tr>
 <td><code>unknown_member</code></td>
 <td>Warning</td>
 <td>A method, property, or constant the resolved class does not have. <code>magic-properties</code> widens it to classes with <code>__get</code>.</td>
