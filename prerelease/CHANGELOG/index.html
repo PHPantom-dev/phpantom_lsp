@@ -6209,6 +6209,7 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 <h4 id="editing-and-navigation">Editing and navigation<a class="headerlink" href="#editing-and-navigation" title="Permanent link">&para;</a></h4>
 <ul>
 <li><strong>Named arguments follow the parameter they name.</strong> A label such as <code>name:</code> in <code>new SelectField(name: 'x')</code> or <code>$field-&gt;render(name: 'x')</code> jumps to the parameter it fills, hovers as it, highlights with it, shows up in its references, and renames with it. When that parameter promotes a property, the label moves with the property as well. Contributed by @AbyssWaIker.</li>
+<li><strong>Signature help for invokable objects.</strong> Calling an object, as in <code>$action('x')</code>, <code>app(TestAction::class)('x')</code> or <code>(new TestAction())('x')</code>, shows the parameters of its <code>__invoke()</code> method, and the arguments are checked against them.</li>
 </ul>
 <h4 id="diagnostics">Diagnostics<a class="headerlink" href="#diagnostics" title="Permanent link">&para;</a></h4>
 <ul>
