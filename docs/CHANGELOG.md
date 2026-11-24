@@ -22,6 +22,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### Laravel
 
+- **Middleware names in Laravel controllers.** In a controller's `$this->middleware('auth:admin')` call, you can complete the guard, jump to its configuration, and see a diagnostic for a misspelling. This follows the controller's parent classes, including application-specific base controllers. Contributed by @shuvroroy.
+
 - **Authorization abilities on typed user models.** In calls such as `$customer->can('update', $post)`, complete the ability, jump to its policy, or see why it does not apply to the model. Contributed by @shuvroroy.
 
 - **Laravel connection names follow the receiver's type.** Connection names in instance calls and model or job properties now complete, navigate, show hover details and references, and report unknown names against the appropriate config file. Contributed by @shuvroroy.

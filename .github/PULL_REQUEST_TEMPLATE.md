@@ -6,7 +6,8 @@ by rewriting commits rather than adding fixup commits on top.
 
 # Checklist
 
-If applicable:
+Tick only what is true. An unticked box is fine and doesn't block the PR; it
+tells the reviewer where to look more closely.
 
 - [ ] I have updated `CHANGELOG.md`
 - [ ] I have updated the documentation (`README.md`, `docs/`, `examples/`)

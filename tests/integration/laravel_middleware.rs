@@ -17,6 +17,7 @@ const COMPOSER_JSON: &str = r#"{
     "require": { "laravel/framework": "^11.0" },
     "autoload": { "psr-4": {
         "App\\": "src/",
+        "Illuminate\\Routing\\": "framework/Routing/",
         "Illuminate\\Foundation\\Configuration\\": "framework/Configuration/",
         "Illuminate\\Auth\\Middleware\\": "framework/Auth/"
     } }
@@ -45,6 +46,7 @@ class Middleware
         $aliases = [
             'auth' => \Illuminate\Auth\Middleware\Authenticate::class,
             'can' => \Illuminate\Auth\Middleware\Authorize::class,
+            'throttle' => \Illuminate\Routing\Middleware\ThrottleRequests::class,
         ];
         return $aliases;
     }
@@ -325,50 +327,132 @@ class PostController implements HasMiddleware
 }
 
 #[tokio::test]
-async fn controller_constructor_middleware_names_middleware() {
-    let controller = r#"<?php
-namespace App\Http\Controllers;
-
-class PostController extends Controller
-{
+async fn controller_middleware_follows_the_resolved_parent_and_checks_each_guard() {
+    let body = r#"{
     public function __construct()
     {
-        $this->middleware('admn');
+        $this->middleware(middleware: ['admn', 'key' => 'auth:web,admin,typo']);
+        $this->middleware(array('can:publish,Post', 'throttle:uploads'));
+        $this->withoutMiddleware('route-only');
     }
 }
 "#;
-    let other = r#"<?php
+    let controller = format!(
+        r#"<?php
 namespace App;
-
-class Pipeline
-{
-    public function __construct()
-    {
-        $this->middleware('admn');
-    }
-}
-"#;
-    let (backend, dir, _uri) = workspace(
+use App\Http\Base as ParentController;
+class Bakery extends ParentController
+{body}"#
+    );
+    let other = format!("<?php\nnamespace App;\nclass Pipeline extends Controller\n{body}");
+    let config = "<?php return ['guards' => ['web' => [], 'admin' => []]];\n";
+    let (backend, dir, _) = workspace(
         "<?php\n",
         &[
-            ("src/Http/Controllers/PostController.php", controller),
-            ("src/Pipeline.php", other),
+            ("framework/Routing/Controller.php", r"<?php namespace Illuminate\Routing; class Controller { public function middleware($middleware) {} }"),
+            ("src/Http/Base.php", r"<?php namespace App\Http; class Base extends \Illuminate\Routing\Controller {}"),
+            ("src/Controller.php", r"<?php namespace App; class Controller { public function middleware($middleware) {} }"),
+            ("src/Bakery.php", &controller),
+            ("src/Pipeline.php", &other),
+            ("config/auth.php", config),
+            ("bootstrap/providers.php", r"<?php return [App\Providers\AppServiceProvider::class];"),
+            ("src/Providers/AppServiceProvider.php", r"<?php namespace App\Providers;
+                use Illuminate\Support\Facades\{Gate, RateLimiter};
+                class AppServiceProvider { public function boot() {
+                    Gate::define('publish', fn () => true);
+                    RateLimiter::for('uploads', fn () => null);
+                } }"),
         ],
-    )
-    .await;
-    for (path, source, expected) in [
-        ("src/Http/Controllers/PostController.php", controller, 1),
-        ("src/Pipeline.php", other, 0),
+    ).await;
+    for (path, source, is_controller) in [
+        ("src/Bakery.php", &controller, true),
+        ("src/Pipeline.php", &other, false),
     ] {
         let uri = Uri::from_file_path(dir.path().join(path)).unwrap();
         open_php_str(&backend, uri.as_str(), source).await;
         let mut diags = Vec::new();
         backend.collect_slow_diagnostics(uri.as_str(), source, &mut diags);
+        let aliases = middleware_diagnostics(&diags);
+        let guards: Vec<_> = diags
+            .iter()
+            .filter(
+                |d| matches!(&d.code, Some(Code::String(c)) if c == "invalid_laravel_auth_guard"),
+            )
+            .map(|d| d.range)
+            .collect();
+        if is_controller {
+            assert_eq!(aliases, ["Unknown middleware 'admn'"]);
+            assert_eq!(
+                guards,
+                [Range::new(
+                    position_after(source, "admin,"),
+                    position_after(source, "admin,typo")
+                )]
+            );
+        } else {
+            assert!(aliases.is_empty() && guards.is_empty(), "{diags:?}");
+        }
+        for (prefix, expected) in [
+            ("['ad", "admin"),
+            ("auth:w", "web"),
+            ("auth:web,ad", "admin"),
+        ] {
+            let pos = position_after(source, prefix);
+            let labels = complete_labels_at_opened(&backend, &uri, pos.line, pos.character).await;
+            assert_eq!(
+                labels.iter().any(|l| l == expected),
+                is_controller,
+                "{path} {prefix} {labels:?}"
+            );
+        }
+        for prefix in ["can:pub", "throttle:up"] {
+            let pos = position_after(source, prefix);
+            let defs = definition_locations(
+                goto_definition_at(&backend, &uri, pos.line, pos.character).await,
+            );
+            assert_eq!(
+                defs.iter().any(|d| d
+                    .uri
+                    .path()
+                    .ends_with("/src/Providers/AppServiceProvider.php")),
+                is_controller,
+                "{path} {prefix} {defs:?}"
+            );
+        }
+        let pos = position_after(source, "auth:web,ad");
+        let defs =
+            definition_locations(goto_definition_at(&backend, &uri, pos.line, pos.character).await);
         assert_eq!(
-            middleware_diagnostics(&diags).len(),
-            expected,
-            "{path}: {:?}",
-            middleware_diagnostics(&diags)
+            defs.iter()
+                .any(|d| d.uri.path().ends_with("/config/auth.php")
+                    && d.range.start == position_after(config, "'web' => [], '")),
+            is_controller,
+            "{path} {defs:?}"
         );
     }
+
+    let config_uri = Uri::from_file_path(dir.path().join("config/auth.php")).unwrap();
+    open_php_str(&backend, config_uri.as_str(), config).await;
+    let refs = references_response(&backend, &config_uri, position_after(config, "'ad"), false)
+        .await
+        .unwrap_or_default();
+    assert!(
+        refs.iter()
+            .any(|location| location.uri.path().ends_with("/src/Bakery.php")),
+        "{refs:?}"
+    );
+    assert!(
+        !refs
+            .iter()
+            .any(|location| location.uri.path().ends_with("/src/Pipeline.php")),
+        "{refs:?}"
+    );
+
+    let uri = Uri::from_file_path(dir.path().join("src/Bakery.php")).unwrap();
+    let (before_call, _) = controller.split_once("$this->middleware(").unwrap();
+    let unfinished = format!("{before_call}$this->middleware('auth:ad");
+    let pos = position_after(&unfinished, "auth:ad");
+    open_php_str(&backend, uri.as_str(), &unfinished).await;
+    let labels = complete_labels_at_opened(&backend, &uri, pos.line, pos.character).await;
+    assert!(labels.iter().any(|l| l == "admin"), "{labels:?}");
 }

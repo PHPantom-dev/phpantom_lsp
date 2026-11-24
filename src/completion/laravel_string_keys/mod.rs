@@ -315,18 +315,13 @@ impl Backend {
     ) -> Option<CompletionResponse> {
         let indexed_function_exists = |name: &str| self.has_indexed_function(name);
         let indexed_class_exists = |name: &str| self.has_indexed_class(name);
-        let typed_actor = |operator: &crate::completion::source::code_context::Operator| {
+        let receiver_is = |operator: &crate::completion::source::code_context::Operator,
+                           receiver| {
             crate::completion::eloquent_string::extract_receiver_subject(content, operator)
                 .and_then(|subject| {
                     let cursor =
                         crate::text_position::position_to_offset(content, position) as usize;
-                    self.typed_laravel_subject_kind(
-                        &subject,
-                        crate::symbol_map::ReceiverClass::LaravelAuthorizable,
-                        content,
-                        cursor,
-                        file_ctx,
-                    )
+                    self.typed_laravel_subject_kind(&subject, receiver, content, cursor, file_ctx)
                 })
                 .is_some()
         };
@@ -337,7 +332,7 @@ impl Backend {
             file_ctx.resolved_names.as_deref(),
             Some(&indexed_function_exists),
             Some(&indexed_class_exists),
-            &typed_actor,
+            &receiver_is,
         )
         .and_then(|ctx| self.laravel_string_key_response(content, position, ctx))
         .or_else(|| self.try_laravel_connection_completion(content, position, code, file_ctx))

@@ -352,18 +352,21 @@ fn controller_middleware_does_not_claim_auth_guards_without_a_typed_receiver() {
     assert!(!has_config_resource_span(
         &backend, uri, "too-deep", AuthGuard
     ));
-    assert!(backend.symbol_map_for(uri).is_some_and(|map| {
-        map.spans.iter().any(|span| {
-            matches!(
-                &span.kind,
-                crate::symbol_map::SymbolKind::StringKey {
-                    kind: crate::symbol_map::StringKeyKind::GateAbility,
-                    key,
-                    ..
-                } if key == "update"
-            )
-        })
+    let map = backend.symbol_map_for(uri).unwrap();
+    assert!(map.typed_receiver_sites.iter().any(|site| {
+        site.key == "update"
+            && site.receiver
+                == crate::symbol_map::ReceiverClass::LaravelControllerMiddleware(
+                    crate::symbol_map::MiddlewarePart::Ability,
+                )
     }));
+    assert!(!map.spans.iter().any(|span| matches!(
+        &span.kind,
+        crate::symbol_map::SymbolKind::StringKey {
+            kind: crate::symbol_map::StringKeyKind::GateAbility,
+            key, ..
+        } if key == "update"
+    )));
 }
 
 /// Two parses of one template can race: an index worker lowers it with

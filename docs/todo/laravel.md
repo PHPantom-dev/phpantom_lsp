@@ -442,16 +442,6 @@ moving the Blade file — defer that one until the rest is in place.
 Symfony service IDs and container parameters are string-key spans too,
 declarations included, so their rename comes with the same work.
 
-#### L59. Typed controller middleware names
-
-**Impact: Low-Medium · Complexity: Medium**
-
-`$this->middleware('auth:admin')` names middleware only when `$this` is a
-Laravel controller; an unrelated class may define the same method for a
-different purpose. Confirm the enclosing class through the shared type engine
-before completing or validating embedded authentication guards. Static and
-fluent `Route::middleware()` calls remain syntactically unambiguous.
-
 #### L57. Laravel queue names
 
 **Impact: Low-Medium · Complexity: Medium**

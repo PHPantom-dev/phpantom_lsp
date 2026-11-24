@@ -2375,6 +2375,12 @@ check(
 
 $middlewareApp = require __DIR__ . '/bootstrap/app.php';
 $middlewareKernel = $middlewareApp->make(\Illuminate\Contracts\Http\Kernel::class);
+check(
+    'BakeryController protects cancel with the admin guard',
+    (new \App\Http\Controllers\BakeryController())->getMiddleware() === [
+        ['middleware' => 'auth:admin', 'options' => ['only' => ['cancel']]],
+    ]
+);
 $middlewareAliases = $middlewareKernel->getMiddlewareAliases();
 $middlewareGroups = $middlewareKernel->getMiddlewareGroups();
 check(

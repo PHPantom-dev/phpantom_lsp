@@ -1331,6 +1331,7 @@ class Demo
         // Try: hover `bakery.open` to see the class it runs and the
         // parameter its handle() takes; Ctrl+Click jumps to the alias in
         // bootstrap/app.php and to App\Http\Middleware\EnsureBakeryIsOpen.
+        // BakeryController registers the same guard in its constructor.
         Route::middleware(['auth:admin', 'bakery.open:sunday'])
             ->get('/bakery/open', fn () => 'open');
 
