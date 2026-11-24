@@ -17,64 +17,114 @@
 use crate::Backend;
 
 /// One anonymous-component registration in effect: the tag prefix it is
-/// addressed under, and the view directory (dot notation) its templates
-/// live in.
+/// addressed under, and where its templates live.
 ///
-/// `Blade::anonymousComponentNamespace('components', 'webshop')` is
-/// `("webshop", "components")`.  An empty prefix is the prefix-less
-/// `Blade::anonymousComponentPath()` registration, whose templates every
-/// un-namespaced tag can address.
-pub(crate) type AnonymousNamespace = (String, String);
+/// `Blade::anonymousComponentNamespace('components', 'webshop')` is the
+/// prefix `webshop` over the view directory `components`.  An empty prefix
+/// is the prefix-less `Blade::anonymousComponentPath()` registration, whose
+/// templates every un-namespaced tag can address.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct AnonymousNamespace {
+    pub(crate) prefix: String,
+    /// What a template's view name starts with: a view directory in dot
+    /// notation (`components`, joined to the rest with a `.`), or a whole
+    /// view namespace ending in `::` for a directory outside every view
+    /// root, which Laravel registers as a view namespace of its own.
+    pub(crate) directory: String,
+    /// Whether the registration is an `anonymousComponentPath()` one, which
+    /// `ComponentTagCompiler::guessAnonymousComponentUsingPaths` also
+    /// reaches with a tag that names no namespace at all, whatever prefix
+    /// the path was given.
+    pub(crate) path: bool,
+}
+
+impl AnonymousNamespace {
+    /// A registration over a view directory in dot notation.
+    pub(crate) fn new(prefix: &str, directory: &str, path: bool) -> Self {
+        Self {
+            prefix: prefix.to_string(),
+            directory: directory.to_string(),
+            path,
+        }
+    }
+}
+
+/// The view namespace an `anonymousComponentPath()` directory outside every
+/// view root is read under.
+///
+/// Laravel registers every such path as a view namespace named after a hash
+/// of its prefix, which no template ever writes; this stands in for it.  It
+/// is not a name a view can be addressed by, so the view-name readers leave
+/// it out ([`is_anonymous_path_view_namespace`]).
+pub(crate) fn anonymous_path_view_namespace(prefix: &str) -> String {
+    format!("{ANONYMOUS_PATH_VIEW_NAMESPACE}{prefix}")
+}
+
+/// Whether a view name is one read under [`anonymous_path_view_namespace`].
+pub(crate) fn is_anonymous_path_view_name(view_name: &str) -> bool {
+    view_name.starts_with(ANONYMOUS_PATH_VIEW_NAMESPACE)
+}
+
+const ANONYMOUS_PATH_VIEW_NAMESPACE: &str = "__anonymous_component_path_";
 
 impl Backend {
-    /// The anonymous-component registrations in effect, as
-    /// [`AnonymousNamespace`] pairs — what
+    /// The anonymous-component registrations in effect — what
     /// `ComponentTagCompiler::guessAnonymousComponentUsingNamespaces` and
     /// its path-keyed twin read before falling back to `components.`.
     ///
     /// A path registration names a directory on disk rather than a view
     /// prefix, so it is rewritten as the view directory that directory sits
-    /// in.  One outside every configured view root is dropped: no template
-    /// under it has a view name to be matched against in the first place.
+    /// in.  One outside every configured view root (a package's own
+    /// templates, as Flux registers them) is read under a view namespace of
+    /// its own, the way Laravel reads it ([`Self::anonymous_component_view_roots`]).
     pub(crate) fn anonymous_component_namespaces(&self) -> Vec<AnonymousNamespace> {
         self.anonymous_component_registrations().0
     }
 
-    /// [`Self::anonymous_component_namespaces`], plus the path
-    /// registrations it had to drop because no view root holds them, as
-    /// `(tag prefix, directory on disk)`.
-    ///
-    /// Laravel still reaches a template under such a directory (the
-    /// registration gives it a view namespace of its own), so a tag under
-    /// the prefix may name one even though no view name here says so.
-    pub(crate) fn anonymous_component_registrations(
+    /// The directories of the path registrations outside every view root,
+    /// as `(view namespace, directory)`, for the view index to scan.
+    pub(crate) fn anonymous_component_view_roots(&self) -> Vec<(String, std::path::PathBuf)> {
+        self.anonymous_component_registrations().1
+    }
+
+    fn anonymous_component_registrations(
         &self,
     ) -> (Vec<AnonymousNamespace>, Vec<(String, std::path::PathBuf)>) {
-        let (mut namespaces, paths) = {
+        let (namespaces, paths) = {
             let resources = self.laravel.provider_resources.read();
             (
                 resources.anonymous_component_namespaces.clone(),
                 resources.anonymous_component_paths.clone(),
             )
         };
-        let mut unmapped = Vec::new();
+        let mut registrations: Vec<AnonymousNamespace> = namespaces
+            .iter()
+            .map(|(prefix, directory)| AnonymousNamespace::new(prefix, directory, false))
+            .collect();
+        let mut roots = Vec::new();
         if paths.is_empty() {
-            return (namespaces, unmapped);
+            return (registrations, roots);
         }
-        let roots = self.laravel_view_roots();
+        let view_roots = self.laravel_view_roots();
         for (prefix, path) in paths {
             let path = dunce::canonicalize(&path).unwrap_or(path);
-            let directory = roots.iter().find_map(|root| {
+            let directory = view_roots.iter().find_map(|root| {
                 let root = root.canonical.as_ref().unwrap_or(&root.path);
                 let rel = path.strip_prefix(root).ok()?;
                 Some(rel.to_string_lossy().replace(['/', '\\'], "."))
             });
-            match directory {
-                Some(directory) => namespaces.push((prefix, directory)),
-                None => unmapped.push((prefix, path)),
-            }
+            let directory = match directory {
+                Some(directory) => directory,
+                None => {
+                    let namespace = anonymous_path_view_namespace(&prefix);
+                    let directory = format!("{namespace}::");
+                    roots.push((namespace, path));
+                    directory
+                }
+            };
+            registrations.push(AnonymousNamespace::new(&prefix, &directory, true));
         }
-        (namespaces, unmapped)
+        (registrations, roots)
     }
 
     /// The view an `<x-…>` tag with no class behind it renders: an
@@ -99,15 +149,12 @@ impl Backend {
     }
 }
 
-/// The bare tag names (without the `x-` prefix) a Blade file's own view
-/// names make it addressable by: `components.brand.boxes` becomes
-/// `brand.boxes` (so `<x-brand.boxes>` matches it), and a namespaced name
-/// drops the `components.` segment after the namespace the same way
 /// The view names a new anonymous component written as `<x-{tag}>` could
 /// be created as, best first: the directory registered for the tag's own
 /// prefix, then the `components.` convention, then a prefix-less
 /// registration.  Only the plain forms, not the index-component ones,
-/// since a new component has no reason to be an index.
+/// since a new component has no reason to be an index, and only under the
+/// application's own view roots: a directory outside them is a package's.
 pub(crate) fn view_names_to_create_for_component_tag(
     tag: &str,
     anonymous: &[AnonymousNamespace],
@@ -118,20 +165,30 @@ pub(crate) fn view_names_to_create_for_component_tag(
             names.push(name);
         }
     };
-    for (prefix, directory) in anonymous.iter().filter(|(prefix, _)| !prefix.is_empty()) {
-        if let Some(rest) = strip_tag_prefix(tag, prefix) {
-            push(guess_view_name(rest, directory));
+    let in_view_root = anonymous
+        .iter()
+        .filter(|registration| !registration.directory.ends_with("::"));
+    for registration in in_view_root.clone().filter(|r| !r.prefix.is_empty()) {
+        if let Some(rest) = tag
+            .strip_prefix(registration.prefix.as_str())
+            .and_then(|rest| rest.strip_prefix("::"))
+        {
+            push(guess_view_name(rest, &registration.directory));
         }
     }
     push(guess_view_name(tag, "components"));
-    for (_, directory) in anonymous.iter().filter(|(prefix, _)| prefix.is_empty()) {
+    for registration in in_view_root.filter(|r| r.prefix.is_empty()) {
         if !tag.contains("::") {
-            push(guess_view_name(tag, directory));
+            push(guess_view_name(tag, &registration.directory));
         }
     }
     names
 }
 
+/// The bare tag names (without the `x-` prefix) a Blade file's own view
+/// names make it addressable by: `components.brand.boxes` becomes
+/// `brand.boxes` (so `<x-brand.boxes>` matches it), and a namespaced name
+/// drops the `components.` segment after the namespace the same way
 /// Laravel's `ComponentTagCompiler::guessViewName` inserts it —
 /// `webshop::components.brand.boxes` is what `<x-webshop::brand.boxes>`
 /// compiles to.
@@ -153,15 +210,18 @@ pub(crate) fn component_tag_names(
         if let Some(tag) = component_tag_for_view_name(name) {
             push_tag(tag, &mut tags);
         }
-        for (prefix, directory) in anonymous {
-            let Some(rest) = strip_view_directory(name, directory) else {
+        for registration in anonymous {
+            let Some(rest) = strip_view_directory(name, &registration.directory) else {
                 continue;
             };
+            // A path registered under a prefix also answers to the bare
+            // name, but only after every other registration had its turn,
+            // so the prefixed name is the one that reliably reaches it.
             push_tag(
-                if prefix.is_empty() {
+                if registration.prefix.is_empty() {
                     rest.to_string()
                 } else {
-                    format!("{prefix}::{rest}")
+                    format!("{}::{rest}", registration.prefix)
                 },
                 &mut tags,
             );
@@ -217,7 +277,11 @@ fn strip_view_directory<'a>(view_name: &'a str, directory: &str) -> Option<&'a s
     if directory.is_empty() {
         return Some(view_name);
     }
-    view_name.strip_prefix(directory)?.strip_prefix('.')
+    let rest = view_name.strip_prefix(directory)?;
+    if directory.ends_with("::") {
+        return Some(rest);
+    }
+    rest.strip_prefix('.')
 }
 
 /// The tag name a view makes a component addressable by, or `None` for a
@@ -227,6 +291,9 @@ fn strip_view_directory<'a>(view_name: &'a str, directory: &str) -> Option<&'a s
 /// drops a `components.` segment a package puts its component views under,
 /// since the class behind them sits directly in the registered namespace.
 pub(crate) fn component_tag_for_view_name(view_name: &str) -> Option<String> {
+    if is_anonymous_path_view_name(view_name) {
+        return None;
+    }
     match view_name.split_once("::") {
         Some((namespace, rest)) => {
             let bare = rest.strip_prefix("components.").unwrap_or(rest);
@@ -241,7 +308,8 @@ pub(crate) fn component_tag_for_view_name(view_name: &str) -> Option<String> {
 /// `ComponentTagCompiler::componentClass` tries them — the `components.`
 /// convention first (with the `components.` prefix going after the
 /// namespace when the tag has one), then each registered anonymous
-/// directory whose prefix the tag is written under.
+/// directory whose prefix the tag is written under (and every path
+/// registration, for a tag that names no namespace).
 ///
 /// Each of those is tried as itself, then as its `.index` and repeated-last
 /// segment forms, which is how an index component is addressed by its
@@ -252,21 +320,29 @@ pub(crate) fn view_names_for_component_tag(
 ) -> Vec<String> {
     let mut names = Vec::new();
     push_view_name(guess_view_name(tag, "components"), tag, &mut names);
-    for (prefix, directory) in anonymous {
-        let Some(rest) = strip_tag_prefix(tag, prefix) else {
+    for registration in anonymous {
+        let Some(rest) = strip_tag_prefix(tag, registration) else {
             continue;
         };
-        push_view_name(guess_view_name(rest, directory), rest, &mut names);
+        push_view_name(
+            guess_view_name(rest, &registration.directory),
+            rest,
+            &mut names,
+        );
     }
     names
 }
 
 /// Laravel's `ComponentTagCompiler::guessViewName`: the directory becomes
 /// the view's prefix, and goes after the namespace when the component name
-/// carries one.
+/// carries one.  A directory that is a whole view namespace (`ns::`) is
+/// the view's prefix as it stands.
 fn guess_view_name(component: &str, directory: &str) -> String {
     if directory.is_empty() {
         return component.to_string();
+    }
+    if directory.ends_with("::") {
+        return format!("{directory}{component}");
     }
     match component.split_once("::") {
         Some((namespace, rest)) => format!("{namespace}::{directory}.{rest}"),
@@ -290,17 +366,23 @@ fn push_view_name(view_name: String, component: &str, names: &mut Vec<String>) {
     }
 }
 
-/// The component name a tag addresses under a registered prefix, or `None`
-/// for a tag written under a different one.
+/// The component name a tag addresses under a registration, or `None` for
+/// a tag the registration does not reach.
 ///
-/// A prefix-less registration is reached by every tag that names no
-/// namespace of its own; one written under some other namespace belongs to
-/// that namespace instead.
-fn strip_tag_prefix<'a>(tag: &'a str, prefix: &str) -> Option<&'a str> {
-    if prefix.is_empty() {
-        return (!tag.contains("::")).then_some(tag);
+/// A tag written under a namespace reaches only the registrations made for
+/// that prefix.  One that names no namespace reaches a prefix-less
+/// registration, and every path registration whatever its prefix, which
+/// `guessAnonymousComponentUsingPaths` only skips for a tag written under
+/// another namespace.
+fn strip_tag_prefix<'a>(tag: &'a str, registration: &AnonymousNamespace) -> Option<&'a str> {
+    if !tag.contains("::") {
+        return (registration.prefix.is_empty() || registration.path).then_some(tag);
     }
-    tag.strip_prefix(prefix)?.strip_prefix("::")
+    if registration.prefix.is_empty() {
+        return None;
+    }
+    tag.strip_prefix(registration.prefix.as_str())?
+        .strip_prefix("::")
 }
 
 #[cfg(test)]
@@ -311,7 +393,11 @@ mod tests {
     const NONE: &[AnonymousNamespace] = &[];
 
     fn registered(prefix: &str, directory: &str) -> Vec<AnonymousNamespace> {
-        vec![(prefix.to_string(), directory.to_string())]
+        vec![AnonymousNamespace::new(prefix, directory, false)]
+    }
+
+    fn registered_path(prefix: &str, directory: &str) -> Vec<AnonymousNamespace> {
+        vec![AnonymousNamespace::new(prefix, directory, true)]
     }
 
     #[test]
@@ -371,7 +457,7 @@ mod tests {
     #[test]
     fn a_prefix_less_registration_addresses_its_directory_bare() {
         assert_eq!(
-            component_tag_names(&["ui.alert".to_string()], &registered("", "ui")),
+            component_tag_names(&["ui.alert".to_string()], &registered_path("", "ui")),
             vec!["alert"]
         );
     }
@@ -441,12 +527,57 @@ mod tests {
     #[test]
     fn a_prefix_less_registration_ignores_a_namespaced_tag() {
         assert_eq!(
-            view_names_for_component_tag("mail::message", &registered("", "ui")),
+            view_names_for_component_tag("mail::message", &registered_path("", "ui")),
             vec![
                 "mail::components.message",
                 "mail::components.message.index",
                 "mail::components.message.message"
             ]
+        );
+    }
+
+    /// `guessAnonymousComponentUsingPaths` lets a tag that names no
+    /// namespace through to every path, so a path registered under a prefix
+    /// still answers to the bare name.  A namespace registration does not.
+    #[test]
+    fn a_prefixed_path_also_answers_a_bare_tag() {
+        assert!(
+            view_names_for_component_tag("button", &registered_path("flux", "ui"))
+                .contains(&"ui.button".to_string())
+        );
+        assert!(
+            !view_names_for_component_tag("button", &registered("flux", "ui"))
+                .contains(&"ui.button".to_string())
+        );
+        assert!(
+            !view_names_for_component_tag("other::button", &registered_path("flux", "ui"))
+                .contains(&"ui.button".to_string())
+        );
+    }
+
+    /// A path outside every view root is read under a view namespace of its
+    /// own, which addresses its templates directly and names no tag itself.
+    #[test]
+    fn a_path_outside_the_view_roots_is_read_under_its_own_namespace() {
+        let namespace = anonymous_path_view_namespace("flux");
+        let directory = format!("{namespace}::");
+        let registration = registered_path("flux", &directory);
+        assert_eq!(
+            view_names_for_component_tag("flux::button", &registration)[3..],
+            [
+                format!("{namespace}::button"),
+                format!("{namespace}::button.index"),
+                format!("{namespace}::button.button"),
+            ]
+        );
+        assert_eq!(
+            component_tag_names(&[format!("{namespace}::button.index")], &registration),
+            vec!["flux::button", "flux::button.index"]
+        );
+        assert_eq!(
+            view_names_to_create_for_component_tag("flux::button", &registration),
+            vec!["flux::components.button"],
+            "a package's own directory is no place to create a component"
         );
     }
 }

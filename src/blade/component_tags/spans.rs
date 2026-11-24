@@ -21,7 +21,7 @@ pub(crate) struct TagSpan {
     pub(crate) closed: bool,
 }
 
-/// A closing tag, `</x-…>` or `</livewire:…>`.
+/// A closing tag, `</x-…>`, `</flux:…>` or `</livewire:…>`.
 struct TagCloser {
     kind: TagKind,
     /// The name's own bytes, indexing the masked source it was read from.
@@ -32,7 +32,7 @@ struct TagCloser {
 
 /// The closing prefixes a component tag is written under, the closing
 /// counterparts of [`TAG_PREFIXES`].
-const CLOSING_TAG_PREFIXES: [&str; 2] = ["</livewire:", "</x-"];
+const CLOSING_TAG_PREFIXES: [&str; 3] = ["</livewire:", "</flux:", "</x-"];
 
 /// The component tags of a template, read once and paired up.
 struct PairedTags<'a> {
@@ -74,7 +74,7 @@ fn pair_tags(content: &str) -> Option<PairedTags<'_>> {
             continue;
         }
 
-        // Closing tag: `</x-…>` or `</livewire:…>`.
+        // Closing tag: `</x-…>`, `</flux:…>` or `</livewire:…>`.
         if bytes.get(i + 1) == Some(&b'/') {
             let Some(prefix) = TAG_PREFIXES
                 .iter()
@@ -97,7 +97,7 @@ fn pair_tags(content: &str) -> Option<PairedTags<'_>> {
             continue;
         }
 
-        // Opening tag: `<x-…>` or `<livewire:…>`.
+        // Opening tag: `<x-…>`, `<flux:…>` or `<livewire:…>`.
         let Some(prefix) = TAG_PREFIXES
             .iter()
             .find(|prefix| masked[i..].starts_with(**prefix))
@@ -128,7 +128,7 @@ fn pair_tags(content: &str) -> Option<PairedTags<'_>> {
     }
 
     let pairing = pairing::pair(tokens, |open: &TagSpan, closer: &TagCloser| {
-        closer_matches(open.kind, &open.name, &masked[closer.name.clone()])
+        closer_matches(open.kind, &open.name, closer, &masked[closer.name.clone()])
     });
     Some(PairedTags {
         masked,
@@ -139,15 +139,15 @@ fn pair_tags(content: &str) -> Option<PairedTags<'_>> {
 
 /// Which kind of tag one of [`TAG_PREFIXES`] opens.
 fn tag_kind_of(prefix: &str) -> TagKind {
-    if prefix == TagKind::Livewire.opening() {
-        TagKind::Livewire
-    } else {
-        TagKind::Blade
-    }
+    TagKind::ALL
+        .into_iter()
+        .find(|kind| kind.opening() == prefix)
+        .unwrap_or(TagKind::Blade)
 }
 
 /// Every component tag in `content`, in document order:
-/// `<x-…>`…`</x-…>` and `<livewire:…>`…`</livewire:…>`, self-closing and
+/// `<x-…>`…`</x-…>`, `<flux:…>`…`</flux:…>` and
+/// `<livewire:…>`…`</livewire:…>`, self-closing and
 /// unclosed ones included.
 ///
 /// A tag ended by a closer that is not its own, or never ended at all,
@@ -195,11 +195,11 @@ pub(crate) fn tag_spans(content: &str) -> Vec<TagSpan> {
 /// `</x-slot>`, with `</x-slot:title>`, and even with a closer naming a
 /// different slot (the compiler's `@endslot` rewrite never reads the
 /// closing tag's name).
-fn closer_matches(kind: TagKind, name: &str, closer_name: &str) -> bool {
+fn closer_matches(kind: TagKind, name: &str, closer: &TagCloser, closer_name: &str) -> bool {
     if kind == TagKind::Blade && is_slot_tag_name(name) {
-        is_slot_tag_name(closer_name)
+        closer.kind == TagKind::Blade && is_slot_tag_name(closer_name)
     } else {
-        name == closer_name
+        kind == closer.kind && name == closer_name
     }
 }
 

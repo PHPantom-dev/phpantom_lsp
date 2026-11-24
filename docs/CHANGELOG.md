@@ -7,7 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+#### Blade templates
+
+- **Flux and Filament components.** Flux's `<flux:button>` tags complete, offer the attributes the component declares, jump to its template in the package, and are reported when no component has the name. Components a package registers by directory, such as Flux's, now work under their `<x-prefix::…>` spelling too.
+
 ### Fixed
+
+- **No unknown-component report for a bare tag a package path answers.** `<x-badge>` reaches a template a package registered with `Blade::anonymousComponentPath()` under a prefix, as Laravel resolves it, so it is no longer reported as unknown.
 
 - **Claude Code no longer sees outdated diagnostics after an edit.** Results from before an edit, at line numbers that no longer match the file, are not reported to the agent as new findings.
 - **Claude Code follows files changed by shell commands.** A file rewritten or deleted by a command the agent runs, such as a formatter or `git checkout`, is picked up within a second instead of keeping its old contents until the agent next edits it.

@@ -1,4 +1,4 @@
-//! Whether a `<x-…>` or `<livewire:…>` tag names a component the project
+//! Whether a `<x-…>`, `<flux:…>` or `<livewire:…>` tag names a component the project
 //! has.
 //!
 //! A tag resolves through the same index completion and go-to-definition
@@ -68,9 +68,6 @@ pub(crate) struct ComponentIndex {
     /// Tag prefixes whose components can be enumerated: class component
     /// namespaces, anonymous component namespaces, and view namespaces.
     known_prefixes: Vec<String>,
-    /// Prefixes of anonymous component directories outside every view
-    /// root, whose templates the index holds no name for.
-    unmapped_prefixes: Vec<String>,
     aliases: Vec<String>,
     open_alias_prefixes: Vec<String>,
     /// `None` when Livewire tags cannot be judged at all.
@@ -90,7 +87,7 @@ impl Backend {
     /// `with_livewire` says a template has a Livewire tag to judge.
     pub(crate) fn component_index(&self, with_livewire: bool) -> ComponentIndex {
         let discovery = self.blade_discovery();
-        let (anonymous, unmapped) = self.anonymous_component_registrations();
+        let anonymous = self.anonymous_component_namespaces();
         let (
             known_prefixes,
             aliases,
@@ -156,7 +153,6 @@ impl Backend {
             discovery,
             anonymous,
             known_prefixes,
-            unmapped_prefixes: unmapped.into_iter().map(|(prefix, _)| prefix).collect(),
             aliases,
             open_alias_prefixes,
             livewire_aliases: livewire_judgeable.then_some(livewire_aliases),
@@ -201,13 +197,9 @@ impl ComponentIndex {
         if name.is_empty() {
             return false;
         }
-        match kind {
-            TagKind::Blade => {
-                self.is_unknown_blade(name) && !self.blade_class_exists(backend, name)
-            }
-            TagKind::Livewire => {
-                self.is_unknown_livewire(name) && !self.livewire_class_exists(backend, name)
-            }
+        match kind.blade_name(name) {
+            Some(name) => self.is_unknown_blade(&name) && !self.blade_class_exists(backend, &name),
+            None => self.is_unknown_livewire(name) && !self.livewire_class_exists(backend, name),
         }
     }
 
@@ -257,19 +249,14 @@ impl ComponentIndex {
         }
         match name.split_once("::") {
             Some((prefix, _)) => {
-                prefix != MAIL_PREFIX
-                    && self.known_prefixes.iter().any(|known| known == prefix)
-                    && !self.unmapped_prefixes.iter().any(|open| open == prefix)
+                prefix != MAIL_PREFIX && self.known_prefixes.iter().any(|known| known == prefix)
             }
-            None => {
-                !self.unmapped_prefixes.iter().any(String::is_empty)
-                    && !self.open_alias_prefixes.iter().any(|prefix| {
-                        prefix.is_empty()
-                            || name
-                                .strip_prefix(prefix.as_str())
-                                .is_some_and(|rest| rest.starts_with('-'))
-                    })
-            }
+            None => !self.open_alias_prefixes.iter().any(|prefix| {
+                prefix.is_empty()
+                    || name
+                        .strip_prefix(prefix.as_str())
+                        .is_some_and(|rest| rest.starts_with('-'))
+            }),
         }
     }
 
@@ -324,7 +311,7 @@ impl ComponentIndex {
     /// suggesting what a misspelt one meant.
     pub(crate) fn known_names(&self, kind: TagKind) -> Vec<String> {
         let mut names: Vec<String> = match kind {
-            TagKind::Blade => {
+            TagKind::Blade | TagKind::Flux => {
                 let views: Vec<String> = self.discovery.views.keys().cloned().collect();
                 self.discovery
                     .components
@@ -332,6 +319,7 @@ impl ComponentIndex {
                     .cloned()
                     .chain(component_tag_names(&views, &self.anonymous))
                     .chain(self.aliases.iter().cloned())
+                    .filter_map(|name| Some(kind.tag_name_for(&name)?.to_string()))
                     .collect()
             }
             TagKind::Livewire => self

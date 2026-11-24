@@ -2,7 +2,7 @@ use super::{ComponentBinding, ComponentParameter, ComponentResolver, ComponentTa
 
 use crate::blade::component_tags::{self, TagKind, camel_case_attr_name};
 
-/// A `<x-…>` / `<livewire:…>` tag opening (or its closing counterpart)
+/// A `<x-…>` / `<flux:…>` / `<livewire:…>` tag opening (or its closing counterpart)
 /// found at the current scan position.
 pub(super) struct ComponentTag {
     /// Characters from the `<` up to (not including) the first character
@@ -28,9 +28,9 @@ impl ComponentTag {
             return None;
         }
         let resolver = components?;
-        match self.kind {
-            TagKind::Livewire => resolver.livewire_component(&self.name),
-            TagKind::Blade => resolver.x_component(&self.name),
+        match self.kind.blade_name(&self.name) {
+            Some(name) => resolver.x_component(&name),
+            None => resolver.livewire_component(&self.name),
         }
     }
 
@@ -271,7 +271,7 @@ pub(super) fn component_tag_at(rem: &[char]) -> Option<ComponentTag> {
     }
     let closing = rem.get(1) == Some(&'/');
     let after_angle = 1 + usize::from(closing);
-    for kind in [TagKind::Blade, TagKind::Livewire] {
+    for kind in TagKind::ALL {
         let prefix = kind.prefix();
         if !starts_with_ascii(&rem[after_angle..], prefix) {
             continue;

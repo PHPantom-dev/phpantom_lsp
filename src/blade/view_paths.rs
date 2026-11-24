@@ -178,6 +178,9 @@ impl crate::Backend {
                 &res.namespace,
             );
         }
+        for (namespace, path) in self.anonymous_component_view_roots() {
+            match_root(&path, &|| Some(path.clone()), &namespace);
+        }
         names
     }
 }

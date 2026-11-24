@@ -1,6 +1,6 @@
 //! Go-to-definition on a Blade component tag.
 //!
-//! `<x-alert>` and `<livewire:counter>` are HTML, and the virtual PHP the
+//! `<x-alert>`, `<flux:button>` and `<livewire:counter>` are HTML, and the virtual PHP the
 //! rest of go-to-definition works from emits a tag's call where the tag
 //! *closes* rather than where its name is written, so the tag name has no
 //! position in it to resolve from. This reads the raw Blade buffer
@@ -9,7 +9,7 @@
 use tower_lsp_server::gen_lsp_types::{Location, Position, Range};
 
 use crate::Backend;
-use crate::blade::component_tags::{TagCursor, TagKind, tag_context_at};
+use crate::blade::component_tags::{TagCursor, tag_context_at};
 use crate::text_position::position_to_byte_offset;
 
 impl Backend {
@@ -27,14 +27,14 @@ impl Backend {
         if ctx.cursor != TagCursor::Name || ctx.name.is_empty() {
             return None;
         }
-        match ctx.kind {
-            TagKind::Livewire => self
+        match ctx.kind.blade_name(&ctx.name) {
+            None => self
                 .livewire_component_fqn(&ctx.name)
                 .and_then(|fqn| self.class_declaration_location(&fqn)),
-            TagKind::Blade => self
-                .blade_component_fqn(&ctx.name)
+            Some(name) => self
+                .blade_component_fqn(&name)
                 .and_then(|fqn| self.class_declaration_location(&fqn))
-                .or_else(|| self.anonymous_component_template(&ctx.name)),
+                .or_else(|| self.anonymous_component_template(&name)),
         }
     }
 

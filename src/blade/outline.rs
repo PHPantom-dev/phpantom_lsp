@@ -72,11 +72,11 @@ impl Backend {
         let anonymous = self.anonymous_component_namespaces();
         tags.into_iter()
             .map(|tag| {
-                let detail = match tag.kind {
-                    TagKind::Livewire => self.livewire_component_fqn(&tag.name),
-                    TagKind::Blade => self
-                        .blade_component_fqn(&tag.name)
-                        .or_else(|| self.anonymous_component_view(&tag.name, &anonymous)),
+                let detail = match tag.kind.blade_name(&tag.name) {
+                    None => self.livewire_component_fqn(&tag.name),
+                    Some(name) => self
+                        .blade_component_fqn(&name)
+                        .or_else(|| self.anonymous_component_view(&name, &anonymous)),
                 };
                 // The legacy `<x-slot name="footer">` is the same slot as
                 // `<x-slot:footer>`, so it is listed the same way.

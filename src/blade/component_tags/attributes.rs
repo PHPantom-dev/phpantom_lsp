@@ -246,7 +246,8 @@ pub(super) fn scan_tag_attributes(
 /// name="title">`) written as a direct child of one of `tag_names`'s
 /// component tags, anywhere in `content`.
 ///
-/// A slot's receiving component is its *nearest* enclosing `<x-…>` tag,
+/// A slot's receiving component is its *nearest* enclosing `<x-…>` (or
+/// `<flux:…>`) tag,
 /// the same scoping Blade's own compiler applies: `ComponentTagCompiler`
 /// lowers `<x-slot…>`/`</x-slot>` to `@slot(...)`/`@endslot` in a pass
 /// that runs before component tags are compiled, and the runtime
@@ -267,10 +268,17 @@ pub(crate) fn scan_component_tag_slots(content: &str, tag_names: &[String]) -> V
     }
     let masked = mask_inert_regions(content, true);
     let bytes = masked.as_bytes();
-    // Currently open `<x-…>` component tags, nearest last. `<x-slot…>`
-    // itself is never pushed here: it is not a component boundary, so a
-    // slot cannot receive another slot.
-    let mut stack: Vec<(&str, bool)> = Vec::new();
+    // Currently open component tags by the name the index knows them by,
+    // nearest last. `<x-slot…>` itself is never pushed here: it is not a
+    // component boundary, so a slot cannot receive another slot.
+    let mut stack: Vec<(Cow<'_, str>, bool)> = Vec::new();
+    // The kind of component tag `at` opens, with the name's start.
+    let component_tag = |at: usize| {
+        [TagKind::Blade, TagKind::Flux]
+            .into_iter()
+            .find(|kind| masked[at..].starts_with(kind.prefix()))
+            .map(|kind| (kind, at + kind.prefix().len()))
+    };
     let mut names: Vec<String> = Vec::new();
     let mut i = 0;
     while i < bytes.len() {
@@ -279,17 +287,17 @@ pub(crate) fn scan_component_tag_slots(content: &str, tag_names: &[String]) -> V
             continue;
         }
         if bytes.get(i + 1) == Some(&b'/') {
-            if !masked[i + 2..].starts_with("x-") {
+            let Some((kind, name_start)) = component_tag(i + 2) else {
                 i += 1;
                 continue;
-            }
-            let name_start = i + 2 + "x-".len();
+            };
             let j = tag_name_end(bytes, name_start);
             let Some(close) = find_byte(bytes, j, b'>') else {
                 break;
             };
-            let name = &masked[name_start..j];
-            if !is_slot_tag_name(name)
+            let written = &masked[name_start..j];
+            if !(kind == TagKind::Blade && is_slot_tag_name(written))
+                && let Some(name) = kind.blade_name(written)
                 && let Some(pos) = stack.iter().rposition(|(open, _)| *open == name)
             {
                 stack.truncate(pos);
@@ -301,24 +309,26 @@ pub(crate) fn scan_component_tag_slots(content: &str, tag_names: &[String]) -> V
             i += 1;
             continue;
         }
-        if !masked[i + 1..].starts_with("x-") {
+        let Some((kind, name_start)) = component_tag(i + 1) else {
             i += 1;
             continue;
-        }
-        let name_start = i + 1 + "x-".len();
+        };
         let j = tag_name_end(bytes, name_start);
         let tag_name = &masked[name_start..j];
         let lexed = lex_tag_attributes(&masked, j);
-        if is_slot_tag_name(tag_name) {
+        if kind == TagKind::Blade && is_slot_tag_name(tag_name) {
             if let Some((_, true)) = stack.last()
                 && let Some(slot_name) = slot_tag_name(&masked, tag_name, &lexed)
                 && !names.contains(&slot_name)
             {
                 names.push(slot_name);
             }
-        } else if lexed.closed && !lexed.self_closing {
-            let is_match = tag_names.iter().any(|n| n == tag_name);
-            stack.push((tag_name, is_match));
+        } else if lexed.closed
+            && !lexed.self_closing
+            && let Some(name) = kind.blade_name(tag_name)
+        {
+            let is_match = tag_names.iter().any(|n| *n == name);
+            stack.push((name, is_match));
         }
         i = lexed.end;
     }

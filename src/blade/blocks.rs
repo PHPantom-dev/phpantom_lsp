@@ -401,7 +401,7 @@ fn view_names(content: &str, directive: &str, arguments: &str) -> Vec<String> {
 /// Whether the template renders a component tag, whose own template is not
 /// something this scan can follow.
 fn has_component_tag(content: &str) -> bool {
-    content.contains("<x-") || content.contains("<livewire:")
+    content.contains("<x-") || content.contains("<flux:") || content.contains("<livewire:")
 }
 
 /// A section or stack name the cursor is in the middle of writing.

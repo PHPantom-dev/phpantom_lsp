@@ -108,17 +108,17 @@ impl Backend {
             if !can_create {
                 continue;
             }
-            let creations: Vec<(String, Vec<NewFile>)> = match tag.kind {
-                TagKind::Blade => [
-                    self.anonymous_component_files(&tag.name, &index)
+            let creations: Vec<(String, Vec<NewFile>)> = match tag.kind.blade_name(&tag.name) {
+                Some(name) => [
+                    self.anonymous_component_files(&name, &index)
                         .map(|files| (format!("Create anonymous component '{}'", tag.name), files)),
-                    self.class_component_files(&tag.name, &index)
+                    self.class_component_files(&name, &index)
                         .map(|files| (format!("Create component class for '{}'", tag.name), files)),
                 ]
                 .into_iter()
                 .flatten()
                 .collect(),
-                TagKind::Livewire => self
+                None => self
                     .livewire_component_files(&tag.name)
                     .map(|files| (format!("Create Livewire component '{}'", tag.name), files))
                     .into_iter()

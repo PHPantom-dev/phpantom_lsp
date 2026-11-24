@@ -30,7 +30,7 @@ const MISMATCHED_CODE: &str = "mismatched_blade_component_tag";
 const UNEXPECTED_CODE: &str = "unexpected_blade_component_tag";
 /// A tag the template never closes.
 const UNCLOSED_CODE: &str = "unclosed_blade_component_tag";
-/// An `<x-…>` tag no class or template answers to.
+/// An `<x-…>` or `<flux:…>` tag no class or template answers to.
 pub(crate) const UNKNOWN_BLADE_CODE: &str = "invalid_blade_component";
 /// A `<livewire:…>` tag no component answers to.
 pub(crate) const UNKNOWN_LIVEWIRE_CODE: &str = "invalid_livewire_component";
@@ -46,6 +46,10 @@ pub(crate) fn unknown_component_report(kind: TagKind, name: &str) -> (&'static s
         TagKind::Livewire => (
             UNKNOWN_LIVEWIRE_CODE,
             format!("Unknown Livewire component '{name}'"),
+        ),
+        TagKind::Flux => (
+            UNKNOWN_BLADE_CODE,
+            format!("Unknown Flux component '{name}'"),
         ),
     }
 }

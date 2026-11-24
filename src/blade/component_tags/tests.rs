@@ -541,3 +541,49 @@ fn a_named_slot_closed_under_its_own_name_reports_nothing() {
     assert!(tag_report("<x-card>\n<x-slot:title>\nHi\n</x-slot:title>\n</x-card>\n").is_empty());
     assert!(tag_report("<x-card>\n<x-slot:title>\nHi\n</x-slot:footer>\n</x-card>\n").is_empty());
 }
+
+#[test]
+fn a_flux_tag_is_referenced_as_the_flux_component_it_names() {
+    let content = r#"<flux:button variant="primary">Save</flux:button><x-flux::badge />"#;
+    assert_eq!(
+        referenced_tags(content),
+        vec!["x-flux::button", "x-flux::badge"]
+    );
+    assert_eq!(
+        referenced_component_tags(content),
+        vec!["flux::button", "flux::badge"]
+    );
+}
+
+#[test]
+fn a_flux_opening_is_its_own_kind() {
+    assert_eq!(
+        name_context("<flux:but|"),
+        Some((TagKind::Flux, "but".to_string(), "but".to_string()))
+    );
+}
+
+#[test]
+fn a_flux_tags_attributes_are_scanned_under_its_flux_name() {
+    let content = r#"<flux:button variant="primary" />"#;
+    let tags = ["flux::button".to_string()];
+    assert!(may_contain_component_tag(
+        content,
+        &component_tag_needles(&tags)
+    ));
+    let calls = scan_component_tag_calls(content, &tags, &no_arguments);
+    assert_eq!(calls.len(), 1);
+    assert_eq!(names(&calls[0].literal), vec!["variant"]);
+}
+
+#[test]
+fn a_flux_tag_pairs_only_with_a_flux_closer() {
+    let blade = "<flux:modal>\n<p>hi</p>\n</flux:modal>\n";
+    assert_eq!(tag_bodies(blade), [(0, blade.len() - 1)]);
+    assert_eq!(tag_spans(blade)[0].kind, TagKind::Flux);
+    // The same name under another prefix is another component.
+    assert_eq!(
+        tag_report("<flux:modal>\n</x-modal>\n"),
+        ["mismatched </x-modal>/<x-modal>"]
+    );
+}

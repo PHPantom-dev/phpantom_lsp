@@ -228,7 +228,13 @@ impl Backend {
 
     /// Every view name in the project, sorted.
     pub(crate) fn blade_view_names(&self) -> Vec<String> {
-        let mut names: Vec<String> = self.blade_discovery().views.keys().cloned().collect();
+        let mut names: Vec<String> = self
+            .blade_discovery()
+            .views
+            .keys()
+            .filter(|name| !super::component_names::is_anonymous_path_view_name(name))
+            .cloned()
+            .collect();
         names.sort();
         names
     }
@@ -401,7 +407,8 @@ impl Backend {
     }
 
     /// Every configured view root and provider-registered view directory,
-    /// scanned into dot-notation names.
+    /// scanned into dot-notation names, plus the anonymous component paths
+    /// outside them under the namespace each is read by.
     fn scan_view_names(&self) -> HashMap<String, PathBuf> {
         let mut views = HashMap::new();
         for root in self.laravel_view_roots().iter() {
@@ -409,6 +416,9 @@ impl Backend {
         }
         for res in &self.laravel.provider_resources.read().view_dirs {
             merge_view_root(&res.path, &res.namespace, &mut views);
+        }
+        for (namespace, path) in self.anonymous_component_view_roots() {
+            merge_view_root(&path, &namespace, &mut views);
         }
         views
     }

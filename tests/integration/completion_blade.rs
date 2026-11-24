@@ -1,12 +1,13 @@
 //! Completion of the parts of a Blade template that are not PHP: the
 //! directive name after an `@`, and the component name and attribute names
-//! of a `<x-…>` / `<livewire:…>` tag.
+//! of a `<x-…>` / `<flux:…>` / `<livewire:…>` tag.
 
 use crate::common::{
-    BLADE_COMPONENT_COMPOSER, ILLUMINATE_COMPONENT_STUB, LIVEWIRE_COMPONENT_STUB,
+    BLADE_COMPONENT_COMPOSER, FLUX_FILES, ILLUMINATE_COMPONENT_STUB, LIVEWIRE_COMPONENT_STUB,
     complete_at_opened_with_trigger, completion_response, create_psr4_workspace,
-    create_test_backend, labels, open_document, workspace_uri,
+    create_test_backend, initialize_with_resource_operations, labels, open_document, workspace_uri,
 };
+use tower_lsp_server::LanguageServer;
 use tower_lsp_server::gen_lsp_types::*;
 
 #[tokio::test]
@@ -335,6 +336,49 @@ async fn a_livewire_opening_offers_the_livewire_index() {
         labels,
         vec!["counter"],
         "only Livewire classes answer a <livewire:…> tag"
+    );
+}
+
+/// A Laravel application with Flux's templates registered the way Flux's
+/// provider registers them, and `template` open at `page.blade.php`.
+async fn flux_workspace(template: &str) -> (phpantom_lsp::Backend, tempfile::TempDir, Uri) {
+    let mut files = FLUX_FILES.to_vec();
+    files.push(("resources/views/page.blade.php", template));
+    let (backend, dir) = create_psr4_workspace(
+        r#"{"require": {"laravel/framework": "^11.0"}, "autoload": {"psr-4": {"App\\": "app/"}}}"#,
+        &files,
+    );
+    initialize_with_resource_operations(&backend).await;
+    backend.initialized(InitializedParams {}).await;
+    let uri = workspace_uri(&backend, "resources/views/page.blade.php");
+    open_document(&backend, &uri, "blade", template).await;
+    (backend, dir, uri)
+}
+
+/// A `<flux:` tag names Flux's components, written without the namespace
+/// the `<x-flux::…>` spelling carries.
+#[tokio::test]
+async fn a_flux_opening_offers_the_flux_components() {
+    let (backend, _dir, uri) = flux_workspace("<flux:").await;
+    let items = complete_typed(&backend, &uri, 0, 6).await;
+    assert_eq!(labels(&items), vec!["badge", "button", "button.index"]);
+
+    let (backend, _dir, uri) = flux_workspace("<x-flux::b").await;
+    let items = complete_typed(&backend, &uri, 0, 10).await;
+    assert_eq!(
+        labels(&items),
+        vec!["flux::badge", "flux::button", "flux::button.index"]
+    );
+}
+
+#[tokio::test]
+async fn a_flux_components_props_are_its_attributes() {
+    let (backend, _dir, uri) = flux_workspace("<flux:button ").await;
+    let items = complete_typed(&backend, &uri, 0, 13).await;
+    let labels = labels(&items);
+    assert!(
+        labels.contains(&"variant") && labels.contains(&"icon-trailing"),
+        "expected the template's @props entries, got: {labels:?}"
     );
 }
 

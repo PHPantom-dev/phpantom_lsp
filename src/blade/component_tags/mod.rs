@@ -51,29 +51,75 @@ pub(crate) struct ComponentTagCall {
 }
 
 /// The prefixes a component tag is written under, longest first so
-/// neither shadows the other.
-const TAG_PREFIXES: [&str; 2] = ["<livewire:", "<x-"];
+/// none shadows another.
+const TAG_PREFIXES: [&str; 3] = ["<livewire:", "<flux:", "<x-"];
 
 /// Which index answers a component tag's name.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TagKind {
     Blade,
     Livewire,
+    /// Flux's `<flux:button>`, which its own precompiler rewrites to the
+    /// Blade component `flux::button` before Blade's tag compiler runs.
+    /// Nothing a provider registers says so, which is why it is known by
+    /// name the way `<livewire:…>` is.
+    Flux,
 }
 
 impl TagKind {
+    pub(crate) const ALL: [TagKind; 3] = [TagKind::Blade, TagKind::Livewire, TagKind::Flux];
+
     /// The opening a tag of this kind is written with.
     pub(crate) fn opening(self) -> &'static str {
         match self {
             TagKind::Blade => "<x-",
             TagKind::Livewire => "<livewire:",
+            TagKind::Flux => "<flux:",
         }
     }
 
     /// The prefix a tag of this kind carries before the component name,
-    /// without the `<`: `x-`, `livewire:`.
+    /// without the `<`: `x-`, `livewire:`, `flux:`.
     pub(crate) fn prefix(self) -> &'static str {
         &self.opening()[1..]
+    }
+
+    /// The name the Blade component index knows a tag of this kind by
+    /// (what follows `<x-` in the equivalent tag), or `None` for a
+    /// Livewire tag, which names a Livewire component instead.
+    pub(crate) fn blade_name(self, name: &str) -> Option<Cow<'_, str>> {
+        match self {
+            TagKind::Blade => Some(Cow::Borrowed(name)),
+            TagKind::Flux => Some(Cow::Owned(format!("{FLUX_NAMESPACE}::{name}"))),
+            TagKind::Livewire => None,
+        }
+    }
+
+    /// The tag kind and name a Blade component name is written with, the
+    /// inverse of [`Self::blade_name`] for a tag written as `kind`: a Flux
+    /// tag can only name a Flux component.
+    pub(crate) fn tag_name_for(self, blade_name: &str) -> Option<&str> {
+        match self {
+            TagKind::Blade => Some(blade_name),
+            TagKind::Flux => blade_name
+                .strip_prefix(FLUX_NAMESPACE)
+                .and_then(|rest| rest.strip_prefix("::")),
+            TagKind::Livewire => None,
+        }
+    }
+}
+
+/// The component namespace `<flux:…>` tags are read in.
+pub(crate) const FLUX_NAMESPACE: &str = "flux";
+
+/// The key a tag written as `tag` (`x-alert`, `flux:button`,
+/// `livewire:counter`) is resolved and cached under: a Flux tag is keyed
+/// as the `<x-flux::…>` tag it stands for, so every tag the Blade
+/// component index answers is an `x-` key.
+pub(crate) fn component_key(tag: &str) -> Cow<'_, str> {
+    match tag.strip_prefix(TagKind::Flux.prefix()) {
+        Some(name) => Cow::Owned(format!("x-{FLUX_NAMESPACE}::{name}")),
+        None => Cow::Borrowed(tag),
     }
 }
 
@@ -111,7 +157,7 @@ pub(crate) fn tag_context_at(content: &str, offset: usize) -> Option<TagContext>
     let before = content.get(..offset)?;
     // The nearest opening before the cursor is the tag it could be inside;
     // a closing tag is spelled `</x-…`, so it never matches.
-    let (start, kind) = [TagKind::Blade, TagKind::Livewire]
+    let (start, kind) = TagKind::ALL
         .into_iter()
         .filter_map(|kind| before.rfind(kind.opening()).map(|at| (at, kind)))
         .max_by_key(|(at, _)| *at)?;
@@ -176,7 +222,8 @@ pub(crate) fn tag_context_at(content: &str, offset: usize) -> Option<TagContext>
 }
 
 /// Every distinct component tag referenced by an occurrence in `content`,
-/// with the prefix it was written under (`x-alert`, `livewire:counter`).
+/// as the [`component_key`] it resolves under (`x-alert`,
+/// `x-flux::button` for `<flux:button>`, `livewire:counter`).
 ///
 /// Closing tags are skipped: an opening tag is what names a component, and
 /// a self-closing one has no closing tag to find it by.
@@ -199,7 +246,8 @@ pub(crate) fn referenced_tags(content: &str) -> Vec<String> {
         let name_start = i + prefix.len();
         let j = tag_name_end(bytes, name_start);
         if j > name_start {
-            let tag = format!("{}{}", &prefix[1..], &masked[name_start..j]);
+            let written = format!("{}{}", &prefix[1..], &masked[name_start..j]);
+            let tag = component_key(&written).into_owned();
             if !tags.contains(&tag) {
                 tags.push(tag);
             }
@@ -209,9 +257,11 @@ pub(crate) fn referenced_tags(content: &str) -> Vec<String> {
     tags
 }
 
-/// Every distinct tag name referenced by an `<x-…>` occurrence in
-/// `content`. Used in the reverse direction from [`scan_component_tag_calls`]:
-/// given a file that was just edited, which components does it call?
+/// Every distinct Blade component name referenced by an `<x-…>` or
+/// `<flux:…>` occurrence in `content`, as the index knows it (`alert`,
+/// `flux::button`). Used in the reverse direction from
+/// [`scan_component_tag_calls`]: given a file that was just edited, which
+/// components does it call?
 pub(crate) fn referenced_component_tags(content: &str) -> Vec<String> {
     referenced_tags(content)
         .into_iter()
@@ -219,15 +269,23 @@ pub(crate) fn referenced_component_tags(content: &str) -> Vec<String> {
         .collect()
 }
 
-/// The `<x-…>` openings that could name one of `tag_names`, for the
-/// cheap rejection test [`may_contain_component_tag`] applies.
+/// The `<x-…>` (and `<flux:…>`) openings that could name one of
+/// `tag_names`, for the cheap rejection test [`may_contain_component_tag`]
+/// applies.
 ///
 /// Built once per component rather than per candidate file: a bulk
 /// refresh pass tests one component's tags against every Blade file in
 /// the workspace, and [`scan_component_tag_calls`] masks the whole file
 /// before it can answer, which is far more than a rejection needs.
 pub(crate) fn component_tag_needles(tag_names: &[String]) -> Vec<String> {
-    tag_names.iter().map(|name| format!("<x-{name}")).collect()
+    let mut needles: Vec<String> = tag_names.iter().map(|name| format!("<x-{name}")).collect();
+    needles.extend(
+        tag_names
+            .iter()
+            .filter_map(|name| TagKind::Flux.tag_name_for(name))
+            .map(|name| format!("<flux:{name}")),
+    );
+    needles
 }
 
 /// Whether `content` is worth handing to [`scan_component_tag_calls`].
@@ -238,14 +296,15 @@ pub(crate) fn component_tag_needles(tag_names: &[String]) -> Vec<String> {
 /// the real scan, so a `true` here can still scan to nothing while a
 /// `false` cannot hide a call.
 pub(crate) fn may_contain_component_tag(content: &str, needles: &[String]) -> bool {
-    content.contains("<x-")
+    (content.contains("<x-") || content.contains("<flux:"))
         && needles
             .iter()
             .any(|needle| content.contains(needle.as_str()))
 }
 
-/// Scan `content` for `<x-…>` occurrences whose tag name (after the `x-`
-/// prefix) is one of `tag_names`, and collect the attributes each passes.
+/// Scan `content` for `<x-…>` and `<flux:…>` occurrences whose component
+/// name (`alert`, `flux::button`) is one of `tag_names`, and collect the
+/// attributes each passes.
 ///
 /// Every bound attribute on *any* tag in the file is counted — not just a
 /// matching one — because the preprocessor's `blade_bound_attr_directive`
@@ -265,7 +324,7 @@ pub(crate) fn scan_component_tag_calls(
     tag_names: &[String],
     arguments: &dyn Fn(&str) -> Option<Vec<String>>,
 ) -> Vec<ComponentTagCall> {
-    if tag_names.is_empty() || !content.contains("<x-") {
+    if tag_names.is_empty() || !(content.contains("<x-") || content.contains("<flux:")) {
         return Vec::new();
     }
     let masked = mask_inert_regions(content, true);
@@ -293,10 +352,11 @@ pub(crate) fn scan_component_tag_calls(
         let name_start = i + 1;
         let j = tag_name_end(bytes, name_start);
         let tag_name = &masked[name_start..j];
-        let is_match = tag_name
+        let key = component_key(tag_name);
+        let is_match = key
             .strip_prefix("x-")
             .is_some_and(|bare| tag_names.iter().any(|n| n == bare));
-        let consumed = arguments(tag_name).unwrap_or_default();
+        let consumed = arguments(&key).unwrap_or_default();
         let (end, call) = scan_tag_attributes(&masked, j, &consumed, &mut bound_index);
         if is_match {
             results.push(call);

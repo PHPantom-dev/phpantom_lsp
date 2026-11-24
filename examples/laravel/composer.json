@@ -17,6 +17,8 @@
     },
     "require": {
         "laravel/framework": "^13.0",
-        "demo/common": "@dev"
+        "demo/common": "@dev",
+        "livewire/flux": "^2.22",
+        "filament/filament": "^5.12"
     }
 }

@@ -7,7 +7,7 @@
 //! a name the scan cannot read, is left alone.
 
 use crate::common::{
-    ILLUMINATE_COMPONENT_STUB, LIVEWIRE_COMPONENT_STUB, code_actions_via_server,
+    FLUX_FILES, ILLUMINATE_COMPONENT_STUB, LIVEWIRE_COMPONENT_STUB, code_actions_via_server,
     create_psr4_workspace, initialize_with_resource_operations, message_text, open_document,
     workspace_uri,
 };
@@ -170,7 +170,7 @@ async fn every_resolvable_tag_is_accepted() {
 /// they are, so a tag under some other prefix is not judged.
 #[tokio::test]
 async fn a_tag_under_an_unregistered_prefix_is_not_judged() {
-    let (backend, _dir, uri) = start("<x-flux::button />\n", &[]).await;
+    let (backend, _dir, uri) = start("<x-acme::button />\n", &[]).await;
     assert_eq!(unknown_components(&backend, &uri), vec![]);
 }
 
@@ -242,6 +242,49 @@ async fn a_tag_under_a_registered_anonymous_namespace_is_judged() {
     let reported = unknown_components(&backend, &uri);
     assert_eq!(reported.len(), 1, "{reported:?}");
     assert_eq!(reported[0].1, "Unknown Blade component 'shop::crad'");
+}
+
+/// Flux's `<flux:button>` is its `<x-flux::button>`, a template in the
+/// package's own directory, which no view root holds but which the
+/// registration makes enumerable all the same.
+#[tokio::test]
+async fn flux_tags_are_judged_against_the_package_templates() {
+    let (backend, _dir, uri) = start(
+        "<flux:button>Save</flux:button>\n\
+         <flux:buton />\n\
+         <x-flux::badge />\n\
+         <x-flux::bdage />\n",
+        &FLUX_FILES,
+    )
+    .await;
+    assert_eq!(
+        unknown_components(&backend, &uri),
+        vec![
+            (
+                "invalid_blade_component".to_string(),
+                "Unknown Flux component 'buton'".to_string(),
+                1,
+                6
+            ),
+            (
+                "invalid_blade_component".to_string(),
+                "Unknown Blade component 'flux::bdage'".to_string(),
+                3,
+                3
+            ),
+        ]
+    );
+}
+
+/// Laravel tries every anonymous component path for a tag that names no
+/// namespace, whatever prefix the path was registered under, so the bare
+/// name reaches a package's template too.
+#[tokio::test]
+async fn a_bare_tag_reaches_a_path_registered_under_a_prefix() {
+    let (backend, _dir, uri) = start("<x-badge />\n<x-bdage />\n", &FLUX_FILES).await;
+    let reported = unknown_components(&backend, &uri);
+    assert_eq!(reported.len(), 1, "{reported:?}");
+    assert_eq!(reported[0].1, "Unknown Blade component 'bdage'");
 }
 
 // ── Quick fixes ─────────────────────────────────────────────────────────────
@@ -332,6 +375,27 @@ async fn a_misspelt_tag_is_offered_the_name_it_meant_on_both_tags() {
         "the opening and closing names"
     );
     assert!(edits.iter().all(|edit| edit.new_text == "buttons.back"));
+}
+
+/// A Flux tag is offered the Flux names, spelled the way the tag writes
+/// them.
+#[tokio::test]
+async fn a_misspelt_flux_tag_is_offered_the_flux_name_it_meant() {
+    let template = "<flux:buton>Save</flux:buton>\n";
+    let (backend, _dir, uri) = start(template, &FLUX_FILES).await;
+    let actions = actions_at(&backend, &uri, 0, 8).await;
+    let change = find(&actions, "Change to 'button'");
+    let edits = &change.edit.as_ref().unwrap().changes.as_ref().unwrap()[&uri];
+    let mut ranges: Vec<(u32, u32)> = edits
+        .iter()
+        .map(|edit| (edit.range.start.character, edit.range.end.character))
+        .collect();
+    ranges.sort();
+    assert_eq!(
+        ranges,
+        vec![(6, 11), (23, 28)],
+        "the opening and closing names"
+    );
 }
 
 #[tokio::test]

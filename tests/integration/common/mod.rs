@@ -1682,6 +1682,34 @@ pub const LIVEWIRE_COMPONENT_STUB: &str = "<?php\nnamespace Livewire;\n\
         public function dispatch(string $event) {}\n\
     }\n";
 
+/// What Flux (`livewire/flux`) registers, stood in for by an application
+/// provider: its templates as an anonymous component path under the `flux`
+/// prefix, in a directory outside every view root.
+pub const FLUX_FILES: [(&str, &str); 4] = [
+    (
+        "bootstrap/providers.php",
+        "<?php\nreturn [\n    App\\Providers\\FluxServiceProvider::class,\n];\n",
+    ),
+    (
+        "app/Providers/FluxServiceProvider.php",
+        "<?php\nnamespace App\\Providers;\n\
+         use Illuminate\\Support\\Facades\\Blade;\n\
+         class FluxServiceProvider {\n\
+             public function boot(): void {\n\
+                 Blade::anonymousComponentPath(base_path('packages/flux/views/flux'), 'flux');\n\
+             }\n\
+         }\n",
+    ),
+    (
+        "packages/flux/views/flux/button/index.blade.php",
+        "@props(['variant' => 'outline', 'iconTrailing' => null])\n<button>{{ $slot }}</button>\n",
+    ),
+    (
+        "packages/flux/views/flux/badge.blade.php",
+        "@props(['color' => null])\n<span>{{ $slot }}</span>\n",
+    ),
+];
+
 /// Open the Blade template at `relative` in the backend's workspace from
 /// disk, the way an editor opening it with language id `blade` would, and
 /// hand back its URI.

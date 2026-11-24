@@ -83,7 +83,7 @@ impl Backend {
                 .iter()
                 .map(|(name, fqn)| (name.clone(), Some(fqn)))
                 .collect(),
-            TagKind::Blade => {
+            TagKind::Blade | TagKind::Flux => {
                 let mut names: Vec<(String, Option<&String>)> = discovery
                     .components
                     .iter()
@@ -98,7 +98,12 @@ impl Backend {
                         names.push((name, None));
                     }
                 }
+                // A `<flux:…>` tag can only name a component in Flux's
+                // namespace, and is written without it.
                 names
+                    .into_iter()
+                    .filter_map(|(name, fqn)| Some((kind.tag_name_for(&name)?.to_string(), fqn)))
+                    .collect()
             }
         };
         names.sort_by(|a, b| a.0.cmp(&b.0));
@@ -136,17 +141,17 @@ impl Backend {
         prefix: &str,
         range: Range,
     ) -> Vec<CompletionItem> {
-        let attributes = match ctx.kind {
-            TagKind::Livewire => self
+        let attributes = match ctx.kind.blade_name(&ctx.name) {
+            None => self
                 .livewire_component_fqn(&ctx.name)
                 // Livewire hands the tag's attributes to `mount()` and
                 // binds whatever is left to the public properties of the
                 // same name, so both are attributes a tag may carry.
                 .map(|fqn| self.class_component_attributes(&fqn, "mount", true))
                 .unwrap_or_default(),
-            TagKind::Blade => match self.blade_component_fqn(&ctx.name) {
+            Some(name) => match self.blade_component_fqn(&name) {
                 Some(fqn) => self.class_component_attributes(&fqn, "__construct", false),
-                None => self.anonymous_component_attributes(&ctx.name),
+                None => self.anonymous_component_attributes(&name),
             },
         };
 

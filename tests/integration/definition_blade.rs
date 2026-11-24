@@ -4,10 +4,12 @@
 #[cfg(test)]
 mod tests {
     use crate::common::{
-        BLADE_COMPONENT_COMPOSER, ILLUMINATE_COMPONENT_STUB, LIVEWIRE_COMPONENT_STUB,
-        create_psr4_workspace, goto_definition_at, open_document, open_php, workspace_uri,
+        BLADE_COMPONENT_COMPOSER, FLUX_FILES, ILLUMINATE_COMPONENT_STUB, LIVEWIRE_COMPONENT_STUB,
+        create_psr4_workspace, goto_definition_at, initialize_with_resource_operations,
+        open_document, open_php, workspace_uri,
     };
 
+    use tower_lsp_server::LanguageServer;
     use tower_lsp_server::gen_lsp_types::*;
 
     /// A project holding one component of every shape a tag can name, with
@@ -142,6 +144,31 @@ mod tests {
             definition(&backend, &dir, &uri, 0, 5).await.as_deref(),
             Some("resources/views/components/banner.blade.php")
         );
+    }
+
+    /// `<flux:button>` is Flux's `<x-flux::button>`, an anonymous component
+    /// in the package's own directory: both spellings lead to its template.
+    #[tokio::test]
+    async fn a_flux_tag_leads_to_the_package_template() {
+        let template = "<flux:button>Save</flux:button>\n<x-flux::button />\n";
+        let mut files = FLUX_FILES.to_vec();
+        files.push(("resources/views/page.blade.php", template));
+        let (backend, dir) = create_psr4_workspace(
+            r#"{"require": {"laravel/framework": "^11.0"}, "autoload": {"psr-4": {"App\\": "app/"}}}"#,
+            &files,
+        );
+        initialize_with_resource_operations(&backend).await;
+        backend.initialized(InitializedParams {}).await;
+        let uri = workspace_uri(&backend, "resources/views/page.blade.php");
+        open_document(&backend, &uri, "blade", template).await;
+
+        for line in [0, 1] {
+            assert_eq!(
+                definition(&backend, &dir, &uri, line, 9).await.as_deref(),
+                Some("packages/flux/views/flux/button/index.blade.php"),
+                "line {line}"
+            );
+        }
     }
 
     #[tokio::test]

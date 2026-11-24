@@ -1986,6 +1986,84 @@ check(
         && $guessed . '\\Card' === \App\View\Components\Card\Card::class
 );
 
+// ─── Blade component libraries ──────────────────────────────────────────────
+
+// resources/views/ui-libraries.blade.php writes Flux and Filament components.
+// Flux's own precompiler rewrites `<flux:button>` to the component
+// `flux::button` before Blade's tag compiler runs, so the tag names what
+// `<x-flux::button>` names. `componentString()` would look the component up
+// through a booted application; the name it is handed is all the claim needs.
+$fluxCompiler = new class extends \Flux\FluxTagCompiler {
+    public function componentString(string $component, array $attributes)
+    {
+        return "[component $component]";
+    }
+};
+check(
+    '<flux:button> compiles to the flux::button component',
+    str_contains(
+        $fluxCompiler->compile('<flux:button variant="primary">Save</flux:button>'),
+        '[component flux::button]'
+    )
+);
+
+// Flux registers its templates with `Blade::anonymousComponentPath(…, 'flux')`,
+// a directory outside the application's view roots, which Laravel reads as a
+// view namespace of its own. A tag under the prefix reaches them, and so does
+// a tag naming no namespace at all, since every path is tried for one.
+$fluxSource = file_get_contents(__DIR__ . '/vendor/livewire/flux/src/FluxServiceProvider.php');
+check(
+    "Flux registers its templates as an anonymous component path under 'flux'",
+    str_contains($fluxSource, "Blade::anonymousComponentPath(dirname(__DIR__).'/stubs/resources/views/flux', 'flux')")
+);
+$previousContainer = \Illuminate\Container\Container::getInstance();
+$viewContainer = new \Illuminate\Container\Container();
+$viewFactory = new \Illuminate\View\Factory(
+    new \Illuminate\View\Engines\EngineResolver(),
+    new \Illuminate\View\FileViewFinder(new \Illuminate\Filesystem\Filesystem(), [__DIR__ . '/resources/views']),
+    new \Illuminate\Events\Dispatcher($viewContainer)
+);
+$viewContainer->instance(\Illuminate\Contracts\View\Factory::class, $viewFactory);
+\Illuminate\Container\Container::setInstance($viewContainer);
+$libraryBlade = new \Illuminate\View\Compilers\BladeCompiler(new \Illuminate\Filesystem\Filesystem(), sys_get_temp_dir());
+$libraryBlade->anonymousComponentPath(__DIR__ . '/vendor/livewire/flux/stubs/resources/views/flux', 'flux');
+$libraryTags = new \Illuminate\View\Compilers\ComponentTagCompiler([], [], $libraryBlade);
+$usingPaths = new ReflectionMethod(\Illuminate\View\Compilers\ComponentTagCompiler::class, 'guessAnonymousComponentUsingPaths');
+$fluxNamespace = hash('xxh128', 'flux');
+check(
+    "flux::button reaches Flux's own button template",
+    $usingPaths->invoke($libraryTags, $viewFactory, 'flux::button') === "$fluxNamespace::button.index"
+);
+check(
+    'a tag naming no namespace reaches a path registered under a prefix',
+    $usingPaths->invoke($libraryTags, $viewFactory, 'badge') === "$fluxNamespace::badge.index"
+);
+check(
+    'a tag under another namespace does not',
+    $usingPaths->invoke($libraryTags, $viewFactory, 'other::badge') === null
+);
+
+// Filament's packages register their views through spatie's package tools,
+// whose `hasViews()` calls `loadViewsFrom()` under the package's short name:
+// `filament` for filament/support. `<x-filament::button>` then names
+// `filament::components.button`, the `components.` convention after the
+// namespace.
+$filamentPackage = new \Spatie\LaravelPackageTools\Package();
+(new ReflectionClass(\Filament\Support\SupportServiceProvider::class))
+    ->newInstanceWithoutConstructor()
+    ->configurePackage($filamentPackage);
+check(
+    "filament/support registers its views under the 'filament' namespace",
+    $filamentPackage->viewNamespace() === 'filament'
+);
+$viewFactory->addNamespace('filament', __DIR__ . '/vendor/filament/support/resources/views');
+$usingNamespaces = new ReflectionMethod(\Illuminate\View\Compilers\ComponentTagCompiler::class, 'guessAnonymousComponentUsingNamespaces');
+check(
+    'filament::button names the button template in the components directory',
+    $usingNamespaces->invoke($libraryTags, $viewFactory, 'filament::button') === 'filament::components.button.index'
+);
+\Illuminate\Container\Container::setInstance($previousContainer);
+
 // ─── Shared data and view composers ─────────────────────────────────────────
 
 // `View::composer('partials.*', …)` matches view names with `Str::is()`, so a

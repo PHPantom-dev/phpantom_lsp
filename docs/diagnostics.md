@@ -128,7 +128,7 @@ These are shown dimmed rather than underlined, except `unwritten_property`.
 | `missing_blade_variable` | Error | A variable a Blade template declares that the call site does not pass. |
 | `unused_blade_variable` | Warning | A variable passed to a view that the template does not use. |
 | `type_mismatch_blade_variable` | Error | A variable passed to a view whose type the template's declaration does not accept. |
-| `invalid_blade_component` | Warning | An `<x-…>` tag with no component class or template. |
+| `invalid_blade_component` | Warning | An `<x-…>` or `<flux:…>` tag with no component class or template. |
 | `invalid_livewire_component` | Warning | A `<livewire:…>` tag with no component. |
 | `unclosed_blade_component_tag` | Error | An `<x-…>` tag that is never closed. |
 | `unexpected_blade_component_tag` | Error | A closing component tag with nothing open. |
