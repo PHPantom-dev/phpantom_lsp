@@ -50,6 +50,7 @@ pub(crate) struct FileDeclarations {
     classes: Vec<Arc<ClassInfo>>,
     functions: Vec<String>,
     constants: Vec<String>,
+    mentions_unguard: bool,
 }
 
 impl FileDeclarations {
@@ -116,9 +117,16 @@ impl Backend {
         // A file that read a body declared here depends on it whether or
         // not it names anything the diff turned up.
         let readers = self.open_files_that_read_bodies_in(saved_uri);
-        let (mut affected, mut others): (Vec<String>, Vec<String>) = uris
-            .into_iter()
-            .partition(|uri| readers.contains(uri.as_str()));
+        // A service provider can change the guard state without changing its signature.
+        let guards_may_change = baseline.mentions_unguard || current.mentions_unguard;
+        let (mut affected, mut others): (Vec<String>, Vec<String>) =
+            uris.into_iter().partition(|uri| {
+                readers.contains(uri.as_str())
+                    || (guards_may_change
+                        && self
+                            .symbol_map_for(uri)
+                            .is_some_and(|map| super::mass_assignment::mentions_assignment(&map)))
+            });
 
         let mut keys = affected_reference_keys(&baseline, &current);
         if keys.is_empty() {
@@ -204,10 +212,15 @@ impl Backend {
             .get(uri)
             .cloned()
             .unwrap_or_default();
+        let is_laravel = self.resolved_class_cache.read().laravel().is_enabled();
         FileDeclarations {
             classes,
             functions,
             constants,
+            mentions_unguard: is_laravel
+                && self
+                    .symbol_map_for(uri)
+                    .is_some_and(|map| super::mass_assignment::mentions_unguard(&map)),
         }
     }
 }
@@ -464,6 +477,25 @@ mod tests {
                 "<?php\nnamespace App;\nclass Bystander {\n  public function ping(): string { return 'pong'; }\n}\n",
             ),
         ])
+    }
+
+    #[test]
+    fn mass_assignment_consumers_refresh_when_a_provider_changes_unguard() {
+        let boot = |body: &str| service(&format!("public function boot(): void {{ {body} }}"));
+        let backend = backend_with_open_files(&[
+            (SERVICE, &boot("")),
+            (CONSUMER, "<?php Post::create($data);"),
+            (BYSTANDER, "<?php echo 1;"),
+        ]);
+        backend
+            .resolved_class_cache
+            .write()
+            .laravel_mut()
+            .set_enabled(true);
+        for body in ["Model::unguard();", "Model::unguard(false);", ""] {
+            assert_eq!(save(&backend, SERVICE, &boot(body)), vec![CONSUMER]);
+        }
+        assert!(save(&backend, SERVICE, &boot("")).is_empty());
     }
 
     #[test]
