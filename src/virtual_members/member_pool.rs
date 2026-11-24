@@ -281,6 +281,7 @@ fn method_eq(a: &MethodInfo, b: &MethodInfo) -> bool {
         is_virtual,
         is_macro,
         is_inferred_return,
+        since,
         is_pure,
         is_impure,
         reads_func_args,
@@ -299,6 +300,7 @@ fn method_eq(a: &MethodInfo, b: &MethodInfo) -> bool {
         && *is_final == b.is_final
         && *is_macro == b.is_macro
         && *is_inferred_return == b.is_inferred_return
+        && *since == b.since
         && *is_pure == b.is_pure
         && *is_impure == b.is_impure
         && *reads_func_args == b.reads_func_args

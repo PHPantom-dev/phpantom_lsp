@@ -225,6 +225,10 @@ pub struct FunctionInfo {
     /// not shadow the stub's signature, deprecation status, or other
     /// metadata.
     pub is_polyfill: bool,
+    /// The PHP version the function was added in, from the `@since` tag of a
+    /// bundled extension's embedded stub.  `None` for every other
+    /// declaration: a library's `@since` names its own releases.
+    pub since: Option<PhpVersion>,
     /// Whether this comes from the stub of an extension php-src does not
     /// ship, whose parameter names follow the installed release of the
     /// extension rather than the stub (see

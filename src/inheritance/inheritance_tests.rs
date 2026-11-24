@@ -399,6 +399,7 @@ fn test_extends_generics_propagate_through_parent_use_generics() {
         kind: ClassLikeKind::Trait,
         template_params: vec![atom("TKey"), atom("TValue")],
         methods: vec![Arc::new(MethodInfo {
+            since: None,
             name: crate::atom::atom("first"),
             name_offset: 0,
             parameters: vec![].into(),

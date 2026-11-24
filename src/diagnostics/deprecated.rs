@@ -366,7 +366,7 @@ impl Backend {
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 /// The word a message names a class-like of `kind` with.
-fn kind_word(kind: ClassLikeKind) -> &'static str {
+pub(super) fn kind_word(kind: ClassLikeKind) -> &'static str {
     match kind {
         ClassLikeKind::Class => "Class",
         ClassLikeKind::Interface => "Interface",
@@ -483,7 +483,7 @@ fn is_within_deprecated_scope(
 /// - `$this` → resolve from enclosing class
 /// - Other `$variable` subjects return `None` (resolved separately
 ///   by [`resolve_variable_subject`]).
-fn resolve_subject_to_class_name(
+pub(super) fn resolve_subject_to_class_name(
     subject_text: &str,
     is_static: bool,
     access_offset: u32,
@@ -512,7 +512,7 @@ fn resolve_subject_to_class_name(
 /// like `$payment->getOrder()` or `$this->faker`.  The resolver uses
 /// the diagnostic scope cache (when active) for variable lookups,
 /// avoiding backward-scanner fallthroughs.
-fn resolve_variable_subject(
+pub(super) fn resolve_variable_subject(
     subject_text: &str,
     access_kind: AccessKind,
     rctx: &ResolutionCtx<'_>,

@@ -464,6 +464,19 @@ impl Backend {
         })
     }
 
+    /// Whether `uri` is where a constant's embedded stub is parsed
+    /// (`phpantom-stub://const/NAME`) and that stub is a bundled
+    /// extension's, so its `@since` tags name PHP versions.
+    ///
+    /// The text this parse is handed is a copy, so the stub file is found
+    /// again through the constant it was loaded for.
+    fn is_bundled_constant_stub_uri(&self, uri: &str) -> bool {
+        uri.strip_prefix(crate::stubs::STUB_URI_PREFIX)
+            .and_then(|rest| rest.strip_prefix("const/"))
+            .and_then(|name| self.stub_constant_index.read().get(name).copied())
+            .is_some_and(crate::stubs::is_bundled_extension_stub_file)
+    }
+
     /// The index update for `program`, the parse of `content`, with `arena`
     /// for scratch space.
     fn ast_index_update_from(
@@ -487,6 +500,7 @@ impl Backend {
             trivias: program.trivia.as_slice(),
             content,
             php_version: Some(self.php_version()),
+            reads_since: self.is_bundled_constant_stub_uri(uri),
             use_map: HashMap::new(),
             namespace: None,
         };

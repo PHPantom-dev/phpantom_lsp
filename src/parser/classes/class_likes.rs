@@ -27,6 +27,9 @@ use super::add_implicit_stringable;
 struct ClassDocblockInfo {
     /// Deprecation message from `@deprecated`, or `None` if not deprecated.
     deprecation_message: Option<String>,
+    /// The PHP version from `@since`, read only where
+    /// [`DocblockCtx::reads_since`] says it names one.
+    since: Option<PhpVersion>,
     /// `@template` parameters declared on the class-like.
     template_params: Vec<Atom>,
     /// Upper bounds for template parameters (`@template T of Bound`).
@@ -106,6 +109,10 @@ fn extract_class_docblock<'a>(
 
     ClassDocblockInfo {
         deprecation_message: docblock::extract_deprecation_message_from_info(&info),
+        since: ctx
+            .reads_since
+            .then(|| docblock::extract_since_version_from_info(&info))
+            .flatten(),
         template_params,
         template_param_bounds,
         template_param_defaults,
@@ -236,6 +243,7 @@ pub(super) fn extract_class<'a>(
         ),
         deprecation_message: class_depr.message,
         deprecated_replacement: class_depr.replacement,
+        since: doc_info.since,
         links: doc_info.links,
         see_refs: doc_info.see_refs,
         template_params: doc_info.template_params,
@@ -329,6 +337,7 @@ pub(super) fn extract_interface<'a>(
         require_implements: doc_info.require_implements,
         deprecation_message: iface_depr.message,
         deprecated_replacement: iface_depr.replacement,
+        since: doc_info.since,
         links: doc_info.links,
         see_refs: doc_info.see_refs,
         template_params: doc_info.template_params,
@@ -398,6 +407,7 @@ pub(super) fn extract_trait<'a>(
         require_implements: doc_info.require_implements,
         deprecation_message: trait_depr.message,
         deprecated_replacement: trait_depr.replacement,
+        since: doc_info.since,
         links: doc_info.links,
         see_refs: doc_info.see_refs,
         template_params: doc_info.template_params,
@@ -507,6 +517,7 @@ pub(super) fn extract_enum<'a>(
         is_final: true,
         deprecation_message: enum_depr.message,
         deprecated_replacement: enum_depr.replacement,
+        since: doc_info.since,
         links: doc_info.links,
         see_refs: doc_info.see_refs,
         implements_generics: doc_info.implements_generics,

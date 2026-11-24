@@ -150,6 +150,9 @@ pub(super) fn extract_method<'a>(
         is_virtual: false,
         is_macro: false,
         is_inferred_return: false,
+        since: info
+            .filter(|_| doc_ctx.is_some_and(|ctx| ctx.reads_since))
+            .and_then(docblock::extract_since_version_from_info),
         // `@pure` promises the call changes nothing, which is what lets a
         // check recorded about the receiver survive it; `@impure` is the
         // opposite promise, for a call whose return type does not already

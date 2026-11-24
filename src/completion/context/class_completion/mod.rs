@@ -17,6 +17,7 @@ use std::collections::{HashMap, HashSet};
 use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
+use crate::stubs::StubSymbolKind;
 use crate::text_position::utf16_col_to_char_index;
 use crate::util::{short_name, strip_fqn_prefix};
 
@@ -376,6 +377,9 @@ impl Backend {
             .fqn_uri_index
             .read()
             .iter()
+            // A built-in the target PHP version does not have yet is left
+            // out, here and in pass 2.
+            .filter(|(fqn, uri)| !self.is_newer_stub_class(fqn, uri))
             .filter(|(fqn, uri)| {
                 scope.as_ref().is_none_or(|scope| {
                     scope.sees(uri)
@@ -421,6 +425,12 @@ impl Backend {
         // Collect keys first to avoid deadlock (same reason as pass 1).
         let stub_keys: Vec<String> = self.stub_index.read().keys().map(str::to_owned).collect();
         for fqn in &stub_keys {
+            if self
+                .newer_stub_version(StubSymbolKind::Class, fqn)
+                .is_some()
+            {
+                continue;
+            }
             let sn = short_name(fqn);
             if !matches_class_prefix(sn, fqn, &prefix_lower, is_fqn_prefix, expanded_prefix_lower) {
                 continue;

@@ -776,6 +776,7 @@ mod tests {
         let mut base = make_class("Base");
         base.constants = vec![
             Arc::new(ConstantInfo {
+                since: None,
                 name: atom("STATUS_OK"),
                 name_offset: 0,
                 type_hint: None,
@@ -790,6 +791,7 @@ mod tests {
                 is_virtual: false,
             }),
             Arc::new(ConstantInfo {
+                since: None,
                 name: atom("SECRET"),
                 name_offset: 0,
                 type_hint: None,

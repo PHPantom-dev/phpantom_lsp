@@ -34,6 +34,7 @@
 //! automatically fetch the latest release from GitHub, re-read the map
 //! file and re-embed everything.
 
+use crate::ci_map::CiMap;
 use std::collections::{HashMap, HashSet};
 
 // Pull in the generated static arrays.
@@ -180,12 +181,28 @@ pub(crate) fn is_unbundled_extension_stub(uri: &str, content: &str) -> bool {
             segments.next();
             segments.next()
         });
-    extension.is_some_and(|ext| {
-        let ext = ext.replace("%20", " ");
-        !BUNDLED_EXTENSIONS
-            .iter()
-            .any(|bundled| bundled.eq_ignore_ascii_case(&ext))
-    })
+    extension.is_some_and(|ext| !is_bundled_extension(ext))
+}
+
+fn is_bundled_extension(extension: &str) -> bool {
+    let extension = extension.replace("%20", " ");
+    BUNDLED_EXTENSIONS
+        .iter()
+        .any(|bundled| bundled.eq_ignore_ascii_case(&extension))
+}
+
+/// Whether `content` is the embedded phpstorm-stubs file of an extension
+/// php-src ships, recognised by its address like in
+/// [`is_unbundled_extension_stub`].
+///
+/// Only there does an `@since` tag name the PHP version a declaration was
+/// added in.  An unbundled extension's stub tags the extension's own
+/// releases, and any other stub (a library's, WordPress') its own.
+pub(crate) fn is_bundled_extension_stub_file(content: &str) -> bool {
+    STUB_FILES
+        .iter()
+        .position(|file| std::ptr::eq(file.as_ptr(), content.as_ptr()))
+        .is_some_and(|i| is_bundled_extension(STUB_FILE_EXTENSIONS[i]))
 }
 
 /// Build a lookup table mapping class/interface/trait short names to their
@@ -247,16 +264,147 @@ impl RemovedStubNames<'_> {
 /// or before `php_version`, in one pass over the file.
 ///
 /// Each `@removed` docblock is attributed to the first declaration
-/// (`function`, `class`, `interface`, `trait`, or `define(`) that follows
-/// it before the next docblock opens.  Returns `None` when nothing in the
-/// file is removed, which is the case for most stub files.
+/// (`function`, `class`, `interface`, `trait`, `enum`, `const`, or
+/// `define(`) that follows it before the next docblock opens.  Returns
+/// `None` when nothing in the file is removed, which is the case for most
+/// stub files.
 pub fn removed_stub_names(
     source: &str,
     php_version: crate::types::PhpVersion,
 ) -> Option<RemovedStubNames<'_>> {
     let mut names = RemovedStubNames::default();
+    for_each_tagged_declaration(source, "@removed", |docblock, declared| {
+        let Declared::Symbol(kind, name) = declared else {
+            return;
+        };
+        if !docblock_removed_at(docblock, php_version) {
+            return;
+        }
+        match kind {
+            StubSymbolKind::Function => names.functions.insert(name),
+            StubSymbolKind::Class => names.classes.insert(name),
+            StubSymbolKind::Constant => names.constants.insert(name),
+        };
+    });
+    (!names.is_empty()).then_some(names)
+}
+
+/// Short names of the declarations in one stub file whose docblock says
+/// they were added `@since` a PHP version newer than a given one, each
+/// with that version.
+#[derive(Debug, Default)]
+pub struct NewerStubNames<'a> {
+    pub functions: HashMap<&'a str, crate::types::PhpVersion>,
+    pub classes: HashMap<&'a str, crate::types::PhpVersion>,
+    pub constants: HashMap<&'a str, crate::types::PhpVersion>,
+    /// The names of the newer methods and class constants, whatever class
+    /// declares them.
+    pub members: HashSet<&'a str>,
+}
+
+impl NewerStubNames<'_> {
+    /// The version the symbol `name` (qualified or not) of the given kind
+    /// was added in, when it is among the newer declarations.
+    pub fn get(&self, kind: StubSymbolKind, name: &str) -> Option<crate::types::PhpVersion> {
+        let short = name.rsplit('\\').next().unwrap_or(name);
+        match kind {
+            StubSymbolKind::Function => self.functions.get(short),
+            StubSymbolKind::Class => self.classes.get(short),
+            StubSymbolKind::Constant => self.constants.get(short),
+        }
+        .copied()
+    }
+}
+
+/// The built-ins of the stub indices that a project's PHP version does not
+/// have yet, keyed the way each index is, with the version that added
+/// each.  Built from [`newer_stub_names`] by `Backend::set_php_version`.
+#[derive(Debug, Default)]
+pub struct NewerStubSymbols {
+    pub functions: CiMap<crate::types::PhpVersion>,
+    pub classes: CiMap<crate::types::PhpVersion>,
+    pub constants: HashMap<&'static str, crate::types::PhpVersion>,
+    /// The names of the newer methods and class constants, lowercased: a
+    /// member access that names none of them cannot use one.
+    pub members: HashSet<String>,
+}
+
+impl NewerStubSymbols {
+    /// The version that added the built-in `name` of the given kind, when
+    /// the target does not have it yet.
+    pub fn get(&self, kind: StubSymbolKind, name: &str) -> Option<crate::types::PhpVersion> {
+        let name = name.strip_prefix('\\').unwrap_or(name);
+        match kind {
+            StubSymbolKind::Function => self.functions.get(name),
+            StubSymbolKind::Class => self.classes.get(name),
+            StubSymbolKind::Constant => self.constants.get(name),
+        }
+        .copied()
+    }
+
+    /// Whether the target PHP version has every built-in.
+    pub fn is_empty(&self) -> bool {
+        self.functions.is_empty()
+            && self.classes.is_empty()
+            && self.constants.is_empty()
+            && self.members.is_empty()
+    }
+
+    /// Whether some built-in class has a method or constant named `name`
+    /// that the target PHP version does not have yet.
+    pub fn has_member_named(&self, name: &str) -> bool {
+        !self.members.is_empty() && self.members.contains(&name.to_ascii_lowercase())
+    }
+}
+
+/// Collect every declaration in a stub file whose `@since` tag names a
+/// PHP version newer than `php_version`, in one pass over the file.
+///
+/// Attributed like [`removed_stub_names`].  Only meaningful for the stub
+/// of a bundled extension (see [`is_bundled_extension_stub_file`]).
+/// Returns `None` when nothing in the file is newer.
+pub fn newer_stub_names(
+    source: &str,
+    php_version: crate::types::PhpVersion,
+) -> Option<NewerStubNames<'_>> {
+    let mut names = NewerStubNames::default();
+    for_each_tagged_declaration(source, "@since", |docblock, declared| {
+        let Some(since) = docblock_since(docblock).filter(|&since| since > php_version) else {
+            return;
+        };
+        let (kind, name) = match declared {
+            Declared::Symbol(kind, name) => (kind, name),
+            Declared::Member(name) => {
+                names.members.insert(name);
+                return;
+            }
+        };
+        let map = match kind {
+            StubSymbolKind::Function => &mut names.functions,
+            StubSymbolKind::Class => &mut names.classes,
+            StubSymbolKind::Constant => &mut names.constants,
+        };
+        map.entry(name).or_insert(since);
+    });
+    let empty = names.functions.is_empty()
+        && names.classes.is_empty()
+        && names.constants.is_empty()
+        && names.members.is_empty();
+    (!empty).then_some(names)
+}
+
+/// Call `f` with the docblock and the declaration of every docblock in
+/// `source` that holds `tag`.
+///
+/// The docblock is attributed to the first declaration that follows it
+/// before the next docblock opens.
+fn for_each_tagged_declaration<'a>(
+    source: &'a str,
+    tag: &str,
+    mut f: impl FnMut(&'a str, Declared<'a>),
+) {
     let mut search_from = 0;
-    while let Some(rel) = source[search_from..].find("@removed") {
+    while let Some(rel) = source[search_from..].find(tag) {
         let tag_pos = search_from + rel;
         let Some(doc_end) = source[tag_pos..].find("*/").map(|p| tag_pos + p + 2) else {
             break;
@@ -265,20 +413,23 @@ pub fn removed_stub_names(
         let Some(doc_start) = source[..tag_pos].rfind("/**") else {
             continue;
         };
-        if !docblock_removed_at(&source[doc_start..doc_end], php_version) {
-            continue;
-        }
         let after = &source[doc_end..];
         let after = &after[..after.find("/**").unwrap_or(after.len())];
-        if let Some((kind, name)) = first_declaration(after) {
-            match kind {
-                StubSymbolKind::Function => names.functions.insert(name),
-                StubSymbolKind::Class => names.classes.insert(name),
-                StubSymbolKind::Constant => names.constants.insert(name),
-            };
+        if let Some(declared) = first_declaration(after) {
+            f(&source[doc_start..doc_end], declared);
         }
     }
-    (!names.is_empty()).then_some(names)
+}
+
+/// The PHP version a docblock's `@since` tag names, if it names one.
+fn docblock_since(docblock: &str) -> Option<crate::types::PhpVersion> {
+    docblock.lines().find_map(|line| {
+        let trimmed = line
+            .trim()
+            .trim_start_matches("/**")
+            .trim_start_matches('*');
+        crate::docblock::parse_php_since_version(trimmed.trim().strip_prefix("@since")?)
+    })
 }
 
 /// Whether a docblock carries an `@removed X.Y` tag with
@@ -303,17 +454,36 @@ pub enum StubSymbolKind {
     Constant,
 }
 
-/// Find the earliest declaration keyword in `text` and return the name
-/// it declares.
-fn first_declaration(text: &str) -> Option<(StubSymbolKind, &str)> {
-    const KEYWORDS: [(&str, StubSymbolKind); 7] = [
-        ("function ", StubSymbolKind::Function),
-        ("class ", StubSymbolKind::Class),
-        ("interface ", StubSymbolKind::Class),
-        ("trait ", StubSymbolKind::Class),
-        ("define('", StubSymbolKind::Constant),
-        ("define(\"", StubSymbolKind::Constant),
-        ("function&", StubSymbolKind::Function),
+/// What a stub docblock documents.
+enum Declared<'a> {
+    /// A function, class-like, or global constant, by its short name.
+    Symbol(StubSymbolKind, &'a str),
+    /// A method, class constant, or enum case, by its name.  A property is
+    /// left out.
+    Member(&'a str),
+}
+
+/// Find the earliest declaration keyword in `text` and return what it
+/// declares.
+///
+/// A declaration with a visibility modifier, which every member in
+/// phpstorm-stubs carries, and an enum `case` are class members.
+fn first_declaration(text: &str) -> Option<Declared<'_>> {
+    const KEYWORDS: [(&str, Option<StubSymbolKind>); 14] = [
+        ("function ", Some(StubSymbolKind::Function)),
+        ("function&", Some(StubSymbolKind::Function)),
+        ("class ", Some(StubSymbolKind::Class)),
+        ("interface ", Some(StubSymbolKind::Class)),
+        ("trait ", Some(StubSymbolKind::Class)),
+        ("enum ", Some(StubSymbolKind::Class)),
+        ("const ", Some(StubSymbolKind::Constant)),
+        ("define('", Some(StubSymbolKind::Constant)),
+        ("define(\"", Some(StubSymbolKind::Constant)),
+        ("public ", None),
+        ("protected ", None),
+        ("private ", None),
+        ("var ", None),
+        ("case ", None),
     ];
     let bytes = text.as_bytes();
     let (pos, keyword, kind) = KEYWORDS
@@ -326,12 +496,24 @@ fn first_declaration(text: &str) -> Option<(StubSymbolKind, &str)> {
                 .map(|(pos, _)| (pos, keyword, kind))
         })
         .min_by_key(|&(pos, _, _)| pos)?;
+    let Some(kind) = kind else {
+        // The name is the last word before the parameter list, the
+        // initializer, or the end of the declaration.
+        let head = &text[pos..];
+        let head = &head[..head.find(['(', '=', ';', '{']).unwrap_or(head.len())];
+        let name = head.split_whitespace().next_back()?.trim_start_matches('&');
+        let is_name = !name.is_empty()
+            && name
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b >= 0x80);
+        return is_name.then_some(Declared::Member(name));
+    };
     let rest = text[pos + keyword.len()..].trim_start_matches([' ', '\t', '&']);
     let len = rest
         .bytes()
         .take_while(|b| b.is_ascii_alphanumeric() || *b == b'_' || *b >= 0x80)
         .count();
-    (len > 0).then(|| (kind, &rest[..len]))
+    (len > 0).then(|| Declared::Symbol(kind, &rest[..len]))
 }
 
 /// Build a lookup table mapping constant names to their embedded PHP
@@ -431,6 +613,55 @@ define('MCRYPT_ENCRYPT', 0);
         let names = removed_stub_names(source, PHP_8_0).unwrap();
         assert!(names.classes.contains("OldClass"));
         assert!(removed_stub_names(source, PHP_7_4).is_none());
+    }
+
+    #[test]
+    fn newer_function_class_and_constant() {
+        let source = "<?php\n/**\n * @since 8.0\n */\n#[Pure]\nfunction str_contains() {}\n\
+                      /**\n * @since 8.4\n */\nenum RoundingMode {}\n\
+                      /**\n * @since 8.1\n */\ndefine('MYSQLI_REFRESH_REPLICA', 64);\n\
+                      /**\n * @since 5.3\n */\nfunction old() {}\n";
+        let names = newer_stub_names(source, PHP_7_4).unwrap();
+        assert_eq!(
+            names.get(StubSymbolKind::Function, "str_contains"),
+            Some(PHP_8_0)
+        );
+        assert_eq!(
+            names.get(StubSymbolKind::Class, "RoundingMode"),
+            Some(PhpVersion::new(8, 4))
+        );
+        assert_eq!(
+            names.get(StubSymbolKind::Constant, "MYSQLI_REFRESH_REPLICA"),
+            Some(PhpVersion::new(8, 1))
+        );
+        assert_eq!(names.get(StubSymbolKind::Function, "old"), None);
+        assert!(newer_stub_names(source, PhpVersion::new(8, 4)).is_none());
+    }
+
+    #[test]
+    fn newer_member_is_not_a_function() {
+        let source = "<?php\nclass DateTime {\n    /**\n     * @since 8.0\n     */\n    \
+                      public static function createFromInterface($object) {}\n\
+                      /**\n * @since 8.3\n */\n    final public const int ATOM = 1;\n\
+                      /** @since 8.4 */\n    case HalfEven;\n}\n\
+                      function createFromInterface() {}\n";
+        let names = newer_stub_names(source, PHP_7_4).unwrap();
+        assert!(names.functions.is_empty());
+        assert!(names.constants.is_empty());
+        let mut members: Vec<_> = names.members.into_iter().collect();
+        members.sort_unstable();
+        assert_eq!(members, ["ATOM", "HalfEven", "createFromInterface"]);
+    }
+
+    #[test]
+    fn extension_version_is_not_newer() {
+        let source = "<?php\n/**\n * @since PECL rrd >= 0.9.0\n */\nfunction rrd_create() {}\n\
+                      /**\n * @since 9.8\n */\nfunction newrelic_x() {}\n";
+        let names = newer_stub_names(source, PHP_7_4).unwrap();
+        assert_eq!(names.get(StubSymbolKind::Function, "rrd_create"), None);
+        // A version above any PHP release still reads as one; only the
+        // stub of a bundled extension is scanned for that reason.
+        assert!(names.get(StubSymbolKind::Function, "newrelic_x").is_some());
     }
 
     #[test]

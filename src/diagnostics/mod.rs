@@ -306,6 +306,7 @@ pub(crate) mod member_lookup;
 pub(crate) mod member_visibility;
 mod missing_return;
 pub(crate) mod namespace_mismatch;
+mod newer_builtins;
 mod override_attribute;
 pub(crate) mod parent_calls;
 mod property_type_errors;

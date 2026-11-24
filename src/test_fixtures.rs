@@ -70,6 +70,7 @@ pub fn make_property(name: &str, type_hint: Option<&str>) -> PropertyInfo {
 /// The constant is public, non-deprecated, and has no type hint.
 pub fn make_constant(name: &str) -> ConstantInfo {
     ConstantInfo {
+        since: None,
         name: crate::atom::atom(name),
         name_offset: 0,
         type_hint: None,

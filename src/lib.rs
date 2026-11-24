@@ -642,6 +642,12 @@ pub struct BackendState {
     /// remove stubs that do not exist in the target PHP version.
     /// Can be consulted when resolving standalone constant references.
     pub(crate) stub_constant_index: Arc<RwLock<HashMap<&'static str, &'static str>>>,
+    /// The built-ins of the three stub indices that the target PHP version
+    /// does not have yet, each with the version that added it.  Unlike a
+    /// removed built-in, such a symbol stays in its index, so a use still
+    /// resolves; this is what reports the use and keeps it out of
+    /// completion.  Rebuilt by [`set_php_version`](Self::set_php_version).
+    pub(crate) newer_stubs: RwLock<stubs::NewerStubSymbols>,
     /// Where the stub paths (`[stubs]` in `.phpantom.toml` and the editor's
     /// stub directory) declare each name.  Consulted by the class,
     /// function and constant lookups ahead of everything else, since a stub

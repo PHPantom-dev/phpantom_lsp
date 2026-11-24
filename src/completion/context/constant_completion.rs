@@ -109,10 +109,14 @@ impl Backend {
         };
 
         // ── 1. User-defined constants (from parsed files) ───────────
+        // A built-in the target PHP version does not have yet is left out,
+        // here and in pass 3: parsing its stub put it among these.
         {
             let dmap = self.symbols.global_defines.read();
             for (name, info) in dmap.iter() {
-                if !contains_folded(name, &prefix_lower) {
+                if !contains_folded(name, &prefix_lower)
+                    || self.is_newer_stub_constant(name, Some(&info.file_uri))
+                {
                     continue;
                 }
                 if !seen.insert(name.clone()) {
@@ -178,7 +182,7 @@ impl Backend {
         // hover / resolve, same as stub functions.
         let stub_const_idx = self.stub_constant_index.read();
         for &name in stub_const_idx.keys() {
-            if !contains_folded(name, &prefix_lower) {
+            if !contains_folded(name, &prefix_lower) || self.is_newer_stub_constant(name, None) {
                 continue;
             }
             if !seen.insert(name.to_string()) {

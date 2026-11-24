@@ -182,6 +182,36 @@ impl Backend {
         self.inlay_hint_kinds() != before
     }
 
+    /// The PHP version that added the built-in `name` of the given kind,
+    /// when the target version does not have it yet.  `name` is the
+    /// symbol's fully-qualified name.
+    pub(crate) fn newer_stub_version(
+        &self,
+        kind: stubs::StubSymbolKind,
+        name: &str,
+    ) -> Option<types::PhpVersion> {
+        self.newer_stubs.read().get(kind, name)
+    }
+
+    /// Whether the class `fqn`, indexed under `uri`, is the embedded stub
+    /// of a built-in the target PHP version does not have yet.
+    pub(crate) fn is_newer_stub_class(&self, fqn: &str, uri: &str) -> bool {
+        stubs::is_embedded_stub_uri(uri)
+            && self
+                .newer_stub_version(stubs::StubSymbolKind::Class, fqn)
+                .is_some()
+    }
+
+    /// Whether the constant `name` is a built-in the target PHP version
+    /// does not have yet: one of the stub index, or a parsed one whose
+    /// `uri` is the embedded stub's.
+    pub(crate) fn is_newer_stub_constant(&self, name: &str, uri: Option<&str>) -> bool {
+        uri.is_none_or(stubs::is_embedded_stub_uri)
+            && self
+                .newer_stub_version(stubs::StubSymbolKind::Constant, name)
+                .is_some()
+    }
+
     /// Return the configured PHP version.
     pub fn php_version(&self) -> types::PhpVersion {
         *self.workspace.php_version.lock()
@@ -200,25 +230,70 @@ impl Backend {
             self.refresh_stub_paths();
         }
         // Every symbol a stub file declares shares that file's `&'static str`,
-        // so each file is scanned once for its removed declarations and the
-        // filter below is a set lookup per symbol.
-        let mut removed_by_file: HashMap<usize, Option<stubs::RemovedStubNames<'static>>> =
-            HashMap::new();
-        let mut is_removed = |source: &'static str, name: &str, kind: stubs::StubSymbolKind| {
-            removed_by_file
-                .entry(source.as_ptr() as usize)
-                .or_insert_with(|| stubs::removed_stub_names(source, version))
+        // so each file is scanned once for its removed and newer
+        // declarations and the filters below are a set lookup per symbol.
+        type FileScan = (
+            Option<stubs::RemovedStubNames<'static>>,
+            Option<stubs::NewerStubNames<'static>>,
+        );
+        let mut scans: HashMap<usize, FileScan> = HashMap::new();
+        fn scan<'m>(
+            scans: &'m mut HashMap<usize, FileScan>,
+            source: &'static str,
+            version: types::PhpVersion,
+        ) -> &'m FileScan {
+            scans.entry(source.as_ptr() as usize).or_insert_with(|| {
+                (
+                    stubs::removed_stub_names(source, version),
+                    stubs::is_bundled_extension_stub_file(source)
+                        .then(|| stubs::newer_stub_names(source, version))
+                        .flatten(),
+                )
+            })
+        }
+        let mut newer = stubs::NewerStubSymbols::default();
+        self.stub_function_index.write().retain(|name, source| {
+            let (removed, added) = scan(&mut scans, source, version);
+            if let Some(since) = added
                 .as_ref()
-                .is_some_and(|names| names.contains(kind, name))
-        };
-        self.stub_function_index
-            .write()
-            .retain(|name, source| !is_removed(source, name, stubs::StubSymbolKind::Function));
-        self.stub_index
-            .write()
-            .retain(|name, source| !is_removed(source, name, stubs::StubSymbolKind::Class));
-        self.stub_constant_index
-            .write()
-            .retain(|name, source| !is_removed(source, name, stubs::StubSymbolKind::Constant));
+                .and_then(|n| n.get(stubs::StubSymbolKind::Function, name))
+            {
+                newer.functions.insert(name, since);
+            }
+            !removed
+                .as_ref()
+                .is_some_and(|n| n.contains(stubs::StubSymbolKind::Function, name))
+        });
+        self.stub_index.write().retain(|name, source| {
+            let (removed, added) = scan(&mut scans, source, version);
+            if let Some(since) = added
+                .as_ref()
+                .and_then(|n| n.get(stubs::StubSymbolKind::Class, name))
+            {
+                newer.classes.insert(name, since);
+            }
+            !removed
+                .as_ref()
+                .is_some_and(|n| n.contains(stubs::StubSymbolKind::Class, name))
+        });
+        self.stub_constant_index.write().retain(|&name, source| {
+            let (removed, added) = scan(&mut scans, source, version);
+            if let Some(since) = added
+                .as_ref()
+                .and_then(|n| n.get(stubs::StubSymbolKind::Constant, name))
+            {
+                newer.constants.insert(name, since);
+            }
+            !removed
+                .as_ref()
+                .is_some_and(|n| n.contains(stubs::StubSymbolKind::Constant, name))
+        });
+        newer.members = scans
+            .values()
+            .filter_map(|(_, added)| added.as_ref())
+            .flat_map(|names| names.members.iter())
+            .map(|name| name.to_ascii_lowercase())
+            .collect();
+        *self.newer_stubs.write() = newer;
     }
 }

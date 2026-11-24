@@ -196,6 +196,34 @@ pub fn extract_removed_version(docblock: &str) -> Option<PhpVersion> {
     PhpVersion::from_composer_constraint(desc)
 }
 
+/// The PHP version a phpstorm-stubs `@since` tag names, read from the
+/// text that follows the tag.
+///
+/// Only a bare `X.Y` or `X.Y.Z` counts.  Extension stubs also use the tag
+/// for the extension's own release (`@since PECL rrd >= 0.9.0`,
+/// `@since 0.4.1(-1)`), which says nothing about the PHP version.
+pub fn parse_php_since_version(text: &str) -> Option<PhpVersion> {
+    let version = text.split_whitespace().next()?;
+    let parts = version.split('.').count();
+    let well_formed = (2..=3).contains(&parts)
+        && version
+            .split('.')
+            .all(|part| !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit()));
+    if !well_formed {
+        return None;
+    }
+    PhpVersion::from_composer_constraint(version)
+}
+
+/// The PHP version a docblock's `@since` tag says the declaration was
+/// added in (see [`parse_php_since_version`]).
+pub fn extract_since_version_from_info(info: &DocblockInfo) -> Option<PhpVersion> {
+    info.tags
+        .iter()
+        .filter(|t| t.name == "since")
+        .find_map(|tag| parse_php_since_version(&tag.description))
+}
+
 /// The `@global Type $name` tags of a function's docblock: the global
 /// variables it documents, each with the type it declares.
 ///
@@ -1518,6 +1546,30 @@ mod tests {
     fn other_tags_but_no_removed() {
         let doc = "/**\n * @deprecated Use foo() instead.\n * @see NewClass\n * @return int\n */";
         assert_eq!(extract_removed_version(doc), None);
+    }
+
+    // ── extract_since_version ───────────────────────────────────────
+
+    fn since(doc: &str) -> Option<PhpVersion> {
+        extract_since_version_from_info(&parse_docblock_for_tags(doc)?)
+    }
+
+    #[test]
+    fn since_tag_reads_a_php_version() {
+        assert_eq!(
+            since("/**\n * @since 8.0\n */"),
+            Some(PhpVersion::new(8, 0))
+        );
+        assert_eq!(since("/** @since 5.3.0 */"), Some(PhpVersion::new(5, 3)));
+    }
+
+    #[test]
+    fn since_tag_ignores_extension_versions() {
+        assert_eq!(since("/** @since PECL rrd >= 0.9.0 */"), None);
+        assert_eq!(since("/** @since luasandbox >= 1.0.0 */"), None);
+        assert_eq!(since("/** @since 0.4.1(-1) */"), None);
+        assert_eq!(since("/** @since 7.5.0.199 */"), None);
+        assert_eq!(since("/** @since 999 */"), None);
     }
 
     // ── extract_type_assertions (generic types) ─────────────────────
