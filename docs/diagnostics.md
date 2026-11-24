@@ -102,6 +102,7 @@ These are shown dimmed rather than underlined, except `unwritten_property`.
 
 | Identifier | Severity | Reports |
 | --- | --- | --- |
+| `laravel_mass_assignment` | Warning | A dynamic attribute array passed to an Eloquent model that uses the default mass-assignment guards. |
 | `invalid_laravel_route` | Warning | A route name no route declares. |
 | `invalid_laravel_view` | Warning | A view name with no template. |
 | `invalid_laravel_config` | Warning | A `config()` key no config file declares. |

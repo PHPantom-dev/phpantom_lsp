@@ -170,7 +170,6 @@ ships, remove every row that names it.
 | L1  | [Facade completion](todo/laravel.md#l1-facade-completion-upstream-method-generator-improvement) (upstream `facade-documenter` PRs)                              | High        | High        |
 | L69 | [Benchmarks for Laravel string names and Blade](todo/laravel.md#l69-benchmarks-for-laravel-string-names-and-blade) | Medium | Low-Medium |
 | L72 | [Unknown Eloquent columns and relations in query strings](todo/laravel.md#l72-unknown-eloquent-columns-and-relations-in-query-strings) | Medium-High | Medium |
-| L49 | [Unguarded Eloquent mass assignment diagnostic](todo/laravel.md#l49-unguarded-eloquent-mass-assignment-diagnostic)                                                          | Medium      | Medium      |
 | L58 | [Laravel rate limiter names](todo/laravel.md#l58-laravel-rate-limiter-names)                                                                                                | Medium      | Medium      |
 | L56 | [Typed Laravel connection names](todo/laravel.md#l56-typed-laravel-connection-names)                                                                                        | Medium      | Medium      |
 | BL20 | [Port Bladestan's tests](todo/blade.md#bl20-port-bladestans-tests) | Medium | Medium |

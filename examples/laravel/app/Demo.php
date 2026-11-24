@@ -1205,6 +1205,14 @@ class Demo
         Bakery::make(['flour' => 'whole wheat']);
     }
 
+    /** @param array<string, mixed> $attributes */
+    public function fillPost(BlogPost $post, array $attributes): void
+    {
+        // Try: change the parameter type from BlogPost to Review. Review keeps
+        // the default guards, so filling it with a non-empty array can throw.
+        $post->fill($attributes);
+    }
+
     public function computedAttributes(): void
     {
         // Try: complete these keys. full_name has a setter; display_name and initials do not.

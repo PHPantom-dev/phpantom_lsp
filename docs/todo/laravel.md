@@ -466,28 +466,6 @@ always-on diagnostics — dynamic construction (`view("emails.$type")`)
 makes "unused" inherently a heuristic, so it must read as "no static
 reference found," never as an error.
 
-#### L49. Unguarded Eloquent mass assignment diagnostic
-
-**Impact: Medium · Complexity: Medium**
-
-A model that declares neither `$fillable` nor `$guarded` is totally
-guarded: `Model::create($request->all())` (and `fill()`/`update()`)
-throws `MassAssignmentException` for any attribute at all, a common
-first-app footgun with no signal today. (Silently dropping unknown keys
-only happens once `$fillable` is declared.) Flag a call whose
-attribute-array argument is not a literal (so its keys can't be checked
-individually) and whose target model declares neither `$fillable` nor
-`$guarded`, nor the `#[Fillable]`/`#[Guarded]`/`#[Unguarded]` model
-attributes, and the project never calls `Model::unguard()`, on `create()`, `fill()`, `update()`,
-`updateOrCreate()`, `firstOrCreate()`, and `firstOrNew()`. The model
-resolution and column-source machinery used by attribute-array key
-completion shares the same receiver-typing path as the diagnostic's
-model-argument matching, so reuse it.
-
-**Where to look:** `virtual_members/laravel/model_extraction/` for
-existing `$fillable`/`$guarded` reads; `diagnostics/` for the
-call-site diagnostic pattern used by similarly-shaped checks.
-
 #### L72. Unknown Eloquent columns and relations in query strings
 
 **Impact: Medium-High · Complexity: Medium**

@@ -13,6 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Flux and Filament components.** Flux's `<flux:button>` tags complete, offer the attributes the component declares, jump to its template in the package, and are reported when no component has the name. Components a package registers by directory, such as Flux's, now work under their `<x-prefix::…>` spelling too.
 
+#### Laravel
+
+- **Mass assignment on totally guarded models.** PHPantom warns when a call such as `Post::create($attributes)` can throw `MassAssignmentException` because the model uses Eloquent's default guards. Contributed by @shuvroroy.
+
 ### Changed
 
 - **Project tools only run in a trusted workspace.** PHPStan, PHP_CodeSniffer, PHPMD, Mago and external formatters execute the project's code, so the language server now runs them only once the workspace is trusted. VS Code and Zed already ask before starting the server, other editors ask once per project, and `phpantom_lsp trust` covers editors that cannot show the question. See [Project tools and workspace trust](configuration.md#project-tools-and-workspace-trust).
