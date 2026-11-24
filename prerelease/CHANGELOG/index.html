@@ -6220,6 +6220,9 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 <h4 id="laravel">Laravel<a class="headerlink" href="#laravel" title="Permanent link">&para;</a></h4>
 <ul>
 <li>
+<p><strong>Middleware names in Laravel controllers.</strong> In a controller's <code>$this-&gt;middleware('auth:admin')</code> call, you can complete the guard, jump to its configuration, and see a diagnostic for a misspelling. This follows the controller's parent classes, including application-specific base controllers. Contributed by @shuvroroy.</p>
+</li>
+<li>
 <p><strong>Authorization abilities on typed user models.</strong> In calls such as <code>$customer-&gt;can('update', $post)</code>, complete the ability, jump to its policy, or see why it does not apply to the model. Contributed by @shuvroroy.</p>
 </li>
 <li>

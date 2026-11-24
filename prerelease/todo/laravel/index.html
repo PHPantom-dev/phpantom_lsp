@@ -1299,17 +1299,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#l59-typed-controller-middleware-names" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        L59. Typed controller middleware names
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#l57-laravel-queue-names" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1955,17 +1944,6 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         L31. String-key rename, highlight, and semantic tokens
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#l59-typed-controller-middleware-names" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        L59. Typed controller middleware names
       </span>
     </span>
   </a>
@@ -2619,13 +2597,6 @@ semantic tokens reuse the existing spans. Renaming a view name implies
 moving the Blade file — defer that one until the rest is in place.
 Symfony service IDs and container parameters are string-key spans too,
 declarations included, so their rename comes with the same work.</p>
-<h4 id="l59-typed-controller-middleware-names">L59. Typed controller middleware names<a class="headerlink" href="#l59-typed-controller-middleware-names" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
-<p><code>$this-&gt;middleware('auth:admin')</code> names middleware only when <code>$this</code> is a
-Laravel controller; an unrelated class may define the same method for a
-different purpose. Confirm the enclosing class through the shared type engine
-before completing or validating embedded authentication guards. Static and
-fluent <code>Route::middleware()</code> calls remain syntactically unambiguous.</p>
 <h4 id="l57-laravel-queue-names">L57. Laravel queue names<a class="headerlink" href="#l57-laravel-queue-names" title="Permanent link">&para;</a></h4>
 <p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
 <p><code>-&gt;onQueue()</code> names are free-form rather than config-backed. Complete from
