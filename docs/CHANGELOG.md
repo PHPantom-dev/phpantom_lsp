@@ -25,6 +25,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Go to a global class's member from a file with a same-named class.** `\Tag::make()` written in a file that declares `App\Tag` now jumps to the global `Tag`, not the class in the current file.
+
 ### Internal
 
 - **Faster CI builds and benchmarks.** Test runners share a compiled suite and matching benchmark builds are reused. Performance checks keep the same thresholds and wait for background diagnostics before measuring memory. Contributed by @shuvroroy.

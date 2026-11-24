@@ -57,6 +57,26 @@ async fn member_navigation_keeps_global_and_namespaced_classes_distinct() {
     }
 }
 
+#[tokio::test]
+async fn global_member_navigation_skips_same_named_class_in_calling_file() {
+    use crate::common::{definition_locations, position_of, workspace_uri};
+    let global = "<?php class Tag { public static function make(): void {} }\n";
+    let (backend, _dir) = create_psr4_workspace(
+        r#"{"autoload":{"psr-4":{"App\\":"app/"}}}"#,
+        &[("Tag.php", global)],
+    );
+    backend.update_ast(workspace_uri(&backend, "Tag.php").as_str(), global);
+    let uri = workspace_uri(&backend, "app/Tag.php");
+    let source = "<?php namespace App; class Tag { public static function make(): void { \\Tag::make(); } }\n";
+    open_php(&backend, &uri, source).await;
+    let at = position_of(source, "make(); }");
+    let locations =
+        definition_locations(goto_definition_at(&backend, &uri, at.line, at.character).await);
+    assert_eq!(locations.len(), 1, "{locations:?}");
+    assert_eq!(locations[0].uri, workspace_uri(&backend, "Tag.php"));
+    assert_eq!(locations[0].range.start, position_of(global, "make()"));
+}
+
 // ─── Member Definition: Class Constants ─────────────────────────────────────
 
 #[tokio::test]

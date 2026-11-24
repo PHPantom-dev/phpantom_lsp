@@ -34,7 +34,7 @@ impl Backend {
         class_loader: &ResolvedClassLoader<'_>,
     ) -> Option<ClassInfo> {
         let fqn = candidate.fqn();
-        crate::class_lookup::find_class_by_name(all_classes, &fqn)
+        crate::class_lookup::find_class_by_fqn(all_classes, &fqn)
             .map(|arc| ClassInfo::clone(arc))
             .or_else(|| class_loader(Fqn::new(&fqn)).map(Arc::unwrap_or_clone))
     }
