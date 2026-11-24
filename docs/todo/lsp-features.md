@@ -888,34 +888,6 @@ not reported.
 
 ---
 
-## F48. Symfony environment variables
-
-**Impact: Medium · Complexity: Low-Medium**
-
-```yaml
-parameters:
-    app.secret: '%env(APP_SECRET)%'
-    app.port: '%env(int:DATABASE_PORT)%'
-```
-
-A Laravel `env('APP_NAME')` completes, jumps to the line of `.env` that
-declares it, and lists its references. The `%env(…)%` placeholders a
-Symfony project reads its environment through, in YAML, XML, PHP, and
-Twig configuration, do none of this: the `ContainerParameter` scan skips
-them. The name is the last segment after the processors (`int:`,
-`json:`, `default:fallback:`), and Symfony also reads `.env.local`,
-`.env.<environment>`, and `.env.<environment>.local`.
-
-Reuse the `Env` string-key kind and its `.env` reader rather than adding
-a second one.
-
-**Where to look:** `src/symfony/resources.rs`
-(`scan_parameter_placeholders`), `src/virtual_members/laravel/` (the
-`.env` reader), and `references/symfony-language-tools`
-(`docs/features/environment.rst`).
-
----
-
 ## F49. Symfony security names
 
 **Impact: Low-Medium · Complexity: Medium**

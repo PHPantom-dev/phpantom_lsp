@@ -149,6 +149,10 @@ $serviceLocator = new FileLocator($config);
 check('app.welcome_mailer is declared in config/services.php', $container->hasDefinition('app.welcome_mailer'));
 check('app.mailer is an alias of app.welcome_mailer', $container->hasAlias('app.mailer') && (string) $container->getAlias('app.mailer') === 'app.welcome_mailer');
 check("app.legacy_mailer ('@app.welcome_mailer' in YAML) is an alias of app.welcome_mailer", $container->hasAlias('app.legacy_mailer') && (string) $container->getAlias('app.legacy_mailer') === 'app.welcome_mailer');
+$exampleEnv = parse_ini_file(__DIR__ . '/.env.example', false, INI_SCANNER_RAW);
+check('The upload directory comes from the documented environment variable',
+    $container->getParameter('app.upload_directory') === '%env(resolve:UPLOAD_DIRECTORY)%'
+    && ($exampleEnv['UPLOAD_DIRECTORY'] ?? null) === 'var/uploads');
 check('app.sender_name is a parameter declared in config/services.php', $container->getParameter('app.sender_name') === 'PHPantom');
 check('app.support_email is a parameter declared in config/services.yaml', $container->getParameter('app.support_email') === 'support@example.com');
 check('app.welcome_mailer, which app.mailer aliases, is built from WelcomeMailer', $container->getDefinition('app.welcome_mailer')->getClass() === WelcomeMailer::class);

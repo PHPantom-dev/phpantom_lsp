@@ -68,9 +68,8 @@ pub(crate) enum StringKeyKind {
     /// A rate limiter registered by `RateLimiter::for()` and named by
     /// `throttle:name` middleware or a queue's `new RateLimited('name')`.
     RateLimiter,
-    /// An environment variable name: the string `env('APP_NAME')` or
-    /// `Env::get('APP_NAME')` reads, resolving to the line that declares it
-    /// in the project's `.env`.
+    /// A variable read by a Laravel environment helper or by Symfony's
+    /// container configuration, declared in the project's dotenv files.
     Env,
     /// A public asset: the path under `public/` that `asset('css/app.css')`,
     /// `secure_asset()`, `URL::asset()`, and `url()->asset()` link to.
@@ -321,6 +320,7 @@ impl StringKeyKind {
     /// it on.
     pub(crate) const fn framework(self) -> KeyFramework {
         match self {
+            Self::Env => KeyFramework::Dotenv,
             Self::TempestView { .. } => KeyFramework::Tempest,
             Self::Config
             | Self::ConfigResource(_)
@@ -335,7 +335,6 @@ impl StringKeyKind {
             | Self::ContainerBinding
             | Self::Middleware
             | Self::RateLimiter
-            | Self::Env
             | Self::Asset
             | Self::MixAsset
             | Self::ViteAsset
@@ -477,6 +476,8 @@ pub(crate) fn declares_another_name(kept: &SymbolSpan, next: &SymbolSpan) -> boo
 /// whether a project reads keys of that kind at all.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum KeyFramework {
+    /// Environment variables shared by Laravel and Symfony.
+    Dotenv,
     Laravel,
     /// Tempest's explicitly qualified view helper, including standalone use.
     Tempest,
@@ -518,6 +519,7 @@ impl ReceiverFrameworks {
     #[inline]
     pub(crate) fn enables(&self, kind: StringKeyKind) -> bool {
         match kind.framework() {
+            KeyFramework::Dotenv => self.symfony || self.laravel,
             KeyFramework::Laravel => self.laravel,
             KeyFramework::ServiceContainer => self.service_container,
             KeyFramework::Symfony => self.symfony,
@@ -1590,6 +1592,8 @@ pub(crate) enum ReceiverClass {
     /// Any of the container's configurators, whose arguments, bindings,
     /// properties, and parameter values may hold `%name%` placeholders.
     ConfiguratorArgument,
+    /// An environment placeholder in a container configurator argument.
+    ConfiguratorEnv,
     /// The container builder a kernel, a bundle, an extension, or a
     /// compiler pass defines services on: `register()`, `autowire()`,
     /// `setDefinition()`, and `setAlias()` declare a service ID, and the
@@ -1839,6 +1843,7 @@ impl ReceiverClass {
             // `decorate()` and `parent()` are only on the configurators of
             // one service, so the base class settles it.
             Self::ServiceConfigurator => &[(SYMFONY_ABSTRACT_CONFIGURATOR, ServiceId)],
+            Self::ConfiguratorEnv => &[(SYMFONY_ABSTRACT_CONFIGURATOR, StringKeyKind::Env)],
             Self::ConfiguratorArgument => &[(SYMFONY_ABSTRACT_CONFIGURATOR, ContainerParameter)],
             Self::ContainerBuilder => &[(SYMFONY_CONTAINER_BUILDER, ServiceId)],
             Self::ControllerRouting => &[(SYMFONY_ABSTRACT_CONTROLLER, SymfonyRoute)],
@@ -1973,9 +1978,10 @@ impl ReceiverClass {
     /// container or the routes with.  Empty for any other receiver.
     pub(crate) fn configurator_namespaces(self) -> &'static [&'static str] {
         match self {
-            Self::ConfiguratorSet | Self::ServiceConfigurator | Self::ConfiguratorArgument => {
-                &[SYMFONY_CONTAINER_CONFIGURATOR_NS]
-            }
+            Self::ConfiguratorSet
+            | Self::ServiceConfigurator
+            | Self::ConfiguratorArgument
+            | Self::ConfiguratorEnv => &[SYMFONY_CONTAINER_CONFIGURATOR_NS],
             Self::RoutingConfigurator => &[SYMFONY_ROUTING_CONFIGURATOR_NS],
             Self::ConfiguratorAlias => &[
                 SYMFONY_CONTAINER_CONFIGURATOR_NS,

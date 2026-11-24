@@ -6,6 +6,8 @@ catalogues together, the way a real Symfony project does.
 
 ## What to try
 
+- In `config/services.yaml`, go to the definition of `UPLOAD_DIRECTORY` to open its declaration in `.env.example`.
+
 - Open `config/services.yaml`, `config/routes.yaml`,
   `config/doctrine/User.orm.xml`, or `config/validator/User.yaml` and use
   go-to-definition on a PHP class name, or on the `Class::method` in a route's

@@ -67,7 +67,8 @@ fn value_site(start: usize, value: ContainerValue) -> ContainerValueSite {
     }
 }
 
-fn key_span(kind: StringKeyKind, key: &str, start: usize, is_write: bool) -> SymbolSpan {
+/// A configuration name at its unquoted byte offset.
+pub(crate) fn key_span(kind: StringKeyKind, key: &str, start: usize, is_write: bool) -> SymbolSpan {
     SymbolSpan {
         start: start as u32,
         end: (start + key.len()) as u32,
@@ -498,22 +499,31 @@ fn scan_service_references(text: &str, absolute_start: usize, spans: &mut Vec<Sy
     }
 }
 
-/// Each `%name%` parameter placeholder in `text`.
-fn scan_parameter_placeholders(text: &str, absolute_start: usize, spans: &mut Vec<SymbolSpan>) {
-    for_each_parameter_placeholder(text, |name, start| {
-        spans.push(key_span(
-            StringKeyKind::ContainerParameter,
-            name,
-            absolute_start + start,
-            false,
-        ));
+/// The variable read after the last Symfony environment processor.
+pub(crate) fn env_name(expression: &str) -> Option<&str> {
+    let name = expression.rsplit(':').next()?;
+    (!name.is_empty() && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_'))
+        .then_some(name)
+}
+
+/// Record the container parameters and environment variables referenced by placeholders.
+pub(crate) fn scan_parameter_placeholders(
+    text: &str,
+    absolute_start: usize,
+    spans: &mut Vec<SymbolSpan>,
+) {
+    for_each_parameter_placeholder(text, |kind, name, start| {
+        spans.push(key_span(kind, name, absolute_start + start, false));
     });
 }
 
 /// Call `found` with each `%name%` parameter placeholder in `text` and the
 /// offset of its name.  `%%` is an escaped percent sign, and `%env(…)%`
 /// reads an environment variable.
-pub(crate) fn for_each_parameter_placeholder(text: &str, mut found: impl FnMut(&str, usize)) {
+pub(crate) fn for_each_parameter_placeholder(
+    text: &str,
+    mut found: impl FnMut(StringKeyKind, &str, usize),
+) {
     let bytes = text.as_bytes();
     let mut cursor = 0usize;
     while let Some(relative) = memchr::memchr(b'%', &bytes[cursor..]) {
@@ -523,8 +533,13 @@ pub(crate) fn for_each_parameter_placeholder(text: &str, mut found: impl FnMut(&
         };
         let close = open + 1 + close_relative;
         let name = &text[open + 1..close];
-        if is_container_key(name) {
-            found(name, open + 1);
+        if let Some(inner) = name.strip_prefix("env(").and_then(|s| s.strip_suffix(')'))
+            && let Some(variable) = env_name(inner)
+        {
+            found(StringKeyKind::Env, variable, close - 1 - variable.len());
+            cursor = close + 1;
+        } else if is_container_key(name) {
+            found(StringKeyKind::ContainerParameter, name, open + 1);
             cursor = close + 1;
         } else {
             // `50% of the 100%` pairs the wrong signs: try the closing one
@@ -545,6 +560,7 @@ fn scan_xml(content: &str, out: &mut ContainerDeclarations) {
     if !content.contains("<service")
         && !content.contains("<parameter")
         && !content.contains("<argument")
+        && !content.contains("%env(")
     {
         return;
     }
@@ -731,7 +747,13 @@ mod tests {
     fn yaml_outside_a_container_section_reads_placeholders_only() {
         let yaml = "framework:\n    secret: '%env(APP_SECRET)%'\n    cache_dir: '%kernel.cache_dir%/app'\n    ratio: '50% of 100%'\n    escaped: '%%literal%%'\n";
         let found = keys("file:///p/config/packages/framework.yaml", yaml);
-        assert_eq!(named(&found), vec![(Param, "kernel.cache_dir", false)]);
+        assert_eq!(
+            named(&found),
+            vec![
+                (StringKeyKind::Env, "APP_SECRET", false),
+                (Param, "kernel.cache_dir", false)
+            ]
+        );
     }
 
     #[test]

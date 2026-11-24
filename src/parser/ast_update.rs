@@ -683,6 +683,7 @@ impl Backend {
                 content,
                 &owned_resolved,
                 crate::symbol_map::extraction::Frameworks {
+                    laravel: self.resolved_class_cache.read().laravel().is_enabled(),
                     symfony: self.is_symfony_project(),
                     service_container: self.reads_service_container(),
                     drupal: self.is_drupal_project(),

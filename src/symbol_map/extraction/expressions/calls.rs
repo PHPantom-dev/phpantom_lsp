@@ -421,6 +421,7 @@ fn extract_function_call<'a>(
                         &mut ctx.spans,
                     );
                 }
+                Some(crate::symbol_map::StringKeyKind::Env) if !ctx.laravel => {}
                 // `@vite(['resources/css/app.css', 'resources/js/app.js'])`
                 // names every entry point it loads.
                 Some(kind @ crate::symbol_map::StringKeyKind::ViteAsset) => {
@@ -813,6 +814,7 @@ mod tests {
             php,
             &names,
             crate::symbol_map::extraction::Frameworks {
+                laravel: false,
                 symfony: true,
                 service_container: true,
                 drupal,
@@ -860,6 +862,7 @@ mod tests {
             php,
             &names,
             crate::symbol_map::extraction::Frameworks {
+                laravel: false,
                 symfony: true,
                 service_container: true,
                 drupal: false,

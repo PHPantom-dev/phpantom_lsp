@@ -1,4 +1,6 @@
 parameters:
+  # Try: jump from UPLOAD_DIRECTORY to its declaration in .env.example.
+  app.upload_directory: '%env(resolve:UPLOAD_DIRECTORY)%'
   app.support_email: support@example.com
 
 services:

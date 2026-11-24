@@ -210,6 +210,7 @@ fn read_routing_file(path: &Path, content: &str) -> Option<SymbolMap> {
             content,
             &names,
             crate::symbol_map::extraction::Frameworks {
+                laravel: false,
                 symfony: true,
                 service_container: true,
                 drupal: false,

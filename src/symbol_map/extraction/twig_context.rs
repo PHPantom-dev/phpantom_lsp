@@ -354,6 +354,7 @@ mod tests {
             php,
             &names,
             crate::symbol_map::extraction::Frameworks {
+                laravel: false,
                 symfony,
                 service_container: symfony,
                 drupal: false,

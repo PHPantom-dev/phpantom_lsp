@@ -859,3 +859,72 @@ function greet(ContainerInterface $container): void {
         .unwrap_or_default();
     assert!(hover.contains(" = Greeter\n"), "{hover}");
 }
+
+#[tokio::test]
+async fn symfony_env_reads_navigate_across_config_formats() {
+    let yaml = "parameters:\n    app.directory: '%env(default:app.fallback:UPLOAD_DIR)%'\n    escaped: '%%env(UPLOAD_DIR)%%'\n";
+    let xml = "<container><framework secret=\"%env(resolve:UPLOAD_DIR)%\"/></container>";
+    let attribute = CONSUMER_PHP
+        .replace("param: 'app.sender_name'", "env: 'resolve:UPLOAD_DIR'")
+        .replace("service: 'app.php_mailer'", "'@app.php_mailer'")
+        .replace("%kernel.project_dir%", "%env(int:UPLOAD_DIR)%");
+    let configurator = SERVICES_PHP.replace(
+        "'plain %'",
+        "'%env(UPLOAD_DIR)%', env('UPLOAD_DIR')->resolve()",
+    );
+    let (backend, dir) = workspace(&[
+        (".env.example", "# Example\nUPLOAD_DIR=uploads\n"),
+        ("config/services.yaml", yaml),
+        ("config/services.xml", xml),
+        ("src/Controller/MailController.php", &attribute),
+        ("config/services.php", &configurator),
+    ])
+    .await;
+    let env = uri_for(&dir, ".env.example");
+    for (file, source) in [
+        ("config/services.yaml", yaml),
+        ("config/services.xml", xml),
+        ("src/Controller/MailController.php", attribute.as_str()),
+        ("config/services.php", configurator.as_str()),
+    ] {
+        let uri = uri_for(&dir, file);
+        let pos = position_in(source, "UPLOAD_DIR", 3);
+        let defs = definitions(&backend, &uri, pos).await;
+        assert_eq!(defs.len(), 1, "{file}: {defs:?}");
+        assert_eq!((&defs[0].uri, defs[0].range.start.line), (&env, 1));
+        let refs = references(&backend, &uri, pos).await;
+        assert_eq!(
+            refs,
+            sorted(vec![
+                (env.clone(), 1),
+                (uri_for(&dir, "config/services.yaml"), 1),
+                (uri_for(&dir, "config/services.xml"), 0),
+                (uri_for(&dir, "config/services.php"), 12),
+                (uri_for(&dir, "config/services.php"), 12),
+                (uri_for(&dir, "src/Controller/MailController.php"), 9),
+                (uri_for(&dir, "src/Controller/MailController.php"), 13),
+            ]),
+            "{file}"
+        );
+    }
+    for (file, source) in [
+        ("config/services.yaml", yaml),
+        ("config/services.php", configurator.as_str()),
+        ("src/Controller/MailController.php", attribute.as_str()),
+    ] {
+        let uri = uri_for(&dir, file);
+        let pos = position_in(source, "UPLOAD_DIR", 3);
+        let hover = crate::common::markup_hover_at(&backend, &uri, pos.line, pos.character).await;
+        assert!(hover.contains("uploads"), "{hover}");
+        assert_eq!(
+            completion_labels(&backend, &uri, pos).await,
+            vec!["UPLOAD_DIR"]
+        );
+    }
+    let uri = uri_for(&dir, "src/Controller/MailController.php");
+    let pos = position_in(&attribute, "int:UPLOAD_DIR", 7);
+    assert_eq!(
+        completion_labels(&backend, &uri, pos).await,
+        vec!["UPLOAD_DIR"]
+    );
+}
