@@ -1332,17 +1332,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#l46-can-on-a-user-model-the-receiver-does-not-name" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        L46. <code>-&gt;can()</code> on a user model the receiver does not name
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#l49-unguarded-eloquent-mass-assignment-diagnostic" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2006,17 +1995,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#l46-can-on-a-user-model-the-receiver-does-not-name" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        L46. <code>-&gt;can()</code> on a user model the receiver does not name
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#l49-unguarded-eloquent-mass-assignment-diagnostic" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2666,34 +2644,6 @@ translation keys. Surface as an opt-in workspace report
 always-on diagnostics — dynamic construction (<code>view("emails.$type")</code>)
 makes "unused" inherently a heuristic, so it must read as "no static
 reference found," never as an error.</p>
-<h4 id="l46-can-on-a-user-model-the-receiver-does-not-name">L46. <code>-&gt;can()</code> on a user model the receiver does not name<a class="headerlink" href="#l46-can-on-a-user-model-the-receiver-does-not-name" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Medium-High · Complexity: Medium-High</strong></p>
-<p>Authorization abilities are recognized on <code>Gate::allows()</code>,
-<code>$this-&gt;authorize()</code>, the <code>can:</code> middleware parameter, and Blade's <code>@can</code>,
-but the most common spelling of all, <code>$user-&gt;can('update', $post)</code>, is
-only recognized when the receiver plainly reads as the authenticated user:
-a variable or property whose name ends in <code>user</code>, or any <code>user()</code> call
-(<code>auth()-&gt;user()</code>, <code>Auth::user()</code>, <code>$request-&gt;user()</code>).</p>
-<p>An application whose user model is not called <code>User</code> writes the same check
-and gets nothing. <code>$customer-&gt;can('update', $routine)</code>,
-<code>$member-&gt;canAny([…])</code>, and <code>$account-&gt;cannot(…)</code> are all invisible: no
-completion inside the string, no hover, no go-to-definition, and no
-unknown-ability diagnostic. In a production codebase where every
-authorization call is written that way, the whole feature is inert.</p>
-<p>The receiver's <em>type</em> is what settles this, and <code>can()</code> is far too ordinary
-a method name to claim on the name alone, so the fix is the mechanism main
-already uses for render sites whose receiver only a type settles: emit a
-candidate site during extraction and confirm it in a later, type-aware
-pass, the way <code>TypedReceiverSite</code> /
-<code>typed_receiver_spans_for</code> (<code>blade/typed_receiver.rs</code>) does. A receiver that resolves to the
-configured auth model (or to <code>Illuminate\Contracts\Auth\Access\Authorizable</code>)
-makes the call an authorization check; anything else leaves it alone. The
-existing name heuristic stays as the cheap path that needs no type
-resolution at all.</p>
-<p><strong>Where to look:</strong> <code>receiver_is_user_like</code> in
-<code>symbol_map/extraction/laravel/gates.rs</code> and its completion-side twin (a
-local check in <code>completion/laravel_string_keys/context.rs</code>); <code>TypedReceiverSite</code> in
-<code>symbol_map/string_keys.rs</code> for the confirm-later shape.</p>
 <h4 id="l49-unguarded-eloquent-mass-assignment-diagnostic">L49. Unguarded Eloquent mass assignment diagnostic<a class="headerlink" href="#l49-unguarded-eloquent-mass-assignment-diagnostic" title="Permanent link">&para;</a></h4>
 <p><strong>Impact: Medium · Complexity: Medium</strong></p>
 <p>A model that declares neither <code>$fillable</code> nor <code>$guarded</code> is totally
