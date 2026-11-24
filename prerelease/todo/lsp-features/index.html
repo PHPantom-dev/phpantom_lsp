@@ -2729,6 +2729,86 @@ spellings.</p>
 <p><strong>Where to look:</strong> <code>src/hover/mod.rs</code> (<code>hover_from_symbol</code>, which has no
 parameter arm, and <code>parameter_hover_body</code>, which spells the label's hover
 from the declared parameter), <code>src/hover/variable.rs</code>.</p>
+<hr />
+<h2 id="f72-a-baseline-for-analyze">F72. A baseline for <code>analyze</code><a class="headerlink" href="#f72-a-baseline-for-analyze" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium-High · Complexity: Low-Medium</strong></p>
+<p>A project with existing findings can't turn <code>phpantom_lsp analyze</code> on in
+CI: it exits <code>1</code> until every finding is fixed or silenced one by one in
+<code>[[diagnostics.ignore]]</code>. PHPStan, Psalm and Tusk PHP all solve this with
+a baseline file, written once, after which a run reports only findings
+the file doesn't list.</p>
+<p>Add <code>--generate-baseline[=FILE]</code> and <code>--baseline FILE</code>, plus a
+<code>[diagnostics] baseline</code> key in <code>.phpantom.toml</code> so the editor can hide
+baselined findings too. Key each entry by the file's path relative to the
+project root, the diagnostic code and the message, never by line, so it
+survives code moving around it, and store a count per key the way
+PHPStan does: without it, a third copy of a message a file already has
+twice slips through. Sort the file so a regenerated baseline diffs
+cleanly. At the end of a run, say how many baselined findings were not
+found, so a stale baseline gets noticed and regenerated.</p>
+<p><strong>Where to look:</strong> <code>src/analyse/stages.rs</code> (where the exit code is
+decided), <code>src/analyse/output.rs</code>, <code>src/diagnostics/ignore_rules.rs</code> (the
+existing config-driven suppression, which the baseline filter should run
+beside).</p>
+<hr />
+<h2 id="f73-an-mcp-server-for-agents-without-lsp-support">F73. An MCP server for agents without LSP support<a class="headerlink" href="#f73-an-mcp-server-for-agents-without-lsp-support" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
+<p>Claude Code already gets PHPantom's index through the
+<code>PHPantom-dev/phpantom_claude</code> plugin, which runs the language server
+and puts the <code>analyze</code>, <code>fix</code> and <code>move</code> commands on its path. Agents that
+cannot host a language server (Codex CLI, Gemini CLI, and others that
+speak MCP) get none of it and fall back to grep.</p>
+<p>Add <code>phpantom_lsp mcp</code>, serving MCP over stdio from the same <code>Backend</code>
+the language server builds, with tools for what an agent asks most:
+find a symbol by name, its definition and signature, its references,
+the type of an expression at a position, and the diagnostics for a file
+or the project. Add project-level questions no LSP request covers, which
+help Claude Code users too: the routes, a model's columns and relations,
+the config keys, and the views. Keep the tools to facts the index
+already holds, with no database or application boot. Tusk PHP's
+<code>internal/mcpserver/</code> and <code>docs/ai-agents.md</code> show one tool set; leave
+out its live-database tools.</p>
+<hr />
+<h2 id="f74-hover-does-not-show-a-declarations-attributes">F74. Hover does not show a declaration's attributes<a class="headerlink" href="#f74-hover-does-not-show-a-declarations-attributes" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low · Complexity: Low</strong></p>
+<p>Hovering a method or function shows its signature and docblock but none of
+its attributes, so <code>#[\NoDiscard]</code> and the project's own attributes
+(<code>#[Marker] public function go()</code>) are invisible there. <code>#[\Override]</code> and
+<code>#[\Deprecated]</code> already surface as the "overrides" and "deprecated"
+lines, so they need nothing more.</p>
+<p>Show the attribute list above the declaration in the hover's code block,
+spelled as written, for classes, functions, methods, properties, constants
+and enum cases. The cases are in <code>tests/fixtures/tusk/php_8_0/</code> and
+<code>tests/fixtures/tusk/php_8_5/</code>, marked <code>// ignore:</code>.</p>
+<p><strong>Where to look:</strong> <code>src/hover/member.rs</code>, <code>src/hover/function.rs</code>; the
+parser would have to keep the attribute text on <code>MethodInfo</code>,
+<code>FunctionInfo</code> and the rest.</p>
+<hr />
+<h2 id="f75-hover-leaves-out-asymmetric-visibility">F75. Hover leaves out asymmetric visibility<a class="headerlink" href="#f75-hover-leaves-out-asymmetric-visibility" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
+<p><code>public private(set) string $name</code> hovers as <code>public string $name</code>: the
+model has no field for a property's write visibility, so hover cannot show
+it. The same field is what D19 needs to tell a write outside the set scope
+from a read.</p>
+<p><strong>Where to look:</strong> <code>src/types/property.rs</code> (<code>PropertyInfo</code>), the property
+parser, <code>src/hover/member.rs</code> (<code>hover_for_property</code>). The case is
+<code>tests/fixtures/tusk/php_8_4/asymmetric_visibility_shows_in_hover.fixture</code>.</p>
+<hr />
+<h2 id="f76-php-86-parameter-doc-comments-are-not-read">F76. PHP 8.6 parameter doc comments are not read<a class="headerlink" href="#f76-php-86-parameter-doc-comments-are-not-read" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
+<p>PHP 8.6 lets a parameter carry its own doc comment:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-23-1" name="__codelineno-23-1" href="#__codelineno-23-1"></a><span class="x">function handle(</span>
+<a id="__codelineno-23-2" name="__codelineno-23-2" href="#__codelineno-23-2"></a><span class="x">    /** The request ID. */</span>
+<a id="__codelineno-23-3" name="__codelineno-23-3" href="#__codelineno-23-3"></a><span class="x">    string $id,</span>
+<a id="__codelineno-23-4" name="__codelineno-23-4" href="#__codelineno-23-4"></a><span class="x">    /** @var Logger */</span>
+<a id="__codelineno-23-5" name="__codelineno-23-5" href="#__codelineno-23-5"></a><span class="x">    $log,</span>
+<a id="__codelineno-23-6" name="__codelineno-23-6" href="#__codelineno-23-6"></a><span class="x">): void {}</span>
+</code></pre></div>
+<p>Hovering <code>$id</code> should show the description, and an <code>@var</code> there should type
+an untyped parameter. Today both are ignored.</p>
+<p><strong>Where to look:</strong> the parameter parser in <code>src/parser/</code>, and
+<code>src/hover/variable.rs</code>. The cases are in <code>tests/fixtures/tusk/php_8_6/</code>,
+marked <code>// ignore:</code>.</p>
 
 
 

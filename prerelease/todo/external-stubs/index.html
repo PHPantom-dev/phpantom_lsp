@@ -1116,6 +1116,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#e8-the-embedded-stubs-lack-php-86-additions" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        E8. The embedded stubs lack PHP 8.6 additions
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1681,6 +1692,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#e8-the-embedded-stubs-lack-php-86-additions" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        E8. The embedded stubs lack PHP 8.6 additions
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -2047,6 +2069,24 @@ declarations: Drupal's URL methods (<code>Url::toString()</code>,
 and is well-tested. It stays in place until the partial-class merge
 above is ready. New patches can still be added
 in Rust in the interim.</p>
+<hr />
+<h2 id="e8-the-embedded-stubs-lack-php-86-additions">E8. The embedded stubs lack PHP 8.6 additions<a class="headerlink" href="#e8-the-embedded-stubs-lack-php-86-additions" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low-Medium · Complexity: Low</strong></p>
+<p>The pinned phpstorm-stubs commit has some of PHP 8.6 (<code>clamp()</code>,
+<code>SortDirection</code>, <code>Io\Poll\Context</code>) but not all of it. Missing:</p>
+<ul>
+<li><code>Time\Duration</code> and the rest of the <code>Time</code> namespace.</li>
+<li><code>Uri\WhatWg\url_percent_encode()</code> and <code>Uri\WhatWg\UrlPercentEncodingMode</code>.</li>
+<li>The 8.6 deprecations: the alias functions (<code>is_integer()</code>, <code>is_long()</code>,
+  <code>is_double()</code>, <code>doubleval()</code>), the <code>mb_ereg*</code> family, <code>spl_object_hash()</code>,
+  <code>strcoll()</code> and a few more, and <code>ArrayIterator</code>'s sort and flag methods
+  (<code>asort()</code>, <code>ksort()</code>, <code>getFlags()</code>, <code>setFlags()</code>, and the rest). Tusk
+  PHP's <code>internal/checks/deprecated_functions.go</code> has the function list.</li>
+</ul>
+<p>Add them to the <code>AJenbo/phpstorm-stubs</code> fork (or upstream) and bump
+<code>stubs.lock</code>. Tusk PHP's <code>internal/stubs/php/core/*/php-8.6.php</code> lists
+what 8.6's reflection reports. The cases are in
+<code>tests/fixtures/tusk/php_8_6/</code>, marked <code>// ignore:</code>.</p>
 
 
 

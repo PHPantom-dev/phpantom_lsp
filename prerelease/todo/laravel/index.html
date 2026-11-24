@@ -1332,6 +1332,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#l72-unknown-eloquent-columns-and-relations-in-query-strings" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        L72. Unknown Eloquent columns and relations in query strings
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#l61-resolve-aliased-facade-imports-during-route-discovery" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1977,6 +1988,17 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         L49. Unguarded Eloquent mass assignment diagnostic
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#l72-unknown-eloquent-columns-and-relations-in-query-strings" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        L72. Unknown Eloquent columns and relations in query strings
       </span>
     </span>
   </a>
@@ -2633,6 +2655,46 @@ model-argument matching, so reuse it.</p>
 <p><strong>Where to look:</strong> <code>virtual_members/laravel/model_extraction/</code> for
 existing <code>$fillable</code>/<code>$guarded</code> reads; <code>diagnostics/</code> for the
 call-site diagnostic pattern used by similarly-shaped checks.</p>
+<h4 id="l72-unknown-eloquent-columns-and-relations-in-query-strings">L72. Unknown Eloquent columns and relations in query strings<a class="headerlink" href="#l72-unknown-eloquent-columns-and-relations-in-query-strings" title="Permanent link">&para;</a></h4>
+<p><strong>Impact: Medium-High · Complexity: Medium</strong></p>
+<p>Relation and column names passed as strings to a model's query builder
+complete and navigate (<code>completion/eloquent_string.rs</code>), but a typo is
+not reported: <code>Post::query()-&gt;where('tilte', …)</code> and
+<code>Post::with('coments')</code> run until the query hits the database or the
+relation is loaded. Report a relation name that the model does not
+declare in <code>with()</code>, <code>without()</code>, <code>has()</code>, <code>doesntHave()</code>, <code>whereHas()</code>,
+<code>whereDoesntHave()</code>, <code>withCount()</code>, the <code>withSum()</code> family,
+<code>withExists()</code>, <code>load()</code>, <code>loadMissing()</code>, and <code>loadCount()</code>, following
+dotted paths (<code>'author.profile'</code>) through each relation's related model.
+Report a column name in <code>where()</code> and its variants, <code>whereIn()</code>,
+<code>whereNull()</code>, <code>whereBetween()</code>, the date filters, <code>whereColumn()</code>,
+<code>select()</code>, <code>addSelect()</code>, <code>pluck()</code>, <code>value()</code>, <code>increment()</code>, and
+<code>decrement()</code>.</p>
+<p>Stay quiet whenever the answer is not certain:</p>
+<ul>
+<li><strong>Columns</strong> only on a model whose table the migrations or schema dump
+  declare in full (the same condition the strict-mode unknown-attribute
+  check uses). A <code>$table</code> the project builds at run time, or a table no
+  migration creates, leaves the model's columns unknown.</li>
+<li><strong>Aliases.</strong> <code>orderBy()</code>, <code>latest()</code>, <code>oldest()</code>, <code>groupBy()</code>, and
+  <code>having()</code> also take an alias from the select list
+  (<code>selectRaw('count(*) as total')-&gt;orderBy('total')</code>, <code>withCount('posts')</code>
+  then <code>having('posts_count', …)</code>), so they are not checked.</li>
+<li><strong>Qualified and raw names.</strong> <code>'posts.title'</code> is read against the named
+  table only when that table is the model's own or a joined table whose
+  columns are known; anything containing an expression is skipped.</li>
+<li><strong>Relations</strong> only when every class and trait the model is made of is
+  indexed, so a relation from an unindexed trait or a macro is never
+  reported missing.</li>
+</ul>
+<p>Tusk PHP's <code>internal/checks/invalid_builder_args.go</code> is a reference for
+the method lists and for the same "complete knowledge only" rule.</p>
+<p><strong>Where to look:</strong> <code>diagnostics/yii_relations.rs</code> and
+<code>diagnostics/yii_queries.rs</code> report the same two mistakes for Yii from
+migrations, and <code>completion/eloquent_string.rs</code> already resolves the
+model and enumerates its relations and columns at these call sites. Add
+the diagnostic beside the other Laravel string checks in
+<code>diagnostics/laravel_string_keys.rs</code>.</p>
 <h4 id="l61-resolve-aliased-facade-imports-during-route-discovery">L61. Resolve aliased facade imports during route discovery<a class="headerlink" href="#l61-resolve-aliased-facade-imports-during-route-discovery" title="Permanent link">&para;</a></h4>
 <p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
 <p>Route discovery recognizes <code>Route</code> and its fully qualified facade name,

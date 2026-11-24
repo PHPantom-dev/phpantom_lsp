@@ -1232,6 +1232,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#t72-diagnostic-changes-on-real-projects-are-only-caught-by-hand" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        T72. Diagnostic changes on real projects are only caught by hand
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#t34-staticconst-over-narrows-to-the-declaring-classs-value" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1570,6 +1581,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#t72-diagnostic-changes-on-real-projects-are-only-caught-by-hand" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        T72. Diagnostic changes on real projects are only caught by hand
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#t34-staticconst-over-narrows-to-the-declaring-classs-value" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1864,6 +1886,29 @@ diffs two dumps (the branch and <code>main</code>) and reports targets lost,
 changed, and gained, plus the share of member accesses resolved. Run it
 on a few real projects before merging type-engine changes, and record
 coverage alongside the diagnostic counts.</p>
+<hr />
+<h2 id="t72-diagnostic-changes-on-real-projects-are-only-caught-by-hand">T72. Diagnostic changes on real projects are only caught by hand<a class="headerlink" href="#t72-diagnostic-changes-on-real-projects-are-only-caught-by-hand" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium · Complexity: Medium</strong></p>
+<p>Whether a change adds false positives on real code is checked by running
+<code>analyze</code> over the local sample projects and comparing counts by hand.
+CI never does it, so a regression that only real code triggers reaches
+<code>main</code> unless someone remembers to look, and a fix that removes findings
+is never recorded either.</p>
+<p>Pin a few public projects at fixed commits (laravel/framework,
+symfony/symfony, WordPress, Drupal core), install their Composer
+dependencies from a lock file kept in the repo, and commit what
+<code>analyze</code> reports on each as a baseline in F72's format (path, code and
+message, no line numbers). A CI job runs <code>analyze</code> over each pinned
+checkout and fails when a finding appears or disappears, printing the
+new ones with their positions. A script rewrites the baselines after an
+intended change, so every shift in findings shows up in the PR diff.
+Cache the checkouts and dependencies by the pinned commit, and run the
+projects as a matrix so the job's wall time stays close to the slowest
+project. T61's resolution dump can later ride on the same checkouts.</p>
+<p>Tusk PHP does exactly this (<code>scripts/field-baseline.sh</code>,
+<code>testdata/field/</code>, the <code>field-baseline</code> job in its
+<code>.github/workflows/conformance.yml</code>) for Laravel, Symfony, WordPress and
+Magento 2.</p>
 <hr />
 <h2 id="t34-staticconst-over-narrows-to-the-declaring-classs-value">T34. <code>static::CONST</code> over-narrows to the declaring class's value<a class="headerlink" href="#t34-staticconst-over-narrows-to-the-declaring-classs-value" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Complexity: Medium-High</strong></p>
