@@ -24,13 +24,22 @@ pub(crate) fn argument_at<'a, 'arena>(
     index: usize,
     name: &[u8],
 ) -> Option<&'a Expression<'arena>> {
+    argument_for_parameter(argument_list, index, name).map(Argument::value)
+}
+
+/// Like `argument_at`, retaining the argument node for callers that distinguish unpacking.
+pub(crate) fn argument_for_parameter<'a, 'arena>(
+    argument_list: &'a ArgumentList<'arena>,
+    index: usize,
+    name: &[u8],
+) -> Option<&'a Argument<'arena>> {
     argument_list
         .arguments
         .iter()
         .enumerate()
-        .find_map(|(at, argument)| match argument {
-            Argument::Positional(positional) if at == index => Some(positional.value),
-            Argument::Named(named) if named.name.value == name => Some(named.value),
+        .find_map(|(at, arg)| match arg {
+            Argument::Positional(_) if at == index => Some(arg),
+            Argument::Named(named) if named.name.value == name => Some(arg),
             _ => None,
         })
 }
