@@ -167,7 +167,6 @@ ships, remove every row that names it.
 | --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
 | L68 | [Port Larastan's type and rule tests](todo/laravel.md#l68-port-larastans-type-and-rule-tests) | High | Medium |
 | L1  | [Facade completion](todo/laravel.md#l1-facade-completion-upstream-method-generator-improvement) (upstream `facade-documenter` PRs)                              | High        | High        |
-| L46 | [`->can()` on a user model the receiver does not name](todo/laravel.md#l46-can-on-a-user-model-the-receiver-does-not-name)                                                  | Medium-High | Medium-High |
 | L69 | [Benchmarks for Laravel string names and Blade](todo/laravel.md#l69-benchmarks-for-laravel-string-names-and-blade) | Medium | Low-Medium |
 | L49 | [Unguarded Eloquent mass assignment diagnostic](todo/laravel.md#l49-unguarded-eloquent-mass-assignment-diagnostic)                                                          | Medium      | Medium      |
 | L58 | [Laravel rate limiter names](todo/laravel.md#l58-laravel-rate-limiter-names)                                                                                                | Medium      | Medium      |

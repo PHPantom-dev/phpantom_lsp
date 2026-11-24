@@ -17,6 +17,24 @@ use mago_syntax::cst::{
 use crate::atom::bytes_to_str;
 use crate::types::ParameterInfo;
 
+/// The argument a call passes its parameter `index` in: positional, or
+/// named `name`.
+pub(crate) fn argument_at<'a, 'arena>(
+    argument_list: &'a ArgumentList<'arena>,
+    index: usize,
+    name: &[u8],
+) -> Option<&'a Expression<'arena>> {
+    argument_list
+        .arguments
+        .iter()
+        .enumerate()
+        .find_map(|(at, argument)| match argument {
+            Argument::Positional(positional) if at == index => Some(positional.value),
+            Argument::Named(named) if named.name.value == name => Some(named.value),
+            _ => None,
+        })
+}
+
 /// For each parameter in `params`, find the call argument that supplies it.
 ///
 /// PHP binding rules: positional arguments fill parameters left to right;

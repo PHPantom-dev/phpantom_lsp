@@ -122,53 +122,49 @@ pub(in crate::symbol_map::extraction) fn try_emit_gate_ability_spans(
         return;
     };
 
-    let first_span = spans.len();
-    for_each_value(ability_arg.value(), |expr| {
-        push_gate_ability_span(expr, role, content, spans)
-    });
-    if spans.len() == first_span {
-        return;
-    }
-
-    let Some(model_index) = model_index else {
-        return;
-    };
-    let Some(model_arg) = argument_list.arguments.iter().nth(model_index) else {
-        return;
-    };
-    let Some((subject_text, is_static)) = gate_model_subject(model_arg.value(), content) else {
-        return;
-    };
-    for span in &spans[first_span..] {
-        gate_subjects.push(crate::symbol_map::GateSubject {
-            ability_start: span.start,
-            subject_text: subject_text.clone(),
-            is_static,
-        });
-    }
+    let model = model_index.and_then(|i| argument_list.arguments.get(i));
+    for_each_gate_ability(
+        ability_arg.value(),
+        model.map(Argument::value),
+        content,
+        gate_subjects,
+        |key, start, end| {
+            spans.push(SymbolSpan {
+                start,
+                end,
+                kind: SymbolKind::StringKey {
+                    kind: crate::symbol_map::StringKeyKind::GateAbility,
+                    key: key.to_owned(),
+                    is_write: role == AbilityRole::Definition,
+                    is_optional: role == AbilityRole::Existence,
+                },
+            });
+        },
+    );
 }
 
-/// Push a gate-ability span for a single string-literal expression.
-fn push_gate_ability_span(
-    expr: &Expression<'_>,
-    role: AbilityRole,
+/// Keep the checked model at each ability's offset, including sites whose
+/// receiver type will only be available after indexing.
+pub(super) fn for_each_gate_ability(
+    abilities: &Expression<'_>,
+    model: Option<&Expression<'_>>,
     content: &str,
-    spans: &mut Vec<SymbolSpan>,
+    subjects: &mut Vec<crate::symbol_map::GateSubject>,
+    mut emit: impl FnMut(&str, u32, u32),
 ) {
-    // An empty literal is rejected by the extractor, so whatever is
-    // between the quotes is a name.
-    let Some((ability, start, end)) = string_literal_at_range(expr, content) else {
-        return;
-    };
-    spans.push(SymbolSpan {
-        start,
-        end,
-        kind: SymbolKind::StringKey {
-            kind: crate::symbol_map::StringKeyKind::GateAbility,
-            key: ability.to_string(),
-            is_write: role == AbilityRole::Definition,
-            is_optional: role == AbilityRole::Existence,
-        },
+    let subject =
+        std::cell::LazyCell::new(|| model.and_then(|expr| gate_model_subject(expr, content)));
+    for_each_value(abilities, |expr| {
+        if let Some((key, start, end)) = string_literal_at_range(expr, content) {
+            emit(key, start, end);
+            if let Some((text, is_static)) = &*subject {
+                subjects.push(crate::symbol_map::GateSubject {
+                    ability_start: start,
+                    subject_text: text.clone(),
+                    is_static: *is_static,
+                });
+            }
+        }
     });
 }
 

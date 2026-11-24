@@ -157,7 +157,7 @@ pub(in crate::symbol_map::extraction) fn names_command(
 }
 
 /// Whether `member_name` is one of the `can()` family.
-fn is_can_method(member_name: &str) -> bool {
+pub(crate) fn is_can_method(member_name: &str) -> bool {
     member_name.eq_ignore_ascii_case("can")
         || member_name.eq_ignore_ascii_case("cannot")
         || member_name.eq_ignore_ascii_case("canAny")
@@ -397,6 +397,45 @@ fn emit_gate_ability_spans_for_method<'a>(
         return;
     }
 
+    if is_can_method(member_name) && !receiver.roots_at_route() {
+        let Some(abilities) = crate::call_args::argument_at(argument_list, 0, b"abilities") else {
+            return;
+        };
+        let model = crate::call_args::argument_at(argument_list, 1, b"arguments");
+        let user_like = receiver.is_user_like();
+        for_each_gate_ability(
+            abilities,
+            model,
+            ctx.content,
+            &mut ctx.gate_subjects,
+            |ability, start, end| {
+                let key = ability.to_owned();
+                if user_like {
+                    ctx.spans.push(SymbolSpan {
+                        start,
+                        end,
+                        kind: SymbolKind::StringKey {
+                            kind: StringKeyKind::GateAbility,
+                            key,
+                            is_write: false,
+                            is_optional: false,
+                        },
+                    });
+                } else {
+                    ctx.typed_receiver_sites.push(TypedReceiverSite {
+                        start,
+                        end,
+                        key,
+                        receiver: ReceiverClass::LaravelAuthorizable,
+                        is_write: false,
+                        is_optional: false,
+                        guards: 0,
+                    });
+                }
+            },
+        );
+        return;
+    }
     let Some(args) = ability_arguments(member_name, receiver) else {
         return;
     };

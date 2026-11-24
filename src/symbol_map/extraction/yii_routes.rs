@@ -15,6 +15,7 @@
 //! to confirm (see [`symfony_receiver_method`]).
 
 use super::*;
+use crate::call_args::argument_at;
 use crate::symbol_map::{RoutePlaceholder, RouteSite, StringKeyKind};
 use crate::virtual_members::laravel::helpers::{
     extract_string_literal_including_empty, resolved_string_literal,

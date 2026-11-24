@@ -231,18 +231,39 @@ fn project_auth_implementors(
 fn read_auth_config(backend: &Backend) -> Option<String> {
     let root = backend.workspace.workspace_root.read().clone()?;
     let path = root.join("config").join("auth.php");
-    if !path.is_file() {
-        return None;
+    backend
+        .open_buffer_at_path(&path)
+        .map(Arc::unwrap_or_clone)
+        // Laravel 11's slim skeleton ships without `config/auth.php`, which
+        // is not worth the warning a failed read logs.
+        .or_else(|| {
+            path.is_file()
+                .then(|| crate::util::read_php_source(&path))?
+        })
+}
+
+impl Backend {
+    /// Only models named by a provider qualify here. The fallback types used
+    /// to infer `auth()->user()` can also include unrelated authenticatables.
+    pub(crate) fn configured_auth_provider_models(&self) -> Arc<[String]> {
+        self.laravel
+            .auth_provider_models
+            .read()
+            .get_or_init(|| {
+                let tree = read_auth_config(self).and_then(|content| parse_config_tree(&content));
+                let Some(ConfigNode::Array(providers)) =
+                    tree.as_ref().and_then(|t| t.get(&["providers"]))
+                else {
+                    return Arc::default();
+                };
+                providers
+                    .iter()
+                    .filter_map(|(_, provider)| provider.value_at(&["model"]))
+                    .flat_map(|value| value.as_classes().0)
+                    .collect()
+            })
+            .clone()
     }
-    // Prefer an open editor buffer (keyed by an absolute file URI); fall back
-    // to disk.  `Uri::from_file_path` requires an absolute path, so relative
-    // workspace roots (e.g. `analyze --project-root`) go straight to disk.
-    if let Some(uri) = crate::util::path_to_url(&path)
-        && let Some(content) = backend.get_file_content(uri.as_ref())
-    {
-        return Some(content);
-    }
-    std::fs::read_to_string(&path).ok()
 }
 
 /// Resolve a configured model name to its canonical FQN, keeping it only if it

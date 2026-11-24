@@ -10,13 +10,13 @@ use tower_lsp_server::gen_lsp_types::Position;
 
 use std::cell::OnceCell;
 
-use crate::completion::source::code_context::{CodeContext, OpenBracket};
+use crate::completion::source::code_context::{CodeContext, OpenBracket, Operator};
 use crate::symbol_map::StringKeyKind;
 use crate::symbol_map::extraction::laravel::{
     MethodReceiver, argument_takes_name_keys, argument_takes_name_list,
     facade_static_call_arg_kind, facade_static_call_array_key_kind,
     helper_function_accepts_name_list, helper_function_first_arg_kind, instance_method_arg_kind,
-    is_middleware_method,
+    is_can_method, is_middleware_method,
 };
 use crate::text_position::position_to_offset;
 use crate::text_scan::{CodeOffsets, is_escaped, scan_ident_backward, skip_php_trivia};
@@ -58,7 +58,8 @@ impl ArgumentSlot<'_> {
     }
 }
 
-pub(super) struct StringArgumentContext<'a> {
+pub(super) struct StringArgumentContext<'a, 'call> {
+    operator: Option<&'call Operator>,
     pub(super) callable: &'a str,
     pub(super) slot: ArgumentSlot<'a>,
     pub(super) shape: StringArgumentShape,
@@ -119,7 +120,7 @@ pub(crate) fn scalar_argument_at<'a>(
 fn array_argument_at<'a>(
     content: &'a str,
     open: &OpenBracket,
-    paren: Option<&OpenBracket>,
+    paren: &OpenBracket,
 ) -> Option<(&'a str, ArgumentSlot<'a>)> {
     let before_open = &content[..open.code_before];
     let before_array = match open.byte {
@@ -133,7 +134,9 @@ fn array_argument_at<'a>(
         }
         _ => return None,
     };
-    let paren = paren.filter(|b| b.byte == b'(')?;
+    if paren.byte != b'(' {
+        return None;
+    }
     argument_slot(content, paren, before_array)
 }
 
@@ -151,15 +154,17 @@ pub(super) fn string_literal_is_array_key(content: &str, cursor: usize, quote: u
     false
 }
 
-pub(super) fn string_argument_context<'a>(
+pub(super) fn string_argument_context<'a, 'call>(
     content: &'a str,
-    code: &CodeContext<'a>,
+    code: &'call CodeContext<'a>,
     cursor: usize,
     quote: u8,
-) -> Option<StringArgumentContext<'a>> {
+) -> Option<StringArgumentContext<'a, 'call>> {
     let mut brackets = code.open_brackets.iter().rev();
     let innermost = brackets.next()?;
-    if let Some((callable, slot)) = array_argument_at(content, innermost, brackets.next()) {
+    if let Some(parent) = brackets.next()
+        && let Some((callable, slot)) = array_argument_at(content, innermost, parent)
+    {
         let shape = if !string_literal_is_array_key(content, cursor, quote) {
             StringArgumentShape::ArrayValue
         } else if code.code_before.ends_with(['[', '(', ',']) {
@@ -169,6 +174,7 @@ pub(super) fn string_argument_context<'a>(
             return None;
         };
         return Some(StringArgumentContext {
+            operator: parent.callee_operator.as_ref(),
             callable,
             slot,
             shape,
@@ -177,6 +183,7 @@ pub(super) fn string_argument_context<'a>(
 
     let (callable, slot) = scalar_argument_at(content, code)?;
     Some(StringArgumentContext {
+        operator: innermost.callee_operator.as_ref(),
         callable,
         slot,
         shape: StringArgumentShape::Scalar,
@@ -717,7 +724,7 @@ pub(super) fn detect_laravel_string_key_context(
 ) -> Option<LaravelStringKeyContext<'_>> {
     let cursor_offset = position_to_offset(content, position) as usize;
     let code = crate::completion::source::code_context::code_context_at(content, cursor_offset)?;
-    detect_laravel_string_key_context_inner(content, position, &code, None, None, None)
+    detect_laravel_string_key_context_inner(content, position, &code, None, None, None, &|_| false)
 }
 
 /// `code` is the lexical position of `position`
@@ -729,6 +736,7 @@ pub(super) fn detect_laravel_string_key_context_inner<'a>(
     resolved_names: Option<&'a crate::names::OwnedResolvedNames>,
     indexed_function_exists: Option<&dyn Fn(&str) -> bool>,
     indexed_class_exists: Option<&dyn Fn(&str) -> bool>,
+    typed_actor: &dyn Fn(&Operator) -> bool,
 ) -> Option<LaravelStringKeyContext<'a>> {
     let cursor_offset = position_to_offset(content, position) as usize;
     let (quote_pos, quote) = code.open_string?;
@@ -763,6 +771,7 @@ pub(super) fn detect_laravel_string_key_context_inner<'a>(
         resolved_names,
         indexed_function_exists,
         indexed_class_exists,
+        typed_actor,
     };
     let before_name = before_paren[..name_start].trim_end();
     let key = if let Some(before_colons) = before_name.strip_suffix("::") {
@@ -810,10 +819,12 @@ struct StringCall<'a, 'f> {
     name: &'a str,
     /// The literal typed so far, up to the cursor.
     literal: &'a str,
-    argument: StringArgumentContext<'a>,
+    argument: StringArgumentContext<'a, 'f>,
     resolved_names: Option<&'a crate::names::OwnedResolvedNames>,
     indexed_function_exists: Option<&'f dyn Fn(&str) -> bool>,
     indexed_class_exists: Option<&'f dyn Fn(&str) -> bool>,
+    /// Confirms the type of the receiver before this call's access operator.
+    typed_actor: &'f dyn Fn(&Operator) -> bool,
 }
 
 impl StringCall<'_, '_> {
@@ -1019,8 +1030,14 @@ fn instance_call_key<'a>(
             });
         }
     }
-    let ArgumentSlot::Positional(index) = slot else {
-        return None;
+    let index = match slot {
+        ArgumentSlot::Positional(index) => index,
+        ArgumentSlot::Named("abilities")
+            if is_can_method(call.name) && !receiver.roots_at_route() =>
+        {
+            0
+        }
+        ArgumentSlot::Named(_) => return None,
     };
     let kind = instance_method_arg_kind(call.name, index, &receiver)?;
     call.shape_fits(&kind).then_some(StringKey::Whole(kind))
@@ -1166,8 +1183,7 @@ impl MethodReceiver for TextReceiver<'_, '_, '_> {
         self.is_this()
     }
 
-    /// Mirrors the symbol map's rule: a name ending in `user`, or any
-    /// `user()` call.
+    /// Consult the type engine only when the spelling leaves the actor unknown.
     fn is_user_like(&self) -> bool {
         let tail = self
             .receiver
@@ -1180,6 +1196,13 @@ impl MethodReceiver for TextReceiver<'_, '_, '_> {
                 .receiver
                 .get(self.receiver.len().saturating_sub(6)..)
                 .is_some_and(|suffix| suffix.eq_ignore_ascii_case("user()"))
+            || (self.call.argument.slot.is_first_or_named("abilities")
+                && self.call.shape_fits(&StringKeyKind::GateAbility)
+                && self
+                    .call
+                    .argument
+                    .operator
+                    .is_some_and(self.call.typed_actor))
     }
 
     fn roots_at_gate(&self) -> bool {

@@ -1514,6 +1514,8 @@ pub(crate) const SYMFONY_ROUTING_CONFIGURATOR_NS: &str =
 /// value name a string key, and which kind of key each one makes it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ReceiverClass {
+    /// An authorization contract or a model named by an auth provider.
+    LaravelAuthorizable,
     /// A Laravel manager or factory whose `connection()` selects a config subtree.
     LaravelConnection,
     /// A queued dispatch or an object using Laravel's Queueable trait.
@@ -1708,6 +1710,10 @@ impl ReceiverClass {
             TranslationDomain, TwigTemplate, TwigVariable, View, YiiRoute, YiiView,
         };
         match self {
+            Self::LaravelAuthorizable => &[(
+                "Illuminate\\Contracts\\Auth\\Access\\Authorizable",
+                StringKeyKind::GateAbility,
+            )],
             Self::LaravelConnection => &[
                 (
                     "Illuminate\\Database\\ConnectionResolverInterface",

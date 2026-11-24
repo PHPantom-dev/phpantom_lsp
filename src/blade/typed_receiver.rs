@@ -198,7 +198,17 @@ impl Backend {
         let _resolver_guard = crate::type_engine::call_resolution::activate_type_engine_caches();
         let _cache_guard =
             crate::virtual_members::with_active_resolved_class_cache(&self.resolved_class_cache);
-        let mut by_offset: Vec<&TypedReceiverSite> = sites.iter().collect();
+        let laravel =
+            std::cell::LazyCell::new(|| self.resolved_class_cache.read().laravel().is_enabled());
+        let mut by_offset: Vec<&TypedReceiverSite> = Vec::with_capacity(sites.len());
+        by_offset.extend(
+            sites
+                .iter()
+                .filter(|site| site.receiver != ReceiverClass::LaravelAuthorizable || *laravel),
+        );
+        if by_offset.is_empty() {
+            return Vec::new();
+        }
         by_offset.sort_by_key(|site| site.start);
 
         let file_ctx = self.file_context(uri);
@@ -410,6 +420,19 @@ impl Backend {
                 .filter_map(|class| class_loader(crate::class_lookup::Fqn::new(class)))
                 .any(|class| crate::drupal::config::uses_config_form_trait(&class, class_loader))
                 .then_some(StringKeyKind::DrupalConfigName);
+        }
+        if receiver == ReceiverClass::LaravelAuthorizable {
+            return self
+                .configured_auth_provider_models()
+                .iter()
+                .any(|model| {
+                    crate::class_lookup::is_subtype_of_named(
+                        ty,
+                        model.trim_start_matches('\\'),
+                        class_loader,
+                    )
+                })
+                .then_some(StringKeyKind::GateAbility);
         }
         // Queueable supplies the connection behavior through a trait, not
         // a subtype relationship. Follow the same ancestor/trait walk used

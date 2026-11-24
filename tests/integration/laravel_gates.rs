@@ -1243,3 +1243,172 @@ class Consumer {
         "the Gate::define() declaration should be included, got {references:?}"
     );
 }
+
+#[tokio::test]
+async fn typed_authorization_checks_follow_the_actor_and_the_policy_subject() {
+    let consumer = r#"<?php
+namespace App;
+use App\Models\Post;
+use Illuminate\Contracts\Auth\Access\Authorizable as Actor;
+class Customer implements Actor {}
+class Other { public function can($abilities, $arguments = []) {} }
+class Consumer {
+    public function go(?Customer $customer, Actor $member, Other $other, Post $post): void {
+        $customer?->can('update', $post);
+        $member->canAny(arguments: $post, abilities: array('update', 'publish'));
+        $member->cannot('unknown-ability');
+        $other->can('update', $post);
+        $other->can('unrelated');
+        $member->can(arguments: 'wrong-slot');
+        $member->canAny(['key' => 'value']);
+    }
+}
+"#;
+    let (backend, _dir, uri) = workspace(consumer).await;
+    let doc = Uri::parse(&uri).unwrap();
+
+    for (site, expected) in [
+        ("$customer?->can('up", true),
+        ("abilities: array('up", true),
+        ("$member->cannot('", true),
+        ("$other->can('up", false),
+        ("arguments: '", false),
+        ("canAny(['k", false),
+        ("'key' => '", false),
+    ] {
+        let pos = position_after(consumer, site);
+        let labels = complete_labels_at_opened(&backend, &doc, pos.line, pos.character).await;
+        assert_eq!(
+            labels.iter().any(|label| label == "update"),
+            expected,
+            "{site}: {labels:?}"
+        );
+    }
+
+    let update = position_after(consumer, "$customer?->can('up");
+    let locations = definition_uris(&backend, &uri, update).await;
+    assert!(
+        locations
+            .iter()
+            .any(|uri| uri.ends_with("/Policies/PostPolicy.php")),
+        "{locations:?}"
+    );
+    let hover = hover_text_at(&backend, &doc, update.line, update.character)
+        .await
+        .unwrap();
+    assert!(hover.contains("PostPolicy"), "{hover}");
+    let other = position_after(consumer, "$other->can('up");
+    assert!(definition_uris(&backend, &uri, other).await.is_empty());
+
+    let uses = crate::common::find_references(&backend, &doc, update, false).await;
+    let lines: Vec<_> = uses
+        .iter()
+        .filter(|loc| loc.uri == doc)
+        .map(|loc| loc.range.start.line)
+        .collect();
+    assert_eq!(lines.len(), 2, "{uses:?}");
+    assert!(lines.contains(&update.line));
+    assert!(lines.contains(&position_after(consumer, "abilities: array('up").line));
+
+    let mut diags = Vec::new();
+    backend.collect_slow_diagnostics(&uri, consumer, &mut diags);
+    let flagged = ability_diagnostics(&diags);
+    assert_eq!(flagged.len(), 2, "{flagged:?}");
+    assert!(
+        flagged
+            .iter()
+            .any(|d| message_text(&d.message).contains("unknown-ability"))
+    );
+    assert!(
+        flagged
+            .iter()
+            .any(|d| message_text(&d.message).contains("publish")
+                && message_text(&d.message).contains("PostPolicy"))
+    );
+}
+
+#[tokio::test]
+async fn typed_authorization_rechecks_configured_models_after_an_auth_config_edit() {
+    let consumer = r#"<?php
+namespace App;
+class Member { public function can($abilities) {} }
+class Account extends Member {}
+class Consumer {
+    public function go(Account $actor, Account|Consumer $either, \App\Guest\Member $guest): void {
+        $actor->can('typo');
+        $either->can('unrelated');
+        $guest->can('same-short-name');
+    }
+}
+"#;
+    let config = r#"<?php use App\Member as Client;
+return ['providers' => ['staff' => ['model' => env('STAFF_MODEL', Client::class)]]];
+"#;
+    let (backend, dir, uri) = create_initialized_psr4_workspace(
+        LARAVEL_SRC_COMPOSER,
+        &[
+            ("config/auth.php", config),
+            ("src/Guest/Member.php", r"<?php namespace App\Guest; class Member implements \Illuminate\Contracts\Auth\Authenticatable { public function can($abilities) {} }"),
+            ("src/Models/Post.php", POST_PHP),
+            ("src/Policies/PostPolicy.php", POST_POLICY_PHP),
+            ("src/Consumer.php", consumer),
+        ],
+        "src/Consumer.php",
+    )
+    .await;
+    let flagged = || {
+        let mut diagnostics = Vec::new();
+        backend.collect_slow_diagnostics(uri.as_str(), consumer, &mut diagnostics);
+        ability_diagnostics(&diagnostics)
+            .iter()
+            .map(|d| d.range.start.line)
+            .collect::<Vec<_>>()
+    };
+    // A union is an actor when any of its members is.
+    assert_eq!(
+        flagged(),
+        [
+            position_after(consumer, "can('typo").line,
+            position_after(consumer, "can('unrelated").line
+        ]
+    );
+    let auth_uri = Uri::from_file_path(dir.path().join("config/auth.php")).unwrap();
+    open_php_str(&backend, auth_uri.as_str(), "<?php return [];").await;
+    assert!(flagged().is_empty());
+}
+
+#[tokio::test]
+async fn typed_authorization_completes_an_unfinished_ability_list() {
+    let source = r"<?php function run(\Illuminate\Contracts\Auth\Access\Authorizable $actor) {
+        $actor->canAny(['viewAny', 'upd";
+    let (backend, _dir, uri) = workspace(source).await;
+    let pos = position_after(source, "'upd");
+    let labels = complete_labels_at_opened(
+        &backend,
+        &Uri::parse(&uri).unwrap(),
+        pos.line,
+        pos.character,
+    )
+    .await;
+    assert_eq!(labels, ["update"]);
+}
+
+#[tokio::test]
+async fn a_can_call_outside_laravel_keeps_its_ordinary_string_argument() {
+    let source = "<?php namespace App; class Consumer { function run(Consumer $customer) { $customer->can('update'); } }";
+    let (backend, _dir, uri) = create_initialized_psr4_workspace(
+        crate::common::APP_PSR4_COMPOSER,
+        &[
+            ("app/Consumer.php", source),
+            ("app/Policies/PostPolicy.php", POST_POLICY_PHP),
+        ],
+        "app/Consumer.php",
+    )
+    .await;
+    let pos = position_after(source, "can('up");
+    assert!(
+        definition_uris(&backend, uri.as_str(), pos)
+            .await
+            .is_empty()
+    );
+}
