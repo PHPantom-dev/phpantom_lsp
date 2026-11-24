@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Named arguments follow the parameter they name.** A label such as `name:` in `new SelectField(name: 'x')` or `$field->render(name: 'x')` jumps to the parameter it fills, hovers as it, highlights with it, shows up in its references, and renames with it. When that parameter promotes a property, the label moves with the property as well. Contributed by @AbyssWaIker.
 - **Signature help for invokable objects.** Calling an object, as in `$action('x')`, `app(TestAction::class)('x')` or `(new TestAction())('x')`, shows the parameters of its `__invoke()` method, and the arguments are checked against them.
+- **`use` imports fold.** A file's block of `use` statements folds as one region, the same way a method body does. It is reported as an imports region, so `"editor.foldingImportsByDefault": true` in VS Code opens files with it already folded. Contributed by @tim-bezhashvyly.
 
 #### Diagnostics
 

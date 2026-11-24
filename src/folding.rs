@@ -38,6 +38,7 @@ impl Backend {
                 for stmt in program.statements.iter() {
                     collect_from_statement(stmt, &idx, &mut ranges);
                 }
+                collect_import_ranges(program.statements.iter(), &idx, &mut ranges);
 
                 // ── Trivia (comments) ──
                 collect_comment_ranges(&program.trivia, &idx, &mut ranges);
@@ -209,6 +210,42 @@ fn emit_paren_pair(
     }
 }
 
+// ─── Imports ────────────────────────────────────────────────────────────────
+
+/// Emit one `Imports` range per run of consecutive `use` statements, so a
+/// file's import block folds as a unit.  Blank lines and comments between
+/// imports are trivia and keep the run going; any other statement ends it.
+/// A run on a single line is dropped later with the other one-line ranges.
+fn collect_import_ranges<'s, 'a: 's>(
+    statements: impl Iterator<Item = &'s Statement<'a>>,
+    idx: &crate::text_position::LineIndex<'_>,
+    ranges: &mut Vec<FoldingRange>,
+) {
+    let mut run: Option<(u32, u32)> = None;
+    for stmt in statements {
+        if let Statement::Use(import) = stmt {
+            let span = import.span();
+            let start = run.map_or(span.start.offset, |(start, _)| start);
+            run = Some((start, span.end.offset));
+        } else if let Some((start, end)) = run.take() {
+            ranges.push(range_from_offsets(
+                idx,
+                start,
+                end,
+                Some(FoldingRangeKind::Imports),
+            ));
+        }
+    }
+    if let Some((start, end)) = run {
+        ranges.push(range_from_offsets(
+            idx,
+            start,
+            end,
+            Some(FoldingRangeKind::Imports),
+        ));
+    }
+}
+
 // ─── Statement walker ───────────────────────────────────────────────────────
 
 fn collect_from_statement(
@@ -223,10 +260,12 @@ fn collect_from_statement(
                 for inner in block.statements.iter() {
                     collect_from_statement(inner, idx, ranges);
                 }
+                collect_import_ranges(block.statements.iter(), idx, ranges);
             } else {
                 for inner in ns.statements().iter() {
                     collect_from_statement(inner, idx, ranges);
                 }
+                collect_import_ranges(ns.statements().iter(), idx, ranges);
             }
         }
 
