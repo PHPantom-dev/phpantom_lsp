@@ -6223,6 +6223,7 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 <h3 id="internal">Internal<a class="headerlink" href="#internal" title="Permanent link">&para;</a></h3>
 <ul>
 <li><strong>Faster CI builds and benchmarks.</strong> Test runners share a compiled suite and matching benchmark builds are reused. Performance checks keep the same thresholds and wait for background diagnostics before measuring memory. Contributed by @shuvroroy.</li>
+<li><strong>Nullable and union receivers name their string keys.</strong> A template, service, route or other name passed to a call on a <code>?Factory</code> or <code>Factory|Mailer</code> receiver now navigates, completes and is checked the same as one on a plain <code>Factory</code>.</li>
 </ul>
 <h2 id="100-2026-11-23"><a href="https://github.com/PHPantom-dev/phpantom_lsp/compare/0.11.1...1.0.0">1.0.0</a> - 2026-11-23<a class="headerlink" href="#100-2026-11-23" title="Permanent link">&para;</a></h2>
 <h3 id="added_1">Added<a class="headerlink" href="#added_1" title="Permanent link">&para;</a></h3>
