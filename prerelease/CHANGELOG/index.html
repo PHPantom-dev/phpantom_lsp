@@ -6222,6 +6222,7 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
 <li><strong>Go to a global class's member from a file with a same-named class.</strong> <code>\Tag::make()</code> written in a file that declares <code>App\Tag</code> now jumps to the global <code>Tag</code>, not the class in the current file.</li>
+<li><strong>Linux binary crashing on older x86_64 CPUs.</strong> The 1.0.0 Linux x86_64 binary stopped at startup with "Illegal instruction" on processors without AVX2. Release binaries for x86_64 run on any 64-bit x86 CPU again.</li>
 </ul>
 <h3 id="internal">Internal<a class="headerlink" href="#internal" title="Permanent link">&para;</a></h3>
 <ul>
