@@ -6,6 +6,8 @@ catalogues together, the way a real Symfony project does.
 
 ## What to try
 
+- In `config/doctrine/User.orm.xml`, navigate from `displayName` or `team` to the property on `User`, or rename the property across PHP and XML.
+
 - Open `config/services.yaml`, `config/routes.yaml`,
   `config/doctrine/User.orm.xml`, or `config/validator/User.yaml` and use
   go-to-definition on a PHP class name, or on the `Class::method` in a route's

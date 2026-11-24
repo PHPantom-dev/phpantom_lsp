@@ -6,6 +6,7 @@
     name="App\Entity\User"
     repository-class="App\Repository\UserRepository"
   >
+    <!-- Try: jump to the displayName or team property, or rename it here. -->
     <id name="email" type="string"/>
     <field name="displayName" type="string"/>
     <many-to-one field="team" target-entity="Team">

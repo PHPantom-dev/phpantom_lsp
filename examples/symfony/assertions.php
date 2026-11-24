@@ -367,6 +367,7 @@ check('A field the mapping does not map fails DQL', !$dqlParses('SELECT u FROM A
 check('An entity class without its identification variable fails DQL', !$dqlParses('SELECT u FROM App\Entity\User WHERE u.displayName = :name'));
 check('A stray parenthesis in the where() fragment fails DQL', !$dqlParses('SELECT u FROM App\Entity\User u WHERE u.displayName = :name)'));
 $userMetadata = $entityManager->getClassMetadata(User::class);
+check('User declares the properties the XML field and association map', property_exists(User::class, 'displayName') && property_exists(User::class, 'team'));
 check('The XML mapping maps team as an association to Team', $userMetadata->hasAssociation('team') && $userMetadata->getAssociationTargetClass('team') === Team::class);
 check('The DQL in UserRepository::inTeam() joins Team and names its fields', $dqlParses('SELECT u FROM App\Entity\User u JOIN u.team t WHERE t.name = :team'));
 check('A field the joined Team does not map fails DQL', !$dqlParses('SELECT u FROM App\Entity\User u JOIN u.team t WHERE t.email = :team'));

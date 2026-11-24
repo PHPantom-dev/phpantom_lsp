@@ -84,6 +84,16 @@ pub(crate) fn new_doctrine_repository_index() -> DoctrineRepositoryIndex {
 
 impl Backend {
     pub(crate) fn index_framework_uri_content(&self, uri: &str, content: &str) {
+        self.index_framework_with_property_spans(uri, content, None);
+    }
+
+    /// Index configuration and collect its mapped PHP properties when building a resource map.
+    pub(crate) fn index_framework_with_property_spans(
+        &self,
+        uri: &str,
+        content: &str,
+        spans: Option<&mut Vec<crate::symbol_map::SymbolSpan>>,
+    ) {
         if !is_framework_config_document(uri) {
             return;
         }
@@ -109,6 +119,7 @@ impl Backend {
             &self.doctrine_mapping_files,
             uri,
             content,
+            spans,
         );
         let connections_changed = crate::doctrine::connection::record(
             &self.doctrine_connections,
