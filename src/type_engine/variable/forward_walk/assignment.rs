@@ -179,15 +179,24 @@ pub(crate) fn resolve_type_to_resolved_types(
 /// The class names of a `@var` type read out of the source, qualified as
 /// [`resolve_type_to_resolved_types`] does.
 pub(crate) fn resolve_var_docblock_type(php_type: &PhpType, ctx: &ForwardWalkCtx<'_>) -> PhpType {
-    // The declaration's templates are marked before names are qualified,
-    // while `T` is still spelled the way the `@template` tag spells it.
+    // The declaration's templates are marked, and the type aliases it names
+    // expanded, before names are qualified: while `T` and `Ids` are still
+    // spelled the way the `@template` and `@phpstan-type` tags spell them.
+    // Templates go first, as the nearer declaration shadows a class alias.
     let marked = ctx
         .template_markers
         .as_ref()
         .map(|m| php_type.substitute(m));
+    let marked = marked.as_ref().unwrap_or(php_type);
+    let expanded = crate::type_engine::type_ops::aliases::expand_nested_type_aliases(
+        marked,
+        &ctx.current_class.fqn(),
+        ctx.file.all_classes,
+        ctx.file.class_loader,
+    );
     let resolved = ctx
         .written_names()
-        .resolve_type(marked.as_ref().unwrap_or(php_type));
+        .resolve_type(expanded.as_ref().unwrap_or(marked));
     if !resolved.needs_constant_evaluation() {
         return resolved;
     }

@@ -6253,6 +6253,42 @@ class Svc {
     );
 }
 
+/// An inline `@var` naming a `@phpstan-type` alias gives the variable what
+/// the alias stands for, whether the tag sits above an assignment, stands
+/// alone, or names the alias inside a larger type.
+#[test]
+fn hover_inline_var_alias_is_expanded() {
+    let backend = create_test_backend();
+    let uri = "file:///alias_var.php";
+    let content = r#"<?php
+/** @phpstan-type Ids list<int> */
+class Foo {
+    public function f($y, $z) {
+        /** @var Ids $x */
+        $x = [1];
+        $x;
+        /** @var Ids $y */
+        $y;
+        /** @var Ids|null */
+        $z = $z;
+        $z;
+    }
+}
+"#;
+    for (line, name, expected) in [
+        (6, "$x", "list<int>"),
+        (8, "$y", "list<int>"),
+        (11, "$z", "list<int>|null"),
+    ] {
+        let text =
+            hover_text(&hover_at(&backend, uri, content, line, 9).expect("hover")).to_string();
+        assert!(
+            text.contains(expected) && !text.contains("Ids"),
+            "{name} is typed by what the alias stands for: {text}"
+        );
+    }
+}
+
 #[test]
 fn hover_stub_constant_php_eol_shows_value() {
     let backend = create_test_backend_with_function_stubs();
