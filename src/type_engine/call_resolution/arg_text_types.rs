@@ -204,7 +204,10 @@ impl Backend {
                     })
                     .or_else(|| super::global_constant_class_reference_type(&value, ctx))
                 }
-                Some(None) => crate::resolution::unversioned_php_version_constant_type(trimmed),
+                Some(None) => crate::resolution::unversioned_php_version_constant_type(
+                    trimmed,
+                    Some(backend.php_version()),
+                ),
             }
         {
             return Some(ty);

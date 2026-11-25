@@ -7,7 +7,7 @@
 
 use crate::Backend;
 use crate::php_type::PhpType;
-use crate::types::DefineInfo;
+use crate::types::{DefineInfo, PhpVersion};
 
 /// How far [`Backend::find_or_load_define`] looks for a declaration.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -263,7 +263,7 @@ impl Backend {
         match name {
             "PHP_MAJOR_VERSION" => Some(Some(version().major.to_string())),
             "PHP_MINOR_VERSION" => Some(Some(version().minor.to_string())),
-            _ if unversioned_php_version_constant_type(name).is_some() => Some(None),
+            _ if unversioned_php_version_constant_type(name, None).is_some() => Some(None),
             _ => None,
         }
     }
@@ -294,9 +294,19 @@ impl Backend {
 /// The type of a PHP version constant whose value depends on the patch
 /// release (see `Backend::php_version_constant`), or `None` for any other
 /// name.
-pub(crate) fn unversioned_php_version_constant_type(name: &str) -> Option<PhpType> {
+///
+/// `PHP_VERSION_ID` is still pinned down to the configured minor version's
+/// range (`int<80500, 80599>` on PHP 8.5) when `version` is known.
+pub(crate) fn unversioned_php_version_constant_type(
+    name: &str,
+    version: Option<PhpVersion>,
+) -> Option<PhpType> {
     match name {
-        "PHP_VERSION_ID" | "PHP_RELEASE_VERSION" => Some(PhpType::int()),
+        "PHP_VERSION_ID" => Some(version.map_or_else(PhpType::int, |version| {
+            let base = u32::from(version.major) * 10_000 + u32::from(version.minor) * 100;
+            PhpType::int_range(base.to_string(), (base + 99).to_string())
+        })),
+        "PHP_RELEASE_VERSION" => Some(PhpType::int()),
         "PHP_VERSION" | "PHP_EXTRA_VERSION" => Some(PhpType::string()),
         _ => None,
     }

@@ -49,6 +49,13 @@ fn parse_type_text(input: &str) -> Option<PhpType> {
     // with underscore placeholders so Mago can parse the surrounding
     // type structure.  The placeholders are restored in the result.
     let postfixed = postfix_prefix_variadics(input);
+    // `func_num_args()` is a conditional subject Psalm accepts and the
+    // PHPDoc grammar does not, so it goes through as a plain name.
+    let postfixed = if postfixed.contains(FUNC_NUM_ARGS_SUBJECT) {
+        std::borrow::Cow::Owned(postfixed.replace(FUNC_NUM_ARGS_SUBJECT, FUNC_NUM_ARGS_PLACEHOLDER))
+    } else {
+        postfixed
+    };
     let cleaned = replace_hyphenated_keywords(&postfixed);
     let effective: &str = &cleaned;
 
@@ -64,6 +71,14 @@ fn parse_type_text(input: &str) -> Option<PhpType> {
         Err(_) => try_parse_hyphenated_generic(input),
     }
 }
+
+/// The conditional subject that counts the arguments a call passed
+/// (`(func_num_args() is 0 ? false : string)`).
+pub(crate) const FUNC_NUM_ARGS_SUBJECT: &str = "func_num_args()";
+
+/// The name [`FUNC_NUM_ARGS_SUBJECT`] is written as while the PHPDoc parser
+/// runs.
+const FUNC_NUM_ARGS_PLACEHOLDER: &str = "__phpantom_func_num_args";
 
 /// Placeholder stem standing in for a bounded late-static type while the
 /// PHPDoc parser runs.  Each occurrence gets its own index so several bounds
@@ -532,6 +547,8 @@ fn convert(src: &str, ty: &cst::Type<'_>) -> PhpType {
                     // list with its brackets doubled (`value-of<<T>>`).
                     if matches!(subject.kind(), TypeKind::KeyOf(_) | TypeKind::ValueOf(_)) {
                         subject.to_string()
+                    } else if subject.is_named(FUNC_NUM_ARGS_PLACEHOLDER) {
+                        FUNC_NUM_ARGS_SUBJECT.to_string()
                     } else {
                         c.subject.to_string()
                     },

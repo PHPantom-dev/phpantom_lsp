@@ -33,9 +33,12 @@ pub(super) fn resolve_rhs_constant_access(
     if let Some(ts) = global_constant_type(name, ca.name.span().start.offset, ctx) {
         return vec![ResolvedType::from_type_string(ts)];
     }
-    crate::resolution::unversioned_php_version_constant_type(name_clean)
-        .map(|ts| vec![ResolvedType::from_type_string(ts)])
-        .unwrap_or_default()
+    crate::resolution::unversioned_php_version_constant_type(
+        name_clean,
+        ctx.file.backend.map(|backend| backend.php_version()),
+    )
+    .map(|ts| vec![ResolvedType::from_type_string(ts)])
+    .unwrap_or_default()
 }
 
 /// The type the global constant `name` holds, read from its initializer.

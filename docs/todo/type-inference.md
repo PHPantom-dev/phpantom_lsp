@@ -49,6 +49,8 @@ and use it from both walks so diagnostics and completion agree.
 
 ---
 
+**Upstream cases** (PHPStan `nsrt/`, 7 assertions): `closure-passed-to-type-fiberscope-php81.php` (4), `closure-in-attribute.php` (3).
+
 ## T61. A regression that changes where a call resolves goes unnoticed
 
 **Impact: Medium · Complexity: Medium**
@@ -203,6 +205,8 @@ key) the fallback can never be assigned, so `$string ??= 1` is still
   (`Psalm\Context`)
 
 ---
+
+**Upstream cases** (PHPStan `nsrt/`, 3 assertions): `bug-2816.php` (3).
 
 ## T46. Template arguments are not inferred from how the object is used later
 **Impact: Medium · Complexity: High**
@@ -699,6 +703,8 @@ are marked with this.
 
 ---
 
+**Upstream cases** (PHPStan `nsrt/`, 4 assertions): `bug-9704.php` (4).
+
 ## T59. `T[K]` on a class template is not resolved
 
 **Impact: Medium · Complexity: Medium**
@@ -732,6 +738,8 @@ API endpoint that types its request this way gets every parameter wrong.
 
 ---
 
+**Upstream cases** (PHPStan `nsrt/`, 3 assertions): `offset-access.php` (3).
+
 ## T62. A sealed hierarchy is not narrowed by ruling out its other members
 
 **Impact: Medium · Complexity: Medium**
@@ -759,6 +767,8 @@ enum's cases are subtracted.
 Found by `analyze` on azjezz/psl, whose tree nodes are sealed this way.
 
 ---
+
+**Upstream cases** (PHPStan `nsrt/`, 4 assertions): `bug-5259.php` (2), `allowed-subtypes-datetime.php`, `allowed-subtypes-throwable.php`.
 
 ## T71. A service `#[AsDecorator]` registers does not take over the ID
 

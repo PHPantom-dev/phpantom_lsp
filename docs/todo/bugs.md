@@ -29,28 +29,6 @@ No outstanding items.
 
 ## Conditional return types
 
-### B807. A conditional comparing a template with a class constant takes the last branch
-
-**Impact: Low · Complexity: Low**
-
-```php
-/**
- * @template T as int
- * @param T $i
- * @return (T is self::TYPE_STRING ? string : (T is self::TYPE_INT ? int : bool))
- */
-public static function getDifferentType(int $i) {}
-
-A::getDifferentType(0);   // bool, should be string (TYPE_STRING = 0)
-```
-
-The condition's target is a class constant, which is compared as written
-rather than as the literal it holds, so no argument ever matches it.
-
-**Fix:** resolve a `self::`/`Foo::` constant target to its value before
-comparing. The cases are the `// SKIP` lines in
-`tests/psalm_assertions/template_conditional_return_type.php`.
-
 ### B808. A conditional on a callable argument's return type keeps both branches
 
 **Impact: Low · Complexity: Medium**
@@ -72,37 +50,79 @@ undecided and both branches are joined.
 **Fix:** decide the conditional once `T` is bound from the callable's
 return type. See `tests/psalm_assertions/template_conditional_return_type.php`.
 
-### B809. `func_num_args()` in a conditional return type is never decided
+### B814. A conditional type in `@phpstan-assert` is not evaluated
+
+**Impact: Medium · Complexity: Low-Medium**
+
+```php
+/** @phpstan-assert ($allow_null is true ? string|null : string) $input */
+function check(mixed $input, bool $allow_null = false): void {}
+$a = x();
+check($a);
+$a;   // no type, should be string
+check(allow_null: true, input: $a);
+$a;   // mixed, should be string|null
+```
+
+With positional arguments the variable ends up with no type at all; with named arguments the assertion is not applied. The conditional should be resolved against the call's arguments (and defaults) before narrowing.
+
+It also shows as:
+
+- A conditional `@phpstan-assert` type leaves the variable without a type
+- A conditional `@phpstan-assert` type is not decided by the call's arguments
+- `@phpstan-assert empty $var` leaves the variable with no type
+
+**Cases** (PHPStan `nsrt/`, 42 assertions): `bug-9435.php` (35), `assert-conditional.php` (4), `bug-14249.php` (2), `assert-empty.php`.
+
+### B815. A `($this is self::Case ? ...)` conditional is not decided by narrowing the enum to a case
+
+**Impact: Low · Complexity: Low-Medium**
+
+```php
+enum X: string { case A = 'a'; case B = 'b';
+  /** @return ($this is self::A ? int : null) */ public function get(): ?int {}
+}
+if ($x !== X::A) { $x->get(); } // got int|null, should be null
+```
+
+Applies to `@return` and `@param-out` conditionals, for both `$this` inside the enum and an enum variable outside it.
+
+**Cases** (PHPStan `nsrt/`, 10 assertions): `bug-12244.php` (10).
+
+### B816. A conditional return or `@param` type is not used to narrow the argument it tests
+
+**Impact: Low · Complexity: Medium**
+
+```php
+/** @return ($value is list<string> ? true : false) */
+function isStringList(array $value): bool {}
+if (isStringList($a)) { $a; }   // array<mixed>, should be list<string>
+```
+
+PHPStan treats such a conditional return as an implicit `@phpstan-assert-if-true`; PHPantom only evaluates it for the return value.
+
+It also shows as:
+
+- A conditional return type on a parameter is not used to narrow that argument
+- A conditional `@param` type is not narrowed by checks on the parameter it names
+
+**Cases** (PHPStan `nsrt/`, 15 assertions): `bug-7915.php` (6), `bug-9734.php` (5), `conditional-types-inference.php` (4).
+
+### B817. `static` in a static method's conditional return type or `@phpstan-assert` is not the class it is called on
 
 **Impact: Low · Complexity: Low**
 
 ```php
-/** @return (func_num_args() is 0 ? false : string) */
-function f(string $s = "") {}
-
-f("hello");   // false|string, should be string
+class A { /** @template T of object @param T $o @return (T is static ? T : static) @phpstan-assert static $o */ public static function check(object $o) {} }
+class B extends A {}
+$r = B::check($a); // $a: A
+$r; // got A|B, should be B
+$a; // got A, should be B
 ```
 
-**Fix:** compare the call site's argument count with the target. See
-`tests/psalm_assertions/template_conditional_return_type.php`.
+The conditional keeps both branches (`DateTime|A`) and the asserted `static` resolves to the declaring class.
 
-### B811. A conditional return type on `PHP_VERSION_ID` takes the else branch
-
-**Impact: Low · Complexity: Low**
-
-```php
-/** @return (PHP_VERSION_ID is int<70300, max> ? string : int) */
-function getSomething() {}
-
-getSomething();   // int, should be string on any PHP 8 project
-```
-
-The subject is a constant rather than a parameter, so the condition is
-never evaluated against the project's PHP version.
-
-**Fix:** read `PHP_VERSION_ID` (and other constants with a known value) as
-the condition's subject. See
-`tests/psalm_assertions/template_conditional_return_type.php`.
+**Cases** (PHPStan `nsrt/`, 5 assertions): `bug-12376.php` (5).
 
 ## Standard-library return types
 
@@ -134,6 +154,8 @@ filter_input(INPUT_GET, 'foo', FILTER_VALIDATE_INT, ['flags' => FILTER_FORCE_ARR
 combined with `FILTER_NULL_ON_FAILURE`. `// SKIP` lines in
 `tests/phpstan_nsrt/filter-input.php`.
 
+**Upstream cases** (PHPStan `nsrt/`, 328 assertions): `filterVar.php` (159), `filter-var.php` (87), `filter-var-array.php` (48), `filter-var-returns-non-empty-string.php` (18), `filter-input-array.php` (13), `filter-var-php85.php` (2), `discussion-9134.php`.
+
 ### B775. `compact()` returns `array` rather than a shape
 
 **Impact: Low · Complexity: Low**
@@ -145,6 +167,8 @@ compact('v', 'k');   // array, should be array{v: 1, k: 'a'}
 
 **Fix:** build the shape from the literal names and the variables' types in
 scope. `// SKIP` line in `tests/phpstan_nsrt/array-find.php`.
+
+**Upstream cases** (PHPStan `nsrt/`, 9 assertions): `compact.php` (6), `bug-10187.php`, `array-find-key.php`, `pipe-operator.php`.
 
 ### B776. `array_merge()` with a spread argument returns `array`
 
@@ -197,6 +221,8 @@ folded, over each member of a literal union. `// SKIP` lines in
 `non-empty-string.php`, `non-empty-string-substr.php` and
 `mixed-to-number.php`.
 
+**Upstream cases** (PHPStan `nsrt/`, 267 assertions): `strval.php` (39), `abs.php` (35), `pow.php` (27), `str_increment.php` (20), `str_decrement.php` (17), `mb-strlen-php83.php` (15), `implode.php` (13), `date.php` (13), `array-sum.php` (13), `range-function.php` (11), `constantTypes.php` (8), `string-offsets.php` (8), 19 more.
+
 ### B779. Folding reads a double-quoted literal's escapes as written
 
 **Impact: Low · Complexity: Low**
@@ -224,6 +250,367 @@ array_column($plop, 'name', null);   // array, should be array{'ROLE_USER', 'ROL
 **Fix:** when the input is a shape whose rows are shapes, build the result
 from the named column of each row (and the index column's values as keys,
 when given). `// SKIP` line in `tests/phpstan_nsrt/bug-12954.php`.
+
+**Upstream cases** (PHPStan `nsrt/`, 117 assertions): `array-column-php82.php` (111), `bug-8917.php` (2), `array-column-php8.php` (2), `bug-9204.php`, `bug-6497.php`.
+
+### B818. `settype()` does not change its argument's type
+
+**Impact: Medium · Complexity: Low**
+
+```php
+function f(string $s) {
+    settype($s, 'int');
+    $s;   // string, should be int
+    $x = null;
+    settype($x, 'array');
+    $x;   // null, should be array{}
+}
+```
+
+The by-reference effect of settype() is not modelled at all: the variable keeps its old type. Needs a rule mapping the (literal or unknown) type name to the cast result, folding literal inputs.
+
+**Cases** (PHPStan `nsrt/`, 115 assertions): `set-type-type-specifying.php` (115).
+
+### B819. Built-ins whose result their arguments decide return the declared type
+
+**Impact: Medium · Complexity: Medium**
+
+```php
+version_compare('7.0.0', '7.0.1');   // int, should be -1
+mb_http_output();                    // string|bool, should be string
+gettimeofday(true);                  // array<int>|float, should be float
+$dt->format('');                     // string, should be ''
+$px->getColor(1);                    // array{r: int|float, ...}, should be array{r: float, ...}
+array_sum($floats);                  // float, should be 0|float
+```
+
+No argument-aware return rules for: version_compare, microtime(null), mb_http_output/mb_regex_encoding/mb_internal_encoding/mb_encoding_aliases/mb_chr/mb_ord, gettimeofday, DateTimeInterface::format literals, ImagickPixel::getColor, fpm_get_status, sscanf scansets, proc_open's $pipes, getopt, CachingIterator::getCache, get_called_class, array_find_key on literal keys, array_sum of floats. Each needs its own rule; grouped because the mechanism (a per-function return rule) is the same.
+
+It also shows as:
+
+- `openssl_encrypt()`'s `$tag` out-parameter ignores the cipher
+- PECL extension calls whose return type PHPStan picks from the arguments use the stub's full union
+- `PDO::connect()` does not return the driver subclass named by the DSN
+- By-reference arrays of `socket_select()` and `proc_open()` are not typed from their inputs
+- `stat()`, `lstat()`, `fstat()` and `ssh2_sftp_stat()` return shapes lack the numeric keys
+- `ArrayObject` offset reads are not nullable
+- `Closure::bind()`, `bindTo()` and `Closure::getCurrent()` lose the closure's signature
+- `ReflectionEnum` methods are not specialized by the reflected enum
+- `DatePeriod`'s constructor arguments do not decide its end-date and recurrence types
+- `strtotime()` of a literal string is not folded
+- `DateTimeInterface::format()` with a literal format is not typed by the format
+- `sscanf()` with a literal format and no output arguments is not typed as a shape
+
+**Fix:** add per-function rules (stub patches with conditional returns, or the array/function rule tables) one function at a time; each upstream fixture is the spec for its function.
+
+**Cases** (PHPStan `nsrt/`, 358 assertions): `functions.php` (42), `array-functions.php` (23), `array-search.php` (20), `mb-convert-encoding-php8.php` (18), `sscanf.php` (18), `get-parent-class.php` (12), `pr-1244-php-84.php` (12), `DateTimeDynamicReturnTypes.php` (12), `DateTimeCreateDynamicReturnTypes.php` (10), `mb_substitute_character-php8.php` (10), `get-defined-vars.php` (10), `bug-3789.php` (8), 54 more.
+
+### B820. `array_splice()` neither returns the removed slice nor updates its array
+
+**Impact: Medium · Complexity: Low-Medium**
+
+```php
+/** @param array<int, int> $arr */
+function f(array $arr): void {
+    array_splice($arr, 0, 0, [1]);
+    $arr;   // array<int, int>, should be non-empty-list<int>
+    /** @var array{17: 'foo', b: 'bar', 19: 'baz'} $c */
+    array_splice($c, 0, 1, ['hello']);
+    $c;     // unchanged, should be array{0: 'hello', b: 'bar', 1: 'baz'}
+}
+```
+
+The by-reference array keeps its pre-call type: int keys are not renumbered (so it never becomes a list), the replacement values are not merged in and removed entries stay. Applies to shapes, generic arrays and properties alike.
+
+It also shows as:
+
+- `array_splice()` returns the input array's type instead of the removed slice
+- `array_splice()` leaves its by-reference array unchanged and returns a generic list
+
+**Cases** (PHPStan `nsrt/`, 100 assertions): `array_splice.php` (91), `bug-5017.php` (6), `bug-14037.php` (2), `bug-11917.php`.
+
+### B821. `preg_match()` gives a generic array for a pattern that is not one plain literal
+
+**Impact: Medium · Complexity: Low-Medium**
+
+```php
+if (preg_match('{' . preg_quote($s) . '(z)}', $s, $m)) {
+    $m; // got array<array-key, string>, should be array{non-falsy-string, 'z'}
+} else {
+    $m; // got array<array-key, string>, should be array{}
+}
+```
+
+Concatenation with `preg_quote()`, a variable holding one of several literal patterns, a variable assigned a double-quoted pattern, and nowdoc/heredoc patterns all give the generic fallback, even in the no-match branch where the result is always `array{}`.
+
+It also shows as:
+
+- `preg_match()` gives a generic array for an `x`-flag pattern or a pattern held in a variable or constant
+- A `preg_match()` pattern concatenated with a constant is not read
+- `preg_match()` with a non-constant flags argument ignores the flags
+
+**Cases** (PHPStan `nsrt/`, 46 assertions): `preg_match_shapes.php` (38), `bug-11311.php` (3), `bug-12242.php` (3), `bug-12211.php`, `bug11384.php`.
+
+### B822. A `preg_match()` capture group that can only match fixed text is typed `string`
+
+**Impact: Low · Complexity: Low-Medium**
+
+```php
+if (preg_match('/Price: (£|€)\d+/', $s, $m)) {
+    $m; // got array{0: string, 1: string}, should be array{string, '£'|'€'}
+}
+```
+
+The shape and its keys are right; only the capture values lose literals. PHPStan derives literal unions from alternations, character classes (`[157]`, `ba[rz]`), escaped literals and empty groups (`''`).
+
+It also shows as:
+
+- A capture group of literal text is typed `string` instead of its literal alternatives
+- `preg_match()` capture groups that can only match fixed text are typed `string`, not the literal
+
+**Cases** (PHPStan `nsrt/`, 58 assertions): `preg_match_shapes.php` (36), `preg_match_all_shapes.php` (12), `bug-11311.php` (6), `preg_replace_callback_shapes.php` (2), `bug-12210.php`, `bug-12173.php`.
+
+### B823. `preg_match()` types a pattern whose alternatives capture different groups as one shape with optional keys instead of a union per alternative
+
+**Impact: Low · Complexity: Medium**
+
+```php
+if (preg_match('~^(?:(\d+)x(\d+)|(\d+)|x(\d+))$~', $s, $m) === 1) {
+    $m; // got array{0: string, 1?: string, 2?: string, 3?: string, 4?: string}
+        // should be array{string, '', '', '', numeric-string}|array{string, '', '', numeric-string}|array{string, numeric-string, numeric-string}
+}
+```
+
+PHPStan builds one shape per top-level alternative (unmatched earlier groups are `''`) and marks a shape whose later groups are optional as a `list{}`. PHPantom makes every group after the first optional key in a single `array{}` shape.
+
+**Cases** (PHPStan `nsrt/`, 19 assertions): `preg_match_shapes.php` (19).
+
+### B824. `preg_match()` gives a generic array for regex syntax its parser does not handle
+
+**Impact: Low · Complexity: Medium**
+
+```php
+if (preg_match('/( \d+ )/x', $s, $m)) {
+    $m; // got array<array-key, string>, should be array{non-empty-string, numeric-string}
+}
+```
+
+Unsupported: the `x` modifier, inline modifier groups `(?i)` / `(?xs-i)`, duplicate names with `(?J)`, branch reset `(?|...)`, `\Q...\E`, and `(*MARK)` verbs (which also add a `MARK` key). The no-match branch then also loses `array{}`.
+
+It also shows as:
+
+- An inline `(?n)` flag makes the `preg_match()` result a generic array
+
+**Cases** (PHPStan `nsrt/`, 20 assertions): `preg_match_shapes.php` (18), `preg_match_shapes_php80.php` (2).
+
+### B825. With `PREG_UNMATCHED_AS_NULL|PREG_OFFSET_CAPTURE` the whole match and required groups are not nullable
+
+**Impact: Low · Complexity: Low**
+
+```php
+preg_match('/(foo)(bar)(baz)/', $s, $m, PREG_OFFSET_CAPTURE|PREG_UNMATCHED_AS_NULL);
+$m[0];   // array{string, int<-1, max>}, should be array{string|null, int<-1, max>}
+$m[1];   // array{string, int<-1, max>}, should be array{'foo'|null, int<-1, max>}
+```
+
+Under PREG_UNMATCHED_AS_NULL only optional groups get |null; PHPStan (matching PHP's offset-capture behaviour) makes every entry, including index 0, nullable when combined with PREG_OFFSET_CAPTURE, and under PREG_SET_ORDER for required groups too. These rows also carry the literal-group gap.
+
+**Cases** (PHPStan `nsrt/`, 5 assertions): `preg_match_all_shapes.php` (3), `preg_match_shapes_php80.php`, `preg_replace_callback_shapes.php`.
+
+### B826. `Enum::from()` and `tryFrom()` with a known value do not return the matching case
+
+**Impact: Medium · Complexity: Low**
+
+```php
+enum E: int { case A = 1; case B = 2; }
+E::tryFrom(2);         // ?E, should be E::B
+E::tryFrom(0);         // ?E, should be null
+E::from(E::B->value);  // E, should be E::B
+```
+
+The backing-value lookup is not done for literal (or constant-folded, or narrowed) arguments; the native `static`/`?static` return is used as is.
+
+**Cases** (PHPStan `nsrt/`, 22 assertions): `enum-from.php` (22).
+
+### B827. `getAttributes()` returns `array` rather than `list` and an unfiltered call gives `ReflectionAttribute<mixed>`
+
+**Impact: Low · Complexity: Low**
+
+```php
+$r = new ReflectionClass(Foo::class);
+$r->getAttributes();             // array<ReflectionAttribute<mixed>>, should be list<ReflectionAttribute<object>>
+$r->getAttributes(Abc::class);   // array<ReflectionAttribute<Abc>>, should be list<ReflectionAttribute<Abc>>
+```
+
+Affects ReflectionClass/Method/Parameter/Property/ClassConstant/Function. The return should be a list, and the template default without a filter should be object.
+
+**Cases** (PHPStan `nsrt/`, 16 assertions): `reflectionclass-issue-5511-php8.php` (16).
+
+### B828. `parse_url()` marks every component present and ignores its component argument
+
+**Impact: Medium · Complexity: Low**
+
+```php
+parse_url($url);                 // got array{scheme: string, ..., fragment: string}|string|int|false|null
+                                 // should be array{scheme?: string, host?: string, port?: int<0, 65535>, ...}|false
+parse_url($url, PHP_URL_HOST);   // got the same union, should be string|false|null
+```
+
+Every call returns the full union of all components. The shape's keys should all be optional, the component constants should pick one member, and `array_key_exists()` should then narrow those optional keys (bug-3009.php).
+
+It also shows as:
+
+- `parse_url()` without a component returns the union of every component's type
+
+**Fix:** return the shape with every key optional, and the component's own type when `$component` is given.
+
+**Cases** (PHPStan `nsrt/`, 33 assertions): `bug-4754.php` (11), `lowercase-string-parse-url.php` (9), `bug-2001-php8.php` (6), `bug-3009.php` (4), `functions.php` (3).
+
+### B829. `json_decode()` of a literal JSON string is not evaluated
+
+**Impact: Low · Complexity: Low**
+
+```php
+json_decode('[1, 2, 3]');   // mixed, should be array{1, 2, 3}
+json_decode('{}');          // mixed, should be stdClass
+/** @var '{}'|'null' $j */ json_decode($j, true);   // mixed, should be array{}|null
+```
+
+No folding of a literal (or literal-union) JSON argument, with the associative flag or `JSON_OBJECT_AS_ARRAY`.
+
+It also shows as:
+
+- `json_decode()` of a literal JSON string is not folded
+- `json_decode()` of an invalid literal JSON string is not evaluated
+
+**Cases** (PHPStan `nsrt/`, 21 assertions): `json-decode-narrow_type.php` (10), `json-decode-narrow_type_with_force_array.php` (6), `json-decode-invalid_type.php` (4), `json-decode-json_object_as_array.php`.
+
+### B830. Some stub return types keep a `|false` that PHP 8 never returns
+
+**Impact: Low · Complexity: Low**
+
+```php
+$doc->createElement('div');   // DOMElement|false, should be DOMElement
+hrtime();                     // array{int, int}|false, should be array{int, int}
+```
+
+PHP 8 throws on invalid element names, and hrtime() cannot fail on supported platforms; the stubs' |false should be dropped (as PHPStan's extensions do).
+
+**Cases** (PHPStan `nsrt/`, 10 assertions): `dom-document-create-element.php` (7), `php73_functions.php` (3).
+
+### B831. `Exception::getCode()` returns `mixed|int` rather than `int|string`
+
+**Impact: Low · Complexity: Low**
+
+```php
+(new \Exception())->getCode();       // mixed|int, should be int|string
+(new \LogicException())->getCode();  // mixed|int, should be int
+$throwable->getCode();               // int, should be int|string
+```
+
+The stub's `@return mixed|int` is used verbatim; PDOException (and anything that may be one) can return a string code, other built-in exceptions an int.
+
+**Cases** (PHPStan `nsrt/`, 8 assertions): `bug-6001.php` (8).
+
+### B832. Key-preserving array functions return a plain `array`
+
+**Impact: Medium · Complexity: Low-Medium**
+
+```php
+array_count_values([1, 2, 2, 3]); // got array, should be non-empty-array<1|2|3, int<1, max>>
+```
+
+The result's keys are the input's int and string values (numeric strings cast to int, other types dropped), and its values are counts.
+
+It also shows as:
+
+- Several array functions return a generic `array` where their inputs determine the result
+- `array_fill()` and `array_fill_keys()` with literal arguments do not build the exact shape in some cases
+- `str_replace()` and `preg_replace_callback()` on an array subject lose its shape
+
+**Fix:** add rules to `array_func_rules.rs` that carry the input's key and value types (and a constant input's shape) through.
+
+**Cases** (PHPStan `nsrt/`, 210 assertions): `array-change-key-case.php` (48), `array-functions.php` (32), `array_pad.php` (32), `array-intersect-key.php` (18), `array-replace.php` (16), `array-fill-keys.php` (16), `array-combine-php8.php` (13), `array-count-values.php` (7), `array-intersect-key-constant.php` (5), `iterator_to_array.php` (5), `bug-7580-php82.php` (4), `replaceFunctions.php` (4), 7 more.
+
+### B833. Slicing or reordering a constant array loses its shape
+
+**Impact: Low · Complexity: Low-Medium**
+
+```php
+foreach (array_chunk(range(0, 10), 60) as $chunk) { $chunk; } // got list<int>, should be array{0, 1, ..., 10}
+```
+
+UNCLEAR whether `range(0, 10)` or `array_chunk()` loses the shape.
+
+It also shows as:
+
+- `sort()` and `shuffle()` do not turn a union of shapes or a non-list argument into a list
+- `array_unique()` returns a list
+- `array_slice()` of a literal array with numeric-string keys, then an append, loses the shape
+
+**Cases** (PHPStan `nsrt/`, 141 assertions): `array-slice.php` (41), `array-functions.php` (19), `array-chunk.php` (19), `array-reverse.php` (18), `php73_functions.php` (12), `shuffle.php` (11), `bug-10721.php` (9), `bug-8956.php` (3), `bug-6138.php` (3), `sort.php` (3), `get-defined-vars.php` (2), `array-chunk-php81.php`.
+
+### B834. `array_filter()` with a callback neither filters a shape entry by entry nor narrows by the callback
+
+**Impact: Medium · Complexity: Medium**
+
+```php
+/** @param array{one?: string, two?: string|null} $d */
+array_filter($d, fn($v) => $v !== null);   // array<string, string|null>, should be array{one?: string, two?: string}
+array_filter(['file1', 'file2'], 'file_exists');   // array<int, 'file1'|'file2'>, should be array{0?: 'file1', 1?: 'file2'}
+```
+
+With a callback the result degrades to a generic array of the original values; the shape should be kept with every key optional, and the value narrowed by the callback's truthy check (!== null, (bool) cast).
+
+It also shows as:
+
+- `array_filter()` with a callback that can never return true does not give `array{}`
+- `array_filter()` with a callback on an array shape returns a generic array instead of filtering each entry
+- UNCLEAR: a closure passed to `array_filter()` gets no parameter types
+
+**Cases** (PHPStan `nsrt/`, 31 assertions): `bug-11730.php` (15), `bug-3132.php` (4), `array-filter-constant.php` (3), `array-filter-arrow-functions.php` (3), `array-functions.php` (2), `bug-7993.php`, `bug-11570.php`, `bug-6006.php`, `bug-7909.php`.
+
+### B835. `curl_getinfo()` with an option returns `mixed`
+
+**Impact: Low · Complexity: Low**
+
+```php
+$handle = curl_init();
+curl_getinfo($handle, CURLINFO_HTTP_CODE);   // mixed, should be int
+curl_getinfo($handle, CURLINFO_EFFECTIVE_URL); // mixed, should be string
+```
+
+The return type depends on the `CURLINFO_*` constant passed, and PHPStan keeps a table of them per PHP version.
+
+**Cases** (PHPStan `nsrt/`, 71 assertions): `curl_getinfo.php` (46), `curl_getinfo_7.3.php` (18), `curl_getinfo_8.2.php` (4), `curl_getinfo_8.3.php` (2), `curl_getinfo_8.4.php`.
+
+### B836. `preg_split()` ignores its flags and literal arguments
+
+**Impact: Low · Complexity: Low-Medium**
+
+```php
+preg_split('/-/', '1-2-3');                    // array<string>|false, should be array{'1', '2', '3'}
+preg_split($p, $s, -1, PREG_SPLIT_OFFSET_CAPTURE); // array<string>|false, should be list<array{string, int}>|false
+```
+
+`PREG_SPLIT_OFFSET_CAPTURE` changes the element type and literal arguments fix the result.
+
+**Cases** (PHPStan `nsrt/`, 43 assertions): `preg_split.php` (37), `preg_filter.php` (6).
+
+### B837. `gettype()` and `get_debug_type()` of a known type return `string`
+
+**Impact: Low · Complexity: Low**
+
+```php
+function f(bool $b, ?Foo $o) {
+    gettype($b);         // string, should be 'boolean'
+    get_debug_type($o);  // string, should be 'Foo'|'null'
+}
+```
+
+Both map each runtime type to a fixed name, so a known argument type decides a union of literals.
+
+**Cases** (PHPStan `nsrt/`, 42 assertions): `get-debug-type.php` (21), `gettype.php` (21).
 
 ## Reachability
 
@@ -268,6 +655,43 @@ filter callbacks alike, and to the code after an always-throwing
 `strlen-int-range.php` are the cases; the unported
 `array-filter-arrow-functions.php` and `array-filter-callables.php` in
 PHPStan's `nsrt/` have the filter ones.
+
+**Upstream cases** (PHPStan `nsrt/`, 72 assertions): `math.php` (28), `conditional-types-inference.php` (5), `array-filter-callables.php` (3), `bug-4099-php8.php` (3), `array-is-list-type-specifying.php` (3), `functions.php` (3), `array-shape-list-optional.php` (2), `assert-docblock.php` (2), `bug-12376.php` (2), `bug-13481.php` (2), `count-type.php` (2), `bug-4434.php` (2), 14 more.
+
+### B838. Loops nested more than six deep are not walked, so nothing inside them has a type
+
+**Impact: High · Complexity: Medium**
+
+```php
+foreach ($a as $x1) { foreach ($b as $x2) { /* ... 9 levels ... */
+    $this->prop;   // no type at all
+} }
+```
+
+`MAX_LOOP_DEPTH = 6` in `forward_walk/loop_control.rs` skips any deeper loop body entirely, so every expression in it (even `$this->prop`) resolves to nothing. Per the perf guidelines the fix is a structural bound on loop re-walks, not a bigger cap.
+
+**Fix:** replace the depth skip with a bound on re-walks that still walks the body once (see the performance anti-patterns: a depth cap that drops the body is the wrong tool).
+
+**Cases** (PHPStan `nsrt/`, 30 assertions): `iterable.php` (30).
+
+### B839. A variable assigned before a `throw` inside `try` has no type in `catch` and `finally`
+
+**Impact: Medium · Complexity: Low-Medium**
+
+```php
+try {
+    if (c()) { $foo = 1; throw new InvalidArgumentException(); }
+    if (d()) { $foo = 2; throw new InvalidArgumentException(); }
+} catch (InvalidArgumentException $e) {
+    $foo;   // no type, should be 1|2
+}
+```
+
+Assignments on paths that end in a throw are dropped instead of flowing into the matching catch block and finally.
+
+**Fix:** join the `try` body's state at every statement that can throw into the `catch` and `finally` entry state, not only its end state.
+
+**Cases** (PHPStan `nsrt/`, 4 assertions): `throw-points-try-catch.php` (4).
 
 ## Narrowing
 
@@ -421,6 +845,8 @@ Tagged unions keyed on a literal string or int narrow already. A `true` or
 entry accept the bool literals. `// SKIP` lines in
 `tests/phpstan_nsrt/bug-6728.php`.
 
+**Upstream cases** (PHPStan `nsrt/`, 23 assertions): `tagged-unions.php` (11), `bug-12401.php` (4), `bug-10544.php` (2), `bug-5128.php` (2), `bug-8724.php` (2), `bug-6383.php`, `bug-9908.php`.
+
 ### B785. Comparing an array with `array_filter()` of itself narrows nothing
 
 **Impact: Low · Complexity: Medium**
@@ -565,6 +991,8 @@ loses the alternatives the other class still allows.
 **Fix:** narrow each receiver class by its own assertion and join the
 results. See `tests/phpstan_nsrt/bug-14108d.php`.
 
+**Upstream cases** (PHPStan `nsrt/`, 2 assertions): `bug-14108c.php`, `bug-14108.php`.
+
 ### B804. `array_search()` does not narrow its haystack to an array
 
 **Impact: Low · Complexity: Low**
@@ -582,6 +1010,358 @@ already knows its haystack is one.
 
 **Fix:** narrow the haystack argument the way `in_array()` narrows its
 needle. See `tests/phpstan_nsrt/array-search-type-specifying.php`.
+
+**Upstream cases** (PHPStan `nsrt/`, 12 assertions): `bug-11276.php` (8), `bug-13301-php8.php` (4).
+
+### B840. Assigning to a property narrows it to the assigned value even where PHP coerces it or a hook intervenes
+
+**Impact: Medium · Complexity: Medium**
+
+```php
+class A {
+    private float $f; public int $i; private string $s;
+    function m(int $n, string $str, mixed $m): void {
+        $this->f = $n;   $this->f;   // int, should be float
+        $this->i = $str; $this->i;   // string, should be int (weak mode coerces)
+        $this->s = $m;   $this->s;   // mixed, should be string
+    }
+}
+```
+
+Property narrowing after an assignment stores the right-hand type verbatim. The stored type should be the assigned type intersected with (or, under weak typing, coerced to) the native property type, e.g. `mixed` -> declared type, `int` -> `float`, `'123'` -> `123`.
+
+It also shows as:
+
+- Assigning to a natively typed property does not apply the property's type
+- Assigning to a hooked, virtual or magic property narrows later reads to the assigned value
+- Assigning to a typed property keeps the assigned value's type even when PHP coerces it
+
+**Cases** (PHPStan `nsrt/`, 73 assertions): `bug-12393b.php` (61), `bug-12393.php` (8), `property-hooks.php` (2), `bug-9062.php`, `bug-12393b-php84.php`.
+
+### B841. `is_subclass_of()` and `is_a()` with class strings do not narrow their subject
+
+**Impact: Medium · Complexity: Low-Medium**
+
+```php
+/** @param string|object $a */
+function f($a) {
+    if (is_subclass_of($a, 'DateTimeInterface')) {
+        $a;         // string|object, should be class-string<DateTimeInterface>|DateTimeInterface
+        new $a();   // no type, should be DateTimeInterface
+    }
+}
+/** @param class-string<A>|class-string<B> $c */
+if (!is_a($c, B::class, true)) { $c; }   // both, should be class-string<A>
+```
+
+No narrowing rule for is_subclass_of() (with or without allow_string), nor for negated is_a(..., true) on a union of class-strings; downstream `new $a()` and `$a::f()` lose their types as a result.
+
+It also shows as:
+
+- `is_subclass_of()` with a `class-string<T>` second argument does not narrow to `class-string<T>`
+
+**Cases** (PHPStan `nsrt/`, 36 assertions): `generic-class-string.php` (15), `specifiedTypesUsingIsFunctions.php` (14), `bug-6687.php` (3), `bug-7987.php` (2), `bug-6704.php`, `bug-6698.php`.
+
+### B842. A loose `==` or `!=` with `null`, `false`, `0` or `''` narrows by strict rules or not at all
+
+**Impact: Medium · Complexity: Medium**
+
+```php
+/** @param 0|0.0|1|''|'0'|'x'|array{}|bool|object|null $x */
+if ($x == false) {
+    $x;   // false, should be 0|0.0|''|'0'|array{}|false|null
+} 
+if ($x == null) {} else {
+    $x;   // unchanged, should be 1|'0'|'x'|object|true
+}
+```
+
+The == false branch keeps only `false` (as if ===) and the else branches of == null/0/'' remove nothing; PHP 8 loose-comparison tables are needed per literal (null/false/0/'').
+
+It also shows as:
+
+- A loose `== ''` comparison does not narrow out `false`
+
+**Cases** (PHPStan `nsrt/`, 18 assertions): `equal-narrow.php` (17), `bug-10338.php`.
+
+### B843. A type check does not narrow a variable that is undefined or has no resolved type
+
+**Impact: Medium · Complexity: Low**
+
+```php
+if (!is_int($integer)) { throw new \Exception(); }
+$integer;   // no type, should be int
+$foo = doFoo();   // unknown function
+if (!is_a($foo, 'Foo')) { return; }
+$foo;       // no type, should be Foo
+```
+
+The narrowing applies to an existing type; when the variable has none (never assigned, or assigned from an unresolvable call) the check produces nothing instead of the checked type.
+
+**Cases** (PHPStan `nsrt/`, 16 assertions): `specifiedTypesUsingIsFunctions.php` (15), `switch-instanceof-truthy.php`.
+
+### B844. `key_exists()` does not narrow like `array_key_exists()`
+
+**Impact: Low · Complexity: Low**
+
+```php
+$a = ['foo' => 2, 3 => 'bar'];
+if (key_exists($key, $a)) { $key; }   // string, should be '3'|'foo'
+/** @param array<string, mixed> $b */
+if (key_exists($k, $b)) { $k; }       // int|string, should be string
+```
+
+key_exists() is an alias of array_key_exists() but no narrowing is applied at all; the alias should share the array_key_exists() rule (B782 then applies to the declared-key-type cases).
+
+**Fix:** register `key_exists` wherever `array_key_exists` is matched by name.
+
+**Cases** (PHPStan `nsrt/`, 12 assertions): `key-exists.php` (12).
+
+### B845. `@phpstan-assert string[] $arr` narrows an array parameter to a bare `array`
+
+**Impact: Low · Complexity: Low**
+
+```php
+/** @param mixed[] $arr @phpstan-assert string[] $arr */ function validate(array $arr): void {}
+/** @param mixed[] $arr */ function f(array $arr) { validate($arr); $arr; } // got array, should be array<string>
+```
+
+The asserted element type is dropped. Same for `-if-true`/`-if-false` forms and `=non-empty-array<int>`.
+
+**Cases** (PHPStan `nsrt/`, 8 assertions): `assert-docblock.php` (8).
+
+### B846. Comparing `get_class()` or `get_parent_class()` with a class name does not narrow the object
+
+**Impact: Low · Complexity: Low**
+
+```php
+if (get_parent_class($o) === A::class) { $o; } // got object, should be A
+if (get_parent_class($s) === A::class) { $s; } // got string, should be class-string<A>
+```
+
+With a mixed argument the branch shows no type at all (should be `A|class-string<A>`).
+
+It also shows as:
+
+- Comparing `get_class($x)` with a class string does not narrow `$x`
+- `get_class($x) === $classString` does not narrow `$x`
+
+**Cases** (PHPStan `nsrt/`, 10 assertions): `bug-5552.php` (8), `bug-6294.php`, `bug-2580.php`.
+
+### B847. A `throw` on one side of `?:`, `||`, `&&` or `??` does not narrow the other side
+
+**Impact: Medium · Complexity: Low**
+
+```php
+function f(?string $data): void {
+    $data === null ? throw new \Exception() : $data;
+    $data;   // ?string, should be string
+    $data ?? throw new \Exception();
+    $data;   // ?string, should be string
+}
+```
+
+An expression statement whose one branch is a `throw` should leave the scope of the other branch's condition, as an `if (...) throw` does.
+
+It also shows as:
+
+- `$x ?? throw` (or a never-returning right side) does not narrow `$x` to non-null
+
+**Cases** (PHPStan `nsrt/`, 11 assertions): `bug-6870.php` (7), `bug-4885.php` (2), `bug-5351.php` (2).
+
+### B848. `switch` narrows its subject less than the equivalent `if` chain
+
+**Impact: Medium · Complexity: Low-Medium**
+
+```php
+switch (true) { case $a === null: exit; }
+$a;   // Foo|null, should be Foo
+/** @var 1|2|3 $b */ switch ($b) { case 1: exit; }
+$b;   // 1|2|3, should be 2|3
+switch (true) { case is_int($x): break; case doFoo(): $x; }   // string|int, should be string
+```
+
+A case that always exits does not remove its condition after the switch, and a later case does not exclude the earlier cases that did not match.
+
+**Cases** (PHPStan `nsrt/`, 7 assertions): `bug-13211.php` (6), `switch-type-elimination.php`.
+
+### B849. `preg_match_all()` and a stored `preg_match()` result do not narrow `$matches`
+
+**Impact: Low · Complexity: Low**
+
+```php
+if (preg_match_all('/ab(?P<num>\d+)?/', $s, $matches)) {
+} else {
+    $matches;   // array{0: list<string>, num: list<string>, 1: list<string>}, should be array{}
+}
+$matches;       // should be array{}|array{0: ..., ...}
+```
+
+preg_match() already narrows $matches in the failing branch (bug-11293 gives array{}), but preg_match_all() in a truthy, `!= false` or `== true` condition does not.
+
+It also shows as:
+
+- Checking a variable that holds `preg_match()`'s result does not narrow `$matches`
+
+**Cases** (PHPStan `nsrt/`, 11 assertions): `preg_match_all_shapes.php` (6), `bug-11699.php` (5).
+
+### B850. `@phpstan-assert` is not applied when the function is called through a callable variable
+
+**Impact: Low · Complexity: Low**
+
+```php
+$f1 = is_positive_int(...);
+$f2 = 'ns\is_positive_int';
+if ($f1($v)) { $v; }   // mixed, should be int (int<1, max>)
+if ($f2($v)) { $v; }   // mixed, should be int
+```
+
+Assertions are read only for direct calls; a first-class callable or a literal function-name string held in a variable resolves the return type but not the assertion.
+
+**Cases** (PHPStan `nsrt/`, 6 assertions): `bug-14249.php` (6).
+
+### B851. Negating a multi-variable `isset()` narrows every variable to `null`
+
+**Impact: High · Complexity: Low**
+
+```php
+function f(?DateTimeImmutable $d, ?int $c) {
+    if (isset($d, $c)) { throw new Exception(); }
+    $d;   // null, should be DateTimeImmutable|null
+    $c;   // null, should be int|null
+}
+```
+
+!isset($a, $b) means at least one is null, not all; the false branch applies the per-variable negation to each one. Later checks then collapse to never.
+
+**Fix:** a failed `isset($a, $b)` proves only that one of them is unset: narrow nothing to `null`, or narrow to the union of each variable's null alternative.
+
+**Cases** (PHPStan `nsrt/`, 6 assertions): `bug-8366.php` (6).
+
+### B852. Narrowing a float by `=== 0.0` or `== 0` gives the int `0` and forgets `-0.0`
+
+**Impact: Low · Complexity: Low**
+
+```php
+function f(float $n): void {
+    if ($n === 0.0) { $n; (string) $n; }   // 0 and '0', should be 0.0 and '-0'|'0'
+    if ($n == 0) { $n; }                   // float, should be 0.0
+}
+```
+
+The narrowed literal is stored as an int literal, the loose comparison with an int does not narrow a float, and the string cast assumes positive zero although `-0.0 === 0.0`.
+
+**Cases** (PHPStan `nsrt/`, 6 assertions): `bug-12225.php` (6).
+
+### B853. `array_is_list()` does not narrow its argument to a list
+
+**Impact: Low · Complexity: Low**
+
+```php
+/** @param array<mixed> $a */
+if (array_is_list($a)) { $a; }   // array<mixed>, should be list<mixed>
+```
+
+No type-specifying rule for `array_is_list()`; a `mixed` argument even loses its type in the true branch.
+
+**Cases** (PHPStan `nsrt/`, 6 assertions): `bug-9734.php` (3), `array-is-list-type-specifying.php` (3).
+
+### B854. The negation of an array-element-type assertion narrows `mixed[]` to `never`
+
+**Impact: Medium · Complexity: Low**
+
+```php
+/** @param mixed[] $arr @phpstan-assert-if-true string[] $arr */ function isStrings(array $arr): bool {}
+if (!isStrings($arr)) { $arr; } // got never, should be non-empty-array<mixed>
+```
+
+Removing `array<string>` from `array<mixed>` should leave a non-empty array (an empty array would have passed). With both `-if-true` and `-if-false` assertions the true branch also becomes `never`.
+
+**Cases** (PHPStan `nsrt/`, 5 assertions): `assert-docblock.php` (5).
+
+### B855. `count()` comparisons narrow shapes and unions wrongly or not at all
+
+**Impact: Medium · Complexity: Low-Medium**
+
+```php
+/** @param array{0: string, 1?: string} $a */
+if (count($a) <= 1) { return; }
+$a;   // array{0: string, 1?: string}, should be array{string, string}
+/** @param array{}|array{0: string, 1: string, 2?: string} $b */
+if (count($b) === 3) { return; }
+$b;   // array{}|array{0: string, 1: string}, should keep 2?
+if (count($mixed) === 0) { $mixed; }   // no type, should be array{}|Countable
+```
+
+Size comparisons do not make optional keys required when the count rules out the shorter form, a failed `=== n` strips the optional key instead of keeping the shape, `> 1` does not remove a one-element member of a union, and a `mixed` subject loses its type.
+
+It also shows as:
+
+- Comparing `count()` with a variable int union or range does not narrow the array
+- `count($this->prop) === 0` after `array_shift($this->prop)` in a `while (count(...) > 0)` loop narrows to `never`
+
+**Cases** (PHPStan `nsrt/`, 10 assertions): `bug11480.php` (4), `count-type.php` (3), `bug-14314.php`, `bug-3558.php`, `bug-4558.php`.
+
+### B856. A ternary or `?:` of type checks used as a condition does not narrow
+
+**Impact: Low · Complexity: Low**
+
+```php
+/** @param resource|object $c */
+assert(rand(0, 1) ? $c instanceof Foo : $c instanceof Bar);
+$c;   // resource|object, should be Foo|Bar
+assert($c instanceof Foo ?: $c instanceof Bar);   // same
+```
+
+Conditions are narrowed through &&, ||, ! but not through a ternary whose branches are both checks (and the short ternary form).
+
+**Cases** (PHPStan `nsrt/`, 4 assertions): `bug-14100.php` (4).
+
+### B857. Comparing a `class-string<A|B>` with `X::class` does not narrow
+
+**Impact: Low · Complexity: Low**
+
+```php
+/** @param class-string<Car|Bike|Boat> $s */
+if ($s === Car::class) { $s; return; }   // whole union, should be Car's class string
+$s;                                      // whole union, should be class-string<Bike|Boat>
+```
+
+Identity comparison with a `::class` literal does not pick or remove the matching member of a class-string union.
+
+**Cases** (PHPStan `nsrt/`, 4 assertions): `bug-9534.php` (4).
+
+### B858. Assigning a property through destructuring or as a `foreach` target does not narrow it
+
+**Impact: Low · Complexity: Low**
+
+```php
+[$this->foo] = [1];
+$this->foo;   // int, should be 1
+foreach ([1, 2, 3] as $this->foo) { $this->foo; }   // int, should be 1|2|3
+```
+
+Property narrowing is recorded for `$this->p = expr` but not when the property is a list()/[...] element or a foreach key/value target.
+
+**Cases** (PHPStan `nsrt/`, 4 assertions): `array-destructuring-types.php` (4).
+
+### B859. `@phpstan-assert-if-true` misses properties of arguments, `!== true`, nullsafe calls and intersection receivers
+
+**Impact: Low · Complexity: Low-Medium**
+
+```php
+/** @phpstan-assert-if-true !null $a->foo */ function check(A $a): bool {}
+if (check($a1)) { $a1->foo; } // got string|null, should be string
+```
+
+Also through a boolean variable holding the call's result.
+
+It also shows as:
+
+- `@phpstan-assert-if-true` on `$this` is not applied through `!== true` or a nullsafe call
+- A call on an intersection receiver applies neither member's `@phpstan-assert`
+
+**Cases** (PHPStan `nsrt/`, 6 assertions): `bug-10040.php` (3), `bug-12866.php` (2), `assert-intersected.php`.
 
 ## Array types
 
@@ -610,6 +1390,8 @@ length or keys, as PHPStan's constant-array builder does. `// SKIP` lines in
 `tests/phpstan_nsrt/narrow-tagged-union.php`,
 `array-merge-const-non-const.php` and `array-replace-const-non-const.php`.
 
+**Upstream cases** (PHPStan `nsrt/`, 70 assertions): `preg_match_shapes.php` (26), `bug11480.php` (16), `isset.php` (7), `bug-6936-limit.php` (3), `bug-11311.php` (3), `preg_match_shapes_php82.php` (3), `overwritten-arrays.php` (3), `constant-array-union-unshift.php` (2), `tagged-unions.php` (2), `bug-9908.php`, `constant-array-optional-set.php`, `bug-2001-php8.php`, 2 more.
+
 ### B767. A value written into an array inside a loop loses its literals
 
 **Impact: Low · Complexity: Medium**
@@ -629,6 +1411,8 @@ nothing the loop changes.
 **Fix:** widen only what the loop's own fixed-point walk shows to grow
 between passes, as `widen_grown_int_locals` does for integers. `// SKIP`
 lines in `tests/phpstan_nsrt/foreach-loop-variables.php`.
+
+**Upstream cases** (PHPStan `nsrt/`, 8 assertions): `bug-9753.php` (3), `bug-8924.php` (3), `bug-5316.php`, `bug-12274.php`.
 
 ### B768. Removing an end entry from a shape with optional keys gives the generic array
 
@@ -669,6 +1453,8 @@ the array's element type becomes the written shape for every element.
 `mixed` when the element was `mixed`. `// SKIP` line in
 `tests/phpstan_nsrt/bug-13270a.php`.
 
+**Upstream cases** (PHPStan `nsrt/`, 10 assertions): `bug-13857.php` (7), `bug-6173.php` (2), `bug-optionalArrayKeyInMultiDimArrayLoop.php`.
+
 ### B789. A nested write under a dynamic key inside a loop is lost after the loop
 
 **Impact: Medium · Complexity: Medium**
@@ -688,6 +1474,8 @@ dropped, so the variable reads as always empty.
 loop's fixed-point walk the way single-dimension writes are, so they also
 reach the loop head for the next pass. `// SKIP` lines in
 `tests/phpstan_nsrt/bug-13629.php` and `bug-10438.php`.
+
+**Upstream cases** (PHPStan `nsrt/`, 9 assertions): `bug-12078.php` (3), `bug-10640.php` (2), `bug-8015.php` (2), `bug-10025.php` (2).
 
 ### B794. An append after `unset()` of the last entry reuses its index
 
@@ -729,6 +1517,8 @@ list or overwrites an entry, and either way it stays a list.
 **Fix:** keep a list a list when the written index is one past an index a
 condition proved set. `// SKIP` lines in `tests/phpstan_nsrt/list-type.php`.
 
+**Upstream cases** (PHPStan `nsrt/`, 23 assertions): `bug-12274.php` (10), `bug-14245.php` (10), `for-loop-expr.php` (2), `bug-10089.php`.
+
 ### B805. `array_values()` on a shape with optional keys gives a generic list
 
 **Impact: Low · Complexity: Low**
@@ -740,6 +1530,146 @@ array_values($numbers);   // list<'a'|'b'|'c'>, should be list{0?: 'a'|'b'|'c', 
 
 **Fix:** renumber the shape's entries, each position taking every value
 that can land there. See `tests/phpstan_nsrt/array_values.php`.
+
+**Upstream cases** (PHPStan `nsrt/`, 3 assertions): `bug-14297.php` (3).
+
+### B860. References into array elements are not tracked
+
+**Impact: Medium · Complexity: Medium**
+
+```php
+$a = 1;
+$b = [&$a];
+$b[0] = 2;
+$a; // got 1, should be 2
+```
+
+References to locals are tracked, but not when the `&$var` sits inside an array literal. Neighbour of B812 (references to properties).
+
+It also shows as:
+
+- Passing an array offset to a by-reference parameter does not update the offset
+- Inside a by-reference `foreach`, a write to the value is not seen through the array
+- Passing a variable to a closure's by-reference parameter keeps its old type
+
+**Cases** (PHPStan `nsrt/`, 38 assertions): `bug-14333.php` (23), `bug-5077.php` (6), `overwritten-arrays.php` (4), `bug-11846.php` (2), `bug-5615.php` (2), `bug-11322.php`.
+
+### B861. `++`, `--` and compound assignment on an array offset or property do not change the stored type
+
+**Impact: Medium · Complexity: Low**
+
+```php
+$a = ['a' => 1];
+$a['a']++;
+$a;   // array{a: 1}, should be array{a: 2}
+$this->p = 1; $this->p++;
+$this->p;   // 1, should be 2
+foreach ($xs as $k) { $counts[$k] ??= ...; $counts[$k]++; }   // values stay 1
+```
+
+The increment of a non-variable lvalue is not written back, so offset/property types keep the pre-increment literal (and loops never widen them). Static properties also lose the earlier `self::$p = 1` entirely.
+
+It also shows as:
+
+- `++` and compound assignment on an array offset do not change the offset's type
+- A compound assignment (`.=`) to a property or static property does not update its narrowed type
+
+**Cases** (PHPStan `nsrt/`, 21 assertions): `has-offset-type-bug.php` (7), `constantTypes.php` (5), `throw-points-assign-op.php` (4), `shopware-connection-profiler.php` (3), `array-keys-branches.php`, `generalize-scope.php`.
+
+### B862. Array keys are not normalised the way PHP casts them
+
+**Impact: Low · Complexity: Low**
+
+```php
+foreach (['foo' => 1, 'two', 'three'] as $k => $v) { $k; }  // 'foo'|1|2, should be 0|1|'foo'
+['1' => 'a', '2' => 'b'];                 // keys string|'1', should be 1|2
+[1 => 'a', 2.5 => 'b'];                   // array-key, should be 1|2
+[STRING_ONE => 'x'];                      // define()d '1' gives string, should be 1
+['id' => null, $key => 's'];              // $key is 'foo'|'bar': generic array, should be array{id: null, foo?: 's', bar?: 's'}
+```
+
+The implicit index after a string key, numeric-string and float keys cast to int, `define()`d constant keys, and a literal-union key are not handled when building the literal's type.
+
+It also shows as:
+
+- A `bool` offset is not cast to `0`/`1` when writing an array
+
+**Cases** (PHPStan `nsrt/`, 9 assertions): `literal-arrays-keys.php` (6), `constant-array-type-set.php` (2), `bug-9907.php`.
+
+### B863. Destructuring a nullable shape with `list()` gives the variables no type
+
+**Impact: Low · Complexity: Low**
+
+```php
+list($month, $day, $year) = sscanf($date, '%s %d %d');   // array{...}|null
+$month;   // no type, should be string|null
+```
+
+`sscanf()` itself resolves to the right shape; destructuring a `shape|null` value leaves every target untyped instead of reading each offset (null offsets give null).
+
+**Cases** (PHPStan `nsrt/`, 6 assertions): `sscanf.php` (6).
+
+### B864. Writes to an array's keys inside a foreach replace the pre-loop value instead of joining with it
+
+**Impact: Low · Complexity: Low-Medium**
+
+```php
+$pre = ['a' => null];
+foreach ($arr as $v) { $pre['a'] = $v['a']; } // $v['a']: string
+$pre['a']; // got string, should be string|null
+```
+
+The loop may run zero times, so after it each written key holds its old value or the written one. PHPStan also correlates the keys (if `a` is still null, so is `b`).
+
+**Cases** (PHPStan `nsrt/`, 5 assertions): `bug-7921.php` (5).
+
+### B865. Writing to an array under the `foreach` loop's own key does not replace the element type
+
+**Impact: Low · Complexity: Low**
+
+```php
+/** @param array<int, string> $a */
+foreach ($a as $k => $v) { $a[$k] = 1; }
+$a;   // array<int, string|1>, should be array<int, 1>
+```
+
+A write under the current iteration key overwrites that element, and after the loop every element has been overwritten; PHPantom joins the written value with the old element type instead.
+
+**Cases** (PHPStan `nsrt/`, 4 assertions): `overwritten-arrays.php` (3), `bug-13730.php`.
+
+### B866. A class constant array whose keys or values are other constants is typed `array`
+
+**Impact: Low · Complexity: Low**
+
+```php
+const A = 'a'; const B = 'b';
+const MAP = [self::A => [self::B]];
+self::MAP;            // array, should be array{a: array{'b'}}
+self::MAP[self::A];   // mixed, should be array{'b'}
+```
+
+The constant initializer is not evaluated when its keys/values are themselves class constants, so the whole array degrades.
+
+**Cases** (PHPStan `nsrt/`, 4 assertions): `bug-7621-1.php` (4).
+
+### B867. Array `+` loses the operands' shapes
+
+**Impact: Low · Complexity: Low**
+
+```php
+$a = rand(0,1) ? [1, 1, 1] : [1, 1, 1, 2, 3];
+$b = rand(0,1) ? ['x', 'y', 1] : ['x', 'y', 1, 1, 1];
+$a + $b; // got array, should be the union of each pair's union
+```
+
+PHPStan computes the array union for each combination of shapes.
+
+It also shows as:
+
+- Array `+` with an operand of unknown element type takes the other operand's types
+- The array `+` operator with a shape on the left loses the shape's entries
+
+**Cases** (PHPStan `nsrt/`, 4 assertions): `constant-array-optional-set.php` (2), `bug-7492.php`, `bug-11912.php`.
 
 ## Laravel
 
@@ -858,6 +1788,8 @@ names once, and hand that signature to first-class callable syntax,
 `Closure::fromCallable()` and callback-taking functions alike. `// SKIP` lines
 in `tests/phpstan_nsrt/first-class-callables.php` and `bug-4213.php`.
 
+**Upstream cases** (PHPStan `nsrt/`, 28 assertions): `call-user-func-array-php8.php` (10), `call-user-func-php8.php` (7), `call-user-func_array.php` (6), `call-user-func.php` (4), `bug-12691.php`.
+
 ### B790. A template bound from a literal is generalized by the wrong rule
 
 **Impact: Low · Complexity: Low-Medium**
@@ -880,6 +1812,8 @@ nothing.
 **Fix:** apply one rule wherever a literal binds a template that ends up in
 a generic argument: widen for an invariant template, keep for a covariant
 one. `// SKIP` lines in `tests/phpstan_nsrt/generics-do-not-generalize.php`.
+
+**Upstream cases** (PHPStan `nsrt/`, 6 assertions): `bug-10254.php` (4), `bug-7078.php`, `self-out.php`.
 
 ### B791. An inherited `@phpstan-assert` on a template leaves the variable without a type
 
@@ -908,6 +1842,28 @@ template is not substituted and the narrowed type is lost entirely.
 inherited `@phpstan-assert` before applying it. `// SKIP` line in
 `tests/phpstan_nsrt/assert-inheritance.php`.
 
+**Upstream cases** (PHPStan `nsrt/`, 6 assertions): `assert-methods.php` (5), `assert-class-type.php`.
+
+### B813. A `static` return through a `$this` narrowed to an intersection drops the other members
+
+**Impact: Low · Complexity: Low**
+
+```php
+abstract class Ipsum implements Foo {
+    public function testThis(): void {
+        if ($this instanceof Bar) {
+            $this->returnStatic();   // static(Ipsum), should be static(Ipsum)&Bar
+        }
+    }
+}
+```
+
+`$this` itself is narrowed to `Ipsum&Bar`, but a forwarding call binds
+`static` to the enclosing class alone, so the `Bar` the check proved is lost.
+
+**Fix:** bind `static` over the narrowed `$this` the way an intersection
+receiver variable already is. See `tests/phpstan_nsrt/intersection-static.php`.
+
 ### B806. A generic function passed as a first-class callable to `array_map()` leaves its template unbound
 
 **Impact: Low · Complexity: Medium**
@@ -922,6 +1878,8 @@ callback's parameter is never bound from the array's value type.
 
 **Fix:** bind the first-class callable's templates from the parameter
 types `array_map()` gives it. See `tests/phpstan_nsrt/array_values.php`.
+
+**Upstream cases** (PHPStan `nsrt/`, 4 assertions): `bug-12691.php` (3), `bug-11861.php`.
 
 ### B810. A bare `class-string` argument leaves `class-string<T>`'s template unbound
 
@@ -942,13 +1900,348 @@ get($class_string);   // mixed, should be object
 **Fix:** bind `T` to `object` from an unparameterised `class-string`. See
 `tests/psalm_assertions/template_conditional_return_type.php`.
 
+### B868. The callback of `array_diff_uassoc()`, `array_udiff()`, `array_intersect_ukey()` and friends gets no parameter types
+
+**Impact: Medium · Complexity: Low**
+
+```php
+array_diff_ukey([1, 2], [3, 4], static function ($a, $b) {
+    $a; // got nothing, should be 0|1
+    return 0;
+});
+```
+
+The callback comes after a variadic list of arrays, so it is not matched to a callable parameter. Hover on its parameters shows nothing at all.
+
+**Fix:** link each callback parameter to the arrays' element (or key) type, as `usort()` already does.
+
+**Cases** (PHPStan `nsrt/`, 24 assertions): `array_diff_intersect_callbacks.php` (24).
+
+### B869. A callable on the right of `|>` gets nothing from the piped value
+
+**Impact: Medium · Complexity: Low-Medium**
+
+```php
+doFoo() |> function ($x) {   // doFoo(): positive-int
+    $x; // got nothing, should be int<1, max>
+};
+$ints |> (fn ($x) => array_map(fn ($i) => $i, $x)); // got array, should be array<int<1, max>>
+```
+
+Even a closure with a native `int $x` parameter shows nothing inside its body. Because the parameter is untyped, everything computed from it inside the closure (array_map, array_filter, conditional returns, array_find_key) degrades too.
+
+It also shows as:
+
+- A first-class callable on the right of `|>` does not bind the piped value as its argument
+
+**Cases** (PHPStan `nsrt/`, 22 assertions): `pipe-operator.php` (22).
+
+### B870. An immediately invoked closure gets no parameter types from its arguments
+
+**Impact: Medium · Complexity: Low-Medium**
+
+```php
+(function ($context) { $context; })($integer);   // no type, should be int
+(fn($a, $b) => [$a, $b])($i, $arr);              // array{mixed, mixed}, should be array{int, array{a: int}}
+```
+
+Closure parameter inference handles closures passed to typed callable parameters; a closure called directly (`(function ($x) {...})($arg)`, also `($cb = fn...)(...)`) should take its parameter types from the call's arguments. Related to T47 but not covered by it.
+
+It also shows as:
+
+- An immediately invoked closure gets no parameter types from its arguments
+
+**Cases** (PHPStan `nsrt/`, 25 assertions): `pipe-operator.php` (10), `closure-argument-type.php` (9), `arrow-function-argument-type.php` (6).
+
+### B871. Inside its declaring scope a template-typed value shows the template's bound instead of the template
+
+**Impact: Low · Complexity: Low-Medium**
+
+```php
+/** @template T of A|B|C */
+abstract class HelloWorld {
+    /** @return T */ abstract protected function getObject(): A|B|C;
+    function f() { $o = $this->getObject(); $o; } // got A|B|C, should be T of A|B|C
+}
+```
+
+Inside the class or function that declares it, a template is replaced by its bound, so narrowing gives the bound's members (`C` instead of `T of C`). Mostly a display difference for hover, but it also loses the link back to `T` for return-type checks. bug-6591.php additionally shows the bound kept beside the narrowed type after the branches join (`UpdatableInterface|T`).
+
+**Cases** (PHPStan `nsrt/`, 12 assertions): `bug-6566-types.php` (6), `bug-6591.php` (4), `bug-12989.php`, `bug-9939.php`.
+
+### B872. Generic callable types (`Closure<T>(T): T`) are not supported
+
+**Impact: Low · Complexity: Medium**
+
+```php
+/** @param Closure<TRet of mixed>(TRet $val): TRet $c */
+function f(Closure $c, int $i) {
+    $c;       // Closure, should be Closure<TRet>(TRet): TRet
+    $c($i);   // mixed, should be int
+}
+```
+
+Callable/Closure types with their own template list are not parsed, so the signature is lost and calls cannot bind the per-call template (also when returned from a generic function or nested).
+
+**Cases** (PHPStan `nsrt/`, 12 assertions): `generic-callables.php` (12).
+
+### B873. `@param-closure-this` is not inherited, and its template is not bound from a `class-string<T>`
+
+**Impact: Low · Complexity: Low**
+
+```php
+class Foo { /** @param-closure-this Some $cb */ public function run(callable $cb) {} }
+class Child extends Foo {
+    public function run(callable $cb) {}
+    function t() { $this->run(function () { $this; }); } // got Child, should be Some
+}
+```
+
+When the override has no docblock, or a docblock with only a plain `@param callable`, the closure's `$this` falls back to the enclosing class.
+
+It also shows as:
+
+- A template `@param-closure-this T` is not bound from a `class-string<T>` argument
+- A conditional `@param-closure-this` type is not decided by the call's arguments
+
+**Cases** (PHPStan `nsrt/`, 12 assertions): `param-closure-this.php` (12).
+
+### B874. `static<…>` on an inherited method fills the calling class's templates positionally instead of through `@implements`/`@extends`
+
+**Impact: Low · Complexity: Low-Medium**
+
+```php
+/** @template T @template U */ interface Foo { /** @return static<T, U> */ function fluent(); }
+/** @template T @implements Foo<float, T> */ abstract class I2 implements Foo {}
+/** @param I2<int> $s */ $s->fluent();   // I2<float, int>, should be I2<int>
+/** @extends A<int, string> */ class B extends A {}
+(new B)->doFoo();                       // B<int, string>, should be B
+```
+
+The arguments of `static<...>` are written in the declaring class's template order and must be mapped back through the `@implements`/`@extends` arguments to the calling class's own templates (none for a non-generic subclass).
+
+**Cases** (PHPStan `nsrt/`, 8 assertions): `generic-static.php` (8).
+
+### B875. A value typed by an enclosing template turns into the template's bound when it flows through a call
+
+**Impact: Low · Complexity: Low-Medium**
+
+```php
+/** @template T of DateTime|DateTimeImmutable @param T $d @return T */
+function m($d) {
+    $d = $d->modify('+1 day');   // DateTime|DateTimeImmutable, should be T
+}
+// passing class-string<T> to a callee @template U @param class-string<U> @return U gives T's bound, should be T
+```
+
+A `static` return on a template-typed receiver, and a callee template bound from an outer template, are both resolved through the bound instead of keeping the outer template.
+
+**Cases** (PHPStan `nsrt/`, 5 assertions): `bug-7987.php` (3), `bug-6609-83.php` (2).
+
+### B876. `key-of<>` and `value-of<>` stay unresolved for constant arrays keyed by class constants or for non-array arguments
+
+**Impact: Low · Complexity: Low**
+
+```php
+private const ALL = [self::JFK => '...', self::LGA => '...'];
+/** @param key-of<self::ALL> $code */ $code;   // key-of<self::ALL>, should be 'jfk'|'lga'
+/** @param key-of<'jfk'> $code */ $code;      // key-of<'jfk'>, should be string
+```
+
+Keys written as `self::CONST` are not folded, and an argument that is not an array should fall back to the native parameter type rather than display the raw tag.
+
+**Cases** (PHPStan `nsrt/`, 5 assertions): `key-of.php` (3), `value-of.php` (2).
+
+### B877. `::cases()` through a template or an enum-typed value returns `array<UnitEnum>` or `list<Enum>` instead of `list<T>` or the case shape
+
+**Impact: Low · Complexity: Low**
+
+```php
+/** @template T of \UnitEnum @param class-string<T> $e */
+$e::cases();    // array<UnitEnum>, should be list<T>
+function f(Test $c) { $c::cases(); }   // list<Test>, should be array{Test::ONE}
+```
+
+`cases()` called on a class-string or instance whose class is a template (or a concrete enum reached through an instance) does not get the enum-aware return type.
+
+**Cases** (PHPStan `nsrt/`, 4 assertions): `bug-7162.php` (2), `bug-11233.php` (2).
+
+### B878. A template inferred through a union parameter type (`T|Closure(): T`) loses literals
+
+**Impact: Low · Complexity: Low**
+
+```php
+/** @template TValue @template TArgs @param TValue|\Closure(TArgs): TValue $value @return TValue */ function value($value, ...$args) {}
+value('foo');       // got string, should be 'foo'
+value(fn () => 42); // got int, should be 42
+```
+
+A literal bound directly to `@param T` is kept (see `collect('a', 'b')`), but through the union parameter it is widened. Possibly the same generalization rule as B790.
+
+It also shows as:
+
+- A template in a union with a concrete type (`T|string`) binds the whole argument instead of the remainder
+
+**Cases** (PHPStan `nsrt/`, 6 assertions): `bug-2572.php` (4), `generics-reduce-types-first.php` (2).
+
+### B879. A property typed by a template whose bound mixes classes and scalars keeps only the class members inside the class
+
+**Impact: Low · Complexity: Low**
+
+```php
+/** @template T of string|\Stringable|array<string|\Stringable>|Combinator|null */
+class CssValue {
+    /** @param T $value */ public function __construct(private readonly mixed $value) {}
+    function f() { $this->value; } // got Stringable|Combinator, should be T of array<...>|Combinator|string|Stringable|null
+}
+```
+
+The scalar, array and null members of the bound are dropped, so `is_array()` narrowing gives bare `array`. This is a wrong type, not only the template-label display difference.
+
+**Cases** (PHPStan `nsrt/`, 4 assertions): `bug-9939.php` (4).
+
+### B880. A generic class extending `FilterIterator` built from a closure's generator leaves the generator's template names unresolved
+
+**Impact: Low · Complexity: Low-Medium**
+
+```php
+$gen = static function (): Generator { yield true => true; };
+$it = new FooFilterIterator($gen()); // @extends FilterIterator<TKey, T, Iterator<TKey, T>>
+$it->key(); // got TKey, should be bool
+```
+
+Raw template names (`TKey`, `TYield`) reach hover. The generator's key and value types are inferred from the `yield`s by PHPStan; PHPantom neither infers them nor falls back to the bound.
+
+**Cases** (PHPStan `nsrt/`, 4 assertions): `bug-7519.php` (4).
+
+### B881. `@no-named-arguments` does not make a variadic parameter a list
+
+**Impact: Low · Complexity: Low**
+
+```php
+/** @no-named-arguments */ function f(float ...$args) { $args; } // got array<int|string, float>, should be list<float>
+```
+
+Also when the tag sits on the parent method or interface method being implemented.
+
+**Cases** (PHPStan `nsrt/`, 4 assertions): `no-named-arguments.php` (4).
+
+### B882. `array_map()` takes its callback's types from the first array or callable member only
+
+**Impact: Medium · Complexity: Medium**
+
+```php
+array_map(function ($a, $b) { $b; }, ['foo' => $i], ['bar' => $s]); // got nothing, should be string; result got list<int|mixed>, should be non-empty-list<int|string>
+```
+
+
+
+It also shows as:
+
+- `array_map()` with a union of callables uses only the first member's return type
+- `array_map()` widens a literal returned by its callback
+- `array_map()` with an untyped callable drops the key type
+
+**Cases** (PHPStan `nsrt/`, 29 assertions): `array-map.php` (10), `array_map_multiple.php` (10), `bug-10685.php` (2), `bug-9224b.php` (2), `array-functions.php` (2), `bug-4902-php8.php`, `bug-10442.php`, `pipe-operator.php`.
+
 ## Framework names in strings
 
 No outstanding items.
 
 ## Name resolution
 
-No outstanding items.
+### B883. Several PHPStan pseudo-types are kept as unresolved names
+
+**Impact: Low · Complexity: Low**
+
+```php
+/** @param enum-string $e @param non-empty-scalar $s @param callable-array $c */
+$e; // got enum-string, should be class-string<UnitEnum>
+/** @var Number $n */ $n; // got Number, should be float|int
+```
+
+`callable-array`, `closed-resource`, `open-resource`, `enum-string`, `non-empty-scalar`, `empty-scalar`, and the capitalised global aliases `Number`, `Numeric`, `Boolean`, `Resource`, `Double` come out unchanged, so they are probably read as class names.
+
+**Cases** (PHPStan `nsrt/`, 11 assertions): `more-types.php` (6), `phpdoc-pseudotype-global.php` (5).
+
+### B884. A constant name used as a PHPDoc type is not resolved to its value
+
+**Impact: Low · Complexity: Low**
+
+```php
+const MY_CONST = 100;
+/** @param MY_CONST|ANOTHER_CONST $two @param PREG_SPLIT_NO_EMPTY $three */
+function foo($two, $three) { $two; $three; } // got MY_CONST|ANOTHER_CONST, should be 100|200; got PREG_SPLIT_NO_EMPTY, should be 1
+```
+
+Global and namespaced constants, `use const` aliases, constants defined from other constants and built-in constants are all read as class names. A class of the same name should still take precedence.
+
+**Cases** (PHPStan `nsrt/`, 9 assertions): `constant-phpdoc-type.php` (9).
+
+### B885. `@phpstan-require-extends` on an interface does not give its instances the required class's members
+
+**Impact: Medium · Complexity: Low-Medium**
+
+```php
+/** @phpstan-require-extends SomeClass */ interface SampleInterface {}
+function t(SampleInterface $t) { $t->doFoo(); } // got nothing, should be int (SomeClass::doFoo)
+```
+
+Members of the required class (and through an interface extending it) are not found on a value typed by the interface.
+
+**Cases** (PHPStan `nsrt/`, 8 assertions): `bug-10302-interface-extends.php` (8).
+
+### B886. A class constant used as a shape key in a docblock is kept as text
+
+**Impact: Medium · Complexity: Low**
+
+```php
+const MY_KEY = 'key';
+/** @param array{self::MY_KEY: string} $a */
+$a;   // array{self::MY_KEY: string}, should be array{key: string}
+```
+
+Shape keys written as self::/static::/parent::/Foo:: constants are not resolved to the constant value (static:: and parent:: relative to the declaring/using class).
+
+**Cases** (PHPStan `nsrt/`, 8 assertions): `bug-6989.php` (8).
+
+### B887. A `@phpstan-type` alias leaks out of the class or trait that declares it
+
+**Impact: Medium · Complexity: Low-Medium**
+
+```php
+/** @phpstan-type Test array{string, int} */ class A {}
+/** @phpstan-type Test \stdClass */ class B { /** @param Test $a */ function f($a) { $a; } }  // array{...}, should be stdClass
+class C { /** @param Test $a */ function f($a) { $a; } }   // array{...}, should be class Test
+```
+
+Local type aliases seem to be collected per file rather than per declaring class: a trait, a class without the alias, and a class with its own alias of the same name all see the first class's alias.
+
+It also shows as:
+
+- A type alias of the class using a trait is applied to the trait's own docblocks
+- A `@phpstan-type` alias named after a built-in type replaces the built-in
+
+**Cases** (PHPStan `nsrt/`, 8 assertions): `type-aliases.php` (7), `trait-type-alias.php`.
+
+### B888. A class-level `@method` or `@property` tag does not override an inherited or own member
+
+**Impact: Low · Complexity: Low-Medium**
+
+```php
+/** @method string sayHi() */
+class HelloWorld extends ParentClass {} // ParentClass::sayHi(): int
+(new HelloWorld())->sayHi(); // got int, should be string
+```
+
+PHPStan lets a class-level `@method` tag win over a method from the parent or a used trait, and over the class's own `@return`. Worth checking against the feature-precedence rule before changing.
+
+It also shows as:
+
+- A class-level `@method` or `@property` tag does not override an inherited real member's type
+- `@phpstan-property` and `@phpstan-property-read` do not override `@property`
+
+**Cases** (PHPStan `nsrt/`, 7 assertions): `bug-3142.php` (3), `classPhpDocs-phpstanPropertyPrefix.php` (2), `bug-6001.php`, `override-property-union-type-with-tag-subtype.php`.
 
 ## Code actions
 
@@ -993,6 +2286,8 @@ unions; the shifts and division do not.
 way PHP does, and fall back to the current type when a member is not a
 literal or the result is not exact. `// SKIP` lines in
 `tests/phpstan_nsrt/integer-range-types.php`.
+
+**Upstream cases** (PHPStan `nsrt/`, 27 assertions): `modulo-operator.php` (15), `math.php` (7), `bug-13097.php` (3), `bug-8803.php` (2).
 
 ### B799. `T[]|Collection` on a native `Collection` return is not a collection of `T`
 
@@ -1070,6 +2365,8 @@ completion goes through the same path. `// SKIP` lines in
 `tests/phpstan_nsrt/methodPhpDocs-trait.php` and
 `methodPhpDocs-recursiveTrait.php`.
 
+**Upstream cases** (PHPStan `nsrt/`, 6 assertions): `bug-4423.php` (3), `bug-9341.php` (2), `inheritdoc-without-curly-braces-from-trait.php`.
+
 ### B802. `::class` on a string literal has no type
 
 **Impact: Low · Complexity: Low**
@@ -1097,3 +2394,263 @@ References to locals are tracked; a reference to a property is not.
 
 **Fix:** record `&$obj->prop` as a reference the way `&$local` is. See
 `tests/psalm_assertions/reference.php`.
+
+### B889. An assignment to a variable variable (`$$name = ...`) erases the type of every variable assigned before it
+
+**Impact: Medium · Complexity: Low**
+
+```php
+$lorem = 1;
+$arr = ['one'];
+$$lorem = 'ipsum';
+$lorem; // got mixed, should be 1
+$arr;   // got mixed, should be array{'one'}
+```
+
+In if.php every variable assigned before line 283's `$$lorem = 'ipsum'` reads as mixed (or nothing) afterwards, and every variable assigned after it is right. A dynamic-name write seems to invalidate the whole scope. PHPStan only writes the one variable when the name is a known literal, and invalidates nothing otherwise.
+
+**Fix:** write only the named variable when the name is a known literal, and leave the scope alone otherwise.
+
+**Cases** (PHPStan `nsrt/`, 51 assertions): `if.php` (51).
+
+### B890. The `**` operator does not use `pow()`'s return-type rules
+
+**Impact: Low · Complexity: Low**
+
+```php
+$r = rand(1, 3);
+$r ** 2;        // int|float, should be int (pow($r, 2) is right)
+$intA ** null;  // int|float, should be 1
+$float ** '0';  // float, should be 1.0
+$std ** $gmp;   // GMP, should be GMP|stdClass
+```
+
+Every pow() line in pow.php passes while the matching `**` line fails, so the operator is resolved by a separate, cruder path (always int|float for ints, no literal folding, no object operand handling). Route `**` through the pow() rule.
+
+**Fix:** route `**` through the same rule `pow()` uses.
+
+**Cases** (PHPStan `nsrt/`, 31 assertions): `pow.php` (31).
+
+### B891. Concatenating a union of literal strings gives `literal-string` instead of a union of the results
+
+**Impact: Low · Complexity: Low**
+
+```php
+$left = rand() ? 'a' : 'b';
+$right = rand() ? 'x' : 'y';
+$left . $right;  // got literal-string&non-falsy-string, should be 'ax'|'ay'|'bx'|'by'
+".$left.";       // got string, should be '.a.'|'.b.'
+```
+
+A single literal on each side is folded, but a union on either side is not distributed. This covers `.`, `.=` and interpolation (where the result even drops to `string`). PHPStan distributes up to a limit of 128 combinations and generalizes past it.
+
+It also shows as:
+
+- Concatenating a union of literals is not folded into a union of literals
+
+**Fix:** fold concatenation over the cross product of literal operands, up to the same union size cap the other folds use.
+
+**Cases** (PHPStan `nsrt/`, 23 assertions): `constant-string-unions.php` (17), `bug-11129.php` (6).
+
+### B892. Magic child and attribute access on `SimpleXMLElement` is not nullable, and on a subclass it has no type
+
+**Impact: Low · Complexity: Low**
+
+```php
+$xml->foo;          // got SimpleXMLElement, should be SimpleXMLElement|null
+$item['name'];      // got static(SimpleXMLElement), should be SimpleXMLElement|null
+class Bar extends SimpleXMLElement {}
+/** @var Bar $b */ $b->item; // got nothing, should be Bar|null
+```
+
+Two parts: the nullability PHPStan gives magic element/attribute reads, and a user subclass of SimpleXMLElement losing its magic child access entirely (foreach over it gives mixed).
+
+**Cases** (PHPStan `nsrt/`, 11 assertions): `simplexml.php` (8), `bug-9575.php` (3).
+
+### B893. `int-mask<…>` and `int-mask-of<…>` are not expanded to their values
+
+**Impact: Low · Complexity: Low**
+
+```php
+const A = 0; const B = 1; const C = 2;
+/** @var int-mask-of<self::*> */ private static $t;
+self::$t;       // int-mask-of<self::TYPE_*>, should be 0|1|2|3
+self::$t | 1;   // int, should be 1|3
+```
+
+The mask type is kept as unresolved text, so bitwise operators on it fall back to int.
+
+It also shows as:
+
+- `int-mask<...>` and `int-mask-of<...>` over non-contiguous values resolve to `int`
+
+**Cases** (PHPStan `nsrt/`, 12 assertions): `bug-9384.php` (9), `int-mask.php` (3).
+
+### B894. A closure's inferred return type misses `void`, `never`, branch returns and generator values
+
+**Impact: Medium · Complexity: Medium**
+
+```php
+$f = function () use ($i) { if (rand(0, 1)) { return $i; } return null; };
+$f();   // null, should be int|null
+$g = function () { $a = ['foo' => 'bar']; return $a; };
+$g();   // mixed, should be array{foo: 'bar'}
+```
+
+Only the last top-level `return` seems to be read; returns nested in `if`/`else`, a bare `return;` mixed with a valued one, an implicit fall-through, and a returned local assigned in the body are missed.
+
+It also shows as:
+
+- A closure with no `return` value is inferred as `mixed` instead of `void`
+- Generator closures widen yielded literals, lose `yield from` values, and ignore the body under a declared `Generator` or `iterable` return
+- A closure that always ends in a `never` call or a `throw` is not inferred as `never`
+
+**Cases** (PHPStan `nsrt/`, 24 assertions): `closure-return-type.php` (15), `missing-closure-native-return-typehint.php` (7), `bug-7031.php` (2).
+
+### B895. `new $var()` has no type unless `$var` is a `class-string<T>`
+
+**Impact: Low · Complexity: Low**
+
+```php
+/** @param mixed $a */
+function f($a, string $s) {
+    new $a();   // no type, should be object
+    new $s();   // no type, should be object
+}
+```
+
+`new` on class-string<Foo> works, but a mixed/string/object/plain class-string operand yields nothing instead of object.
+
+It also shows as:
+
+- `new $class` has no type when `$class` is a plain string or an intersection with `class-string`
+
+**Cases** (PHPStan `nsrt/`, 9 assertions): `generic-class-string.php` (6), `bug-4579.php` (2), `bug-7374.php`.
+
+### B896. A property hook's `set` parameter does not take the property's type
+
+**Impact: Medium · Complexity: Low**
+
+```php
+/** @var array<string> */
+public array $l {
+    set { $value; }             // array, should be array<string>
+}
+/** @var array<T> */
+public array $m { set (array $val) { $val; } }   // array, should be array<T>
+```
+
+The implicit $value and an explicit `set (array $val)` parameter use only the native type; the property's @var (or promoted constructor @param) type is not applied.
+
+It also shows as:
+
+- A short `set => expr` property hook's parameter has no type
+
+**Cases** (PHPStan `nsrt/`, 19 assertions): `property-hooks.php` (19).
+
+### B897. A bitwise operator with a `string` and a `mixed` operand gives `int`
+
+**Impact: Low · Complexity: Low**
+
+```php
+function f(string $s, $mixed) {
+    $s & $mixed;   // int, should be string
+    $mixed | $s;   // int, should be string
+}
+```
+
+The string-operand bitwise rule (string op string => string) is not used when the other side is mixed.
+
+**Cases** (PHPStan `nsrt/`, 6 assertions): `bitwise.php` (6).
+
+### B898. A method or property named by a variable holding literal strings is not resolved
+
+**Impact: Low · Complexity: Low-Medium**
+
+```php
+/** @param 'foo'|'bar' $m */
+$a->{$m}();   // mixed, should be the union of foo()'s and bar()'s return types (int)
+```
+
+Dynamic method names are not resolved through the literal values of the name expression.
+
+It also shows as:
+
+- Variable variables and dynamic property names held in a literal-string variable are not resolved
+
+**Cases** (PHPStan `nsrt/`, 7 assertions): `bug-12875.php` (5), `bug-12398.php` (2).
+
+### B899. First-class callable syntax on an invokable object drops `__invoke`'s parameters
+
+**Impact: Low · Complexity: Low**
+
+```php
+C::u()(...);   // u(): A&E where A has __invoke(B $b): int
+               // Closure(): int, should be Closure(B): int
+```
+
+The return type of `__invoke` is kept but its parameter list is not copied into the closure type (here through an intersection return type).
+
+**Cases** (PHPStan `nsrt/`, 4 assertions): `bug-14362.php` (4).
+
+### B900. `foreach` over an `IteratorAggregate` does not use `getIterator()`'s types
+
+**Impact: Medium · Complexity: Low**
+
+```php
+interface Agg extends \IteratorAggregate { public function getIterator(): MyIterator; }
+foreach ($agg as $k => $v) {}   // int|string and mixed, should be MyKey and MyValue
+```
+
+Without `@implements IteratorAggregate<K, V>` the key/value types should come from the declared `getIterator()` return (recursively); the fallback key `int|string` is also wrong for a Traversable, whose keys can be anything.
+
+It also shows as:
+
+- `foreach` over an `IteratorAggregate` misreads its value type
+
+**Cases** (PHPStan `nsrt/`, 5 assertions): `foreach-object-type.php` (3), `bug-4267.php` (2).
+
+### B901. Environment-dependent predefined constants take the stubs' placeholder value
+
+**Impact: Medium · Complexity: Low**
+
+```php
+PHP_OS;                 // got "Linux", should be non-falsy-string
+DEFAULT_INCLUDE_PATH;   // got ".:/usr/share/php:/usr/share/pear", should be string
+DIRECTORY_SEPARATOR;    // got "/", should be '/'|'\\'
+PHP_WINDOWS_VERSION_MAJOR; // got 0, should be int<4, max>
+```
+
+Constants whose value depends on the build, OS or install (paths, PHP_OS, PHP_SAPI, PHP_ZTS, PHP_MAXPATHLEN, PHP_SHLIB_SUFFIX, library versions, PHP_BUILD_DATE, __COMPILER_HALT_OFFSET__, the Windows constants) are read from the stub's sample value. They should get the type the stub's value has, not the value itself. Version constants matching the configured PHP version and PHP_INT_SIZE are fine and were left out.
+
+It also shows as:
+
+- Platform-dependent predefined constants are typed as the analysing machine's value
+
+**Fix:** type `PHP_OS`, path and platform constants by their declared type rather than the stub's sample value; keep folding only the constants whose value the configured PHP version fixes.
+
+**Cases** (PHPStan `nsrt/`, 34 assertions): `predefined-constants.php` (31), `predefined-constants-php72.php` (2), `predefined-constants-php85.php`.
+
+### B902. Parentheses around an assignment's right side change its type
+
+**Impact: Low · Complexity: Low**
+
+```php
+/** @param list<string> $arr */
+function f(array $arr): void {
+    $a = array_pop($arr);     // string|null, and $arr is popped once
+    $b = (array_pop($arr));   // differs: the by-reference effect on $arr is applied differently
+    $c = voidFunction();      // void
+    $d = (voidFunction());    // null
+}
+```
+
+The assignment handler special-cases the shape of its right side (a call
+with by-reference arguments, a `void` result), and a parenthesised right side
+does not match those cases, so the same value gets a different type.
+
+**Fix:** unwrap parentheses before the assignment handler looks at its right
+side. Wrapping every expression in `tests/assert_type_runner.rs` in
+parentheses reproduces the cases (`array-pop.php`, `array-shift.php`,
+`bug-10122.php`, `bug-4499.php`, the `functionPhpDocs*`/`methodPhpDocs*`
+`void` assertions, and the WordPress `output-constants.php`).

@@ -162,6 +162,34 @@ impl TextArgs<'_> {
             return self.branch(cond, takes_then);
         }
 
+        // A constant the condition compares against (`T is
+        // self::TYPE_STRING`) stands for its value, which is what the
+        // subject is compared with.
+        let with_values;
+        let cond = match condition_constants_as_values(
+            &cond.condition,
+            class_ctx.declaring,
+            class_loader,
+            tpl,
+        ) {
+            Some(condition) => {
+                with_values = ConditionalType {
+                    condition,
+                    ..(**cond).clone()
+                };
+                &with_values
+            }
+            None => &**cond,
+        };
+
+        // A subject that is a value the call site knows (`func_num_args()`,
+        // `PHP_VERSION_ID`) rather than a parameter is judged as that value.
+        if let Some(subject_ty) = self.call_value_subject(target) {
+            let takes_then = type_condition_result(&subject_ty, &cond.condition, class_loader)
+                .map(|holds| holds ^ cond.negated);
+            return self.branch(cond, takes_then);
+        }
+
         // Check if the conditional subject is a template parameter
         // with a default value (not a method $parameter).
         if !target.starts_with('$')
@@ -253,8 +281,7 @@ impl TextArgs<'_> {
             ..*self
         };
 
-        let constant_values = condition_constants_as_values(&cond.condition, class_loader, tpl);
-        let condition = constant_values.as_ref().unwrap_or(&cond.condition);
+        let condition = &cond.condition;
 
         // A condition naming a template no argument binds (`$status is
         // TStatus`) asks about a type the call never pins down, so either
@@ -294,6 +321,55 @@ impl TextArgs<'_> {
                 type_condition_result(arg_ty, condition, class_loader)
             })
         }
+    }
+
+    /// The value of a conditional subject that names neither a parameter nor
+    /// a template but something the call site knows: the number of
+    /// arguments `func_num_args()` counts, or a global constant
+    /// (`PHP_VERSION_ID`).
+    ///
+    /// `None` for any other subject, and for a constant the resolver knows
+    /// nothing about.
+    fn call_value_subject(&self, target: &str) -> Option<PhpType> {
+        if target == crate::php_type::FUNC_NUM_ARGS_SUBJECT {
+            let args = split_top_level_commas(self.text_args);
+            let mut count = 0usize;
+            let mut spread = false;
+            for arg in args
+                .iter()
+                .map(|arg| arg.trim())
+                .filter(|arg| !arg.is_empty())
+            {
+                if arg.starts_with("...") {
+                    spread = true;
+                } else {
+                    count += 1;
+                }
+            }
+            // An unpacked argument may supply any number of values.
+            return Some(if spread {
+                PhpType::int_range(count.to_string(), "max")
+            } else {
+                PhpType::literal_int(count.to_string())
+            });
+        }
+        // Constants are conventionally written in capitals, which tells
+        // them apart from a template (`T`, `TKey`) without a lookup that
+        // would search every autoloaded file for a name that is not there.
+        let name = target.strip_prefix('\\').unwrap_or(target);
+        let looks_like_constant = name.len() > 1
+            && name.starts_with(|c: char| c.is_ascii_uppercase() || c == '_')
+            && name
+                .bytes()
+                .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit() || b == b'_' || b == b'\\');
+        if !looks_like_constant
+            || self.tpl.params.iter().any(|t| t.as_str() == target)
+            || self.tpl.defaults.is_some_and(|d| d.contains_key(target))
+            || self.subs.is_some_and(|subs| subs.contains_key(target))
+        {
+            return None;
+        }
+        self.tpl.arg_type_resolver?(target).filter(|ty| !ty.is_mixed() && !ty.is_untyped())
     }
 
     /// The conditional's then branch when `takes_then` is `Some(true)`, its
@@ -879,34 +955,49 @@ fn param_default_text(param: Option<&ParameterInfo>) -> Option<&str> {
     param?.default_value.as_deref()
 }
 
-/// `condition` with each global constant it names (`$flag is
-/// PREG_SPLIT_NO_EMPTY`) replaced by the constant's value, which is what an
-/// argument is compared against. `None` when it names none.
+/// `condition` with each constant it names (`$flag is
+/// PREG_SPLIT_NO_EMPTY`, `T is self::TYPE_STRING`) replaced by the
+/// constant's value, which is what an argument is compared against. `None`
+/// when it names none.
 ///
 /// A name that loads as a class is a class, and a name the resolver cannot
-/// read as a literal value is left as written.
+/// read as a literal value is left as written. `self`, `static` and
+/// `parent` in a class constant name `declaring`, the class whose docblock
+/// the condition was written in.
 fn condition_constants_as_values(
     condition: &PhpType,
+    declaring: Option<&str>,
     class_loader: &ResolvedClassLoader<'_>,
     tpl: &TemplateContext<'_>,
 ) -> Option<PhpType> {
     let resolve = tpl.arg_type_resolver?;
+    let is_value =
+        |ty: &PhpType| ty.as_literal().is_some() || ty.is_true() || ty.is_false() || ty.is_null();
     let members = condition.union_members();
     let mut changed = false;
     let values: Vec<PhpType> = members
         .iter()
         .map(|&member| {
-            let value = match member.kind() {
-                TypeKind::Named(name)
-                    if !member.is_keyword()
-                        && !tpl.params.contains(name)
-                        && class_loader(Fqn::new(name)).is_none() =>
-                {
-                    resolve(name).filter(|ty| {
-                        ty.as_literal().is_some() || ty.is_true() || ty.is_false() || ty.is_null()
-                    })
+            let value = if let Some((class, constant)) = class_const_condition_parts(member) {
+                // The class was written in the callee's docblock, so it is
+                // read fully qualified rather than against the call site's
+                // namespace. A name that does not resolve that way keeps
+                // the constant as written, for the textual comparison.
+                let class =
+                    resolve_self_keyword(class, declaring).map_or(Cow::Borrowed(class), Cow::Owned);
+                let class = class.trim_start_matches('\\');
+                resolve(&format!("\\{class}::{constant}")).filter(is_value)
+            } else {
+                match member.kind() {
+                    TypeKind::Named(name)
+                        if !member.is_keyword()
+                            && !tpl.params.contains(name)
+                            && class_loader(Fqn::new(name)).is_none() =>
+                    {
+                        resolve(name).filter(is_value)
+                    }
+                    _ => None,
                 }
-                _ => None,
             };
             changed |= value.is_some();
             value.unwrap_or_else(|| member.clone())

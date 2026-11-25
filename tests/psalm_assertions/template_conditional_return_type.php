@@ -114,11 +114,11 @@ namespace PsalmTest_template_conditional_return_type_4 {
     $int2 = (new A)->getDifferentType(1);
     $bool2 = (new A)->getDifferentType(4);
 
-    assertType('string', $string); // SKIP: a conditional return type comparing a template with a class constant takes the last branch
-    assertType('int', $int); // SKIP: a conditional return type comparing a template with a class constant takes the last branch
+    assertType('string', $string);
+    assertType('int', $int);
     assertType('bool', $bool);
-    assertType('string', $string2); // SKIP: a conditional return type comparing a template with a class constant takes the last branch
-    assertType('int', $int2); // SKIP: a conditional return type comparing a template with a class constant takes the last branch
+    assertType('string', $string2);
+    assertType('int', $int2);
     assertType('bool', $bool2);
 }
 
@@ -248,8 +248,8 @@ namespace PsalmTest_template_conditional_return_type_8 {
     $b = zeroArgsFalseOneArgString("");
     $c = zeroArgsFalseOneArgString("hello");
 
-    assertType('string', $b); // SKIP: `func_num_args()` in a conditional return type is never decided
-    assertType('string', $c); // SKIP: `func_num_args()` in a conditional return type is never decided
+    assertType('string', $b);
+    assertType('string', $c);
 }
 
 // Test: stringOrClassStringT
@@ -308,8 +308,8 @@ namespace PsalmTest_template_conditional_return_type_10 {
     $somethingElse = getSomethingElse();
 
     // Psalm runs this case as PHP 7.2; at PHP 8.5 `PHP_VERSION_ID` is above 70300.
-    assertType('string', $something); // SKIP: a conditional return type on `PHP_VERSION_ID` takes the else branch
-    assertType('string', $somethingElse); // SKIP: a conditional return type on `PHP_VERSION_ID` takes the else branch
+    assertType('string', $something);
+    assertType('string', $somethingElse);
 }
 
 // Test: ineritedreturnTypeBasedOnPhpVersionId
@@ -340,8 +340,8 @@ namespace PsalmTest_template_conditional_return_type_11 {
     $somethingElse = $class->getSomethingElse();
 
     // Psalm runs this case as PHP 7.2; at PHP 8.5 `PHP_VERSION_ID` is above 70300.
-    assertType('string', $something); // SKIP: a conditional return type on `PHP_VERSION_ID` takes the else branch
-    assertType('string', $somethingElse); // SKIP: a conditional return type on `PHP_VERSION_ID` takes the else branch
+    assertType('string', $something);
+    assertType('string', $somethingElse);
 }
 
 // Test: nonEmptyLiteralString

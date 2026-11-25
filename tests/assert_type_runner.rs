@@ -86,9 +86,23 @@ fn extract_assert_type_calls(source: &str) -> Vec<AssertTypeCall> {
     let lines: Vec<&str> = source.lines().collect();
 
     let mut i = 0;
+    let mut in_block_comment = false;
     while i < lines.len() {
         let line = lines[i];
         let trimmed = line.trim();
+
+        // Skip the lines of a `/* … */` block comment, whatever they start
+        // with: upstream comments out whole blocks of assertions this way.
+        if in_block_comment {
+            in_block_comment = !trimmed.contains("*/");
+            i += 1;
+            continue;
+        }
+        if trimmed.starts_with("/*") && !trimmed.contains("*/") {
+            in_block_comment = true;
+            i += 1;
+            continue;
+        }
 
         // Skip lines with SKIP annotation.
         if trimmed.contains("// SKIP") || trimmed.contains("/* SKIP */") {
@@ -403,6 +417,44 @@ fn parse_second_argument(text: &str) -> Option<String> {
 
 // ─── Source transformation ──────────────────────────────────────────────────
 
+/// The right-hand side for an assertion's expression: the expression itself,
+/// parenthesised only when it holds a keyword operator outside any brackets.
+/// `=` binds tighter than `and`, `or` and `xor`, so `$v = $a or $b` would
+/// assign `$a` alone. Other expressions stay bare, so the walk sees the
+/// assignment shape a user writes.
+fn rhs(expr: &str) -> String {
+    let mut depth = 0i32;
+    let mut quote: Option<char> = None;
+    let bytes = expr.as_bytes();
+    for (i, ch) in expr.char_indices() {
+        if let Some(q) = quote {
+            if ch == q {
+                quote = None;
+            }
+            continue;
+        }
+        match ch {
+            '\'' | '"' => quote = Some(ch),
+            '(' | '[' | '{' => depth += 1,
+            ')' | ']' | '}' => depth -= 1,
+            ' ' if depth == 0 => {
+                let word: String = expr[i + 1..]
+                    .chars()
+                    .take_while(|c| c.is_ascii_alphabetic())
+                    .collect();
+                let after = bytes.get(i + 1 + word.len()).copied();
+                if matches!(word.to_ascii_lowercase().as_str(), "and" | "or" | "xor")
+                    && matches!(after, Some(b' ' | b'(' | b'$'))
+                {
+                    return format!("({expr})");
+                }
+            }
+            _ => {}
+        }
+    }
+    expr.to_string()
+}
+
 /// Transform the PHP source by replacing each `assertType(...)` call
 /// with `$__phpantom_assert_N = expr;` so we can hover on the variable.
 ///
@@ -448,12 +500,12 @@ fn transform_source(
                         // The name may be qualified (`\PHPStan\Testing\assertType`).
                         let before = line[..start]
                             .trim_end_matches(|c: char| c.is_alphanumeric() || "_\\".contains(c));
-                        format!("{before}{var_name} = {}{}", a.expr, &line[end..])
+                        format!("{before}{var_name} = {}{}", rhs(&a.expr), &line[end..])
                     }
                     None => {
                         // Preserve indentation from the original line.
                         let indent = &line[..line.len() - line.trim_start().len()];
-                        format!("{indent}{var_name} = {};", a.expr)
+                        format!("{indent}{var_name} = {};", rhs(&a.expr))
                     }
                 };
                 result.push_str(&replacement);

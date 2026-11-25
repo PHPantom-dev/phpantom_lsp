@@ -6223,8 +6223,8 @@ function probe(): void {
     );
     let id = hover_text(&hover_at(&backend, uri, content, 5, 6).expect("hover $id")).to_string();
     assert!(
-        id.contains("int") && !id.contains("50306"),
-        "PHP_VERSION_ID depends on the patch release, so it is only an int: {id}"
+        id.contains("int<") && !id.contains("50306"),
+        "PHP_VERSION_ID depends on the patch release, so it is the configured minor's range: {id}"
     );
 }
 

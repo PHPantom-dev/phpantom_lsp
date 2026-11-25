@@ -112,6 +112,16 @@ pub fn resolve_conditional_without_args_and_defaults(
                 };
             }
 
+            // A call without arguments passed none.
+            if target == crate::php_type::FUNC_NUM_ARGS_SUBJECT {
+                let count = PhpType::literal_int("0");
+                return match type_condition_result(&count, condition, &|_| None) {
+                    Some(holds) if holds ^ *negated => recurse(then_type),
+                    Some(_) => recurse(else_type),
+                    None => undecided_answer(cond, recurse),
+                };
+            }
+
             // Check if the conditional subject is a template parameter
             // with a default value (not a method $parameter).
             if !target.starts_with('$')
