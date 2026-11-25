@@ -2435,17 +2435,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b905-reading-a-property-write-property-gives-its-type" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B905. Reading a <code>@property-write</code> property gives its type
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -4497,17 +4486,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b905-reading-a-property-write-property-gives-its-type" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B905. Reading a <code>@property-write</code> property gives its type
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -6230,15 +6208,6 @@ left as the unexpanded name where the cycle recurs, which then reads as a
 class. PHPStan reports the alias as invalid and types its uses as an error.
 Imported aliases that form a cycle already resolve to <code>mixed</code>.</p>
 <p><strong>Cases</strong> (PHPStan <code>nsrt/</code>, 2 assertions): <code>type-aliases.php</code> (2).</p>
-<h3 id="b905-reading-a-property-write-property-gives-its-type">B905. Reading a <code>@property-write</code> property gives its type<a class="headerlink" href="#b905-reading-a-property-write-property-gives-its-type" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-126-1" name="__codelineno-126-1" href="#__codelineno-126-1"></a><span class="x">/** @property-write int $baz */</span>
-<a id="__codelineno-126-2" name="__codelineno-126-2" href="#__codelineno-126-2"></a><span class="x">#[AllowDynamicProperties]</span>
-<a id="__codelineno-126-3" name="__codelineno-126-3" href="#__codelineno-126-3"></a><span class="x">class Foo { function f() { $this-&gt;baz; } }   // int, should be never</span>
-</code></pre></div>
-<p>A write-only magic property cannot be read, so PHPStan types a read of it as
-<code>*NEVER*</code>. PHPantom reads <code>@property-write</code> like <code>@property</code>.</p>
-<p><strong>Cases</strong> (PHPStan <code>nsrt/</code>, 1 assertion): <code>classPhpDocs-phpstanPropertyPrefix.php</code>.</p>
 
 
 
