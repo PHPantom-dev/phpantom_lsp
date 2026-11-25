@@ -9,7 +9,9 @@ use mago_syntax::cst::argument::Argument;
 
 use crate::atom::{atom, bytes_to_str};
 use crate::php_type::{PhpType, ShapeEntry, TypeKind};
-use crate::type_engine::call_resolution::{effective_out_type, resolve_out_type_for_call};
+use crate::type_engine::call_resolution::{
+    OutParamCall, effective_out_type, resolve_out_type_for_call,
+};
 use crate::types::ResolvedType;
 
 use super::*;
@@ -340,6 +342,19 @@ fn is_extractable_variable_name(name: &str) -> bool {
         && name != "this"
 }
 
+/// The variable an instance method call is made on (`$x` in `$x->get()`).
+fn method_call_receiver<'b>(expr: &'b Expression<'b>) -> Option<&'b str> {
+    let object = match crate::parser::unwrap_parens(expr) {
+        Expression::Call(Call::Method(call)) => call.object,
+        Expression::Call(Call::NullSafeMethod(call)) => call.object,
+        _ => return None,
+    };
+    match object {
+        Expression::Variable(Variable::Direct(dv)) => Some(bytes_to_str(dv.name)),
+        _ => None,
+    }
+}
+
 /// Whether `value_expr` is passed to the call via `...value_expr` (argument
 /// unpacking), rather than as a direct positional or named argument.
 fn arg_is_unpacked<'b>(arg_list: &ArgumentList<'b>, value_expr: &Expression<'b>) -> bool {
@@ -445,12 +460,21 @@ pub(super) fn seed_by_ref_parameters<'b>(
                 );
                 let call_var_resolver =
                     super::super::resolution::build_var_resolver_from_ctx(&var_ctx);
+                // A `($this is self::A ? …)` out type is decided by the
+                // receiver as the call found it.
+                let receiver_type = method_call_receiver(expr).and_then(|name| {
+                    let types = pre_call(name);
+                    (!types.is_empty()).then(|| ResolvedType::types_joined(&types))
+                });
                 resolve_out_type_for_call(
                     out_hint,
                     parameters,
                     template_owner,
-                    arg_list,
-                    ctx.file.content,
+                    OutParamCall {
+                        argument_list: arg_list,
+                        content: ctx.file.content,
+                        this_type: receiver_type.as_ref(),
+                    },
                     &var_ctx.as_resolution_ctx(),
                     Some(&call_var_resolver),
                 )

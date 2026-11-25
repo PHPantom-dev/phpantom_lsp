@@ -266,6 +266,17 @@ pub(crate) fn effective_out_type(
     }
 }
 
+/// The call site a conditional out type is decided at.
+#[derive(Clone, Copy)]
+pub(crate) struct OutParamCall<'a, 'b> {
+    pub(crate) argument_list: &'a ArgumentList<'b>,
+    /// The source text the argument spans point into.
+    pub(crate) content: &'a str,
+    /// The receiver of a method call, as the call found it, which a
+    /// `($this is self::A ? …)` out type is decided by.
+    pub(crate) this_type: Option<&'a PhpType>,
+}
+
 /// Decide a PHPStan conditional out type against the arguments *this*
 /// call actually supplied.
 ///
@@ -279,14 +290,18 @@ pub(crate) fn resolve_out_type_for_call(
     hint: PhpType,
     parameters: &[ParameterInfo],
     callee: &OutParamCallee,
-    argument_list: &ArgumentList<'_>,
-    content: &str,
+    call: OutParamCall<'_, '_>,
     resolution_ctx: &ResolutionCtx<'_>,
     var_resolver: VarClassStringResolver<'_>,
 ) -> PhpType {
     if !matches!(hint.kind(), TypeKind::Conditional(_)) {
         return hint;
     }
+    let OutParamCall {
+        argument_list,
+        content,
+        this_type,
+    } = call;
     let text_args = super::super::variable::raw_type_inference::extract_arg_texts_from_ast(
         argument_list,
         content,
@@ -302,7 +317,7 @@ pub(crate) fn resolve_out_type_for_call(
         bindings: &[],
         arg_type_resolver: Some(&arg_type_resolver),
         default_type_resolver: Some(&default_type_resolver),
-        this_type: None,
+        this_type,
         subs: None,
     };
     let declaring_fqn = callee.declaring_fqn();

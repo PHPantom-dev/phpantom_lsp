@@ -56,6 +56,20 @@ pub(super) fn resolve_method_receiver<'b>(
         // receiver's own types stay empty so `static` is still bound late,
         // to the class the call runs on.
         let classes = match narrowed_subject_from_scope("$this", object, ctx) {
+            // An enum's `$this` narrowed to some of its cases has no late
+            // binding to keep open, and a `($this is self::A ? …)` return
+            // is decided by the cases it narrowed to.
+            Some(narrowed)
+                if !narrowed.is_empty()
+                    && narrowed.iter().all(|rt| {
+                        rt.type_string
+                            .union_members()
+                            .iter()
+                            .all(|m| m.as_enum_case().is_some())
+                    }) =>
+            {
+                return (ResolvedType::into_arced_classes(narrowed.clone()), narrowed);
+            }
             Some(narrowed) => ResolvedType::into_arced_classes(narrowed),
             None => crate::class_lookup::find_class_by_fqn(
                 ctx.file.all_classes,
@@ -495,7 +509,10 @@ pub(super) fn resolve_member_call_on_receiver<'b>(
                 ctx,
                 is_static,
                 &template_subs,
-                &self_replace,
+                super::owner_method_call::OwnerReceiver {
+                    self_replace: &self_replace,
+                    receiver_type: enum_case_receiver(&receiver_resolved, &owner_key).as_ref(),
+                },
             )
         };
         if let Some(count) = fluent_count {
@@ -716,6 +733,39 @@ pub(super) fn expand_union_generic_owners(
 /// `Eloquent\Builder` / `Query\Builder` classes; FQN is preferred when
 /// available so Query-mixin fluents like `lockForUpdate()` keep the
 /// Eloquent receiver's `Builder<TModel>` type.
+/// The cases an enum receiver was narrowed to, when every entry of the
+/// receiver that is `owner_name` names a case (`X::B|X::C` after
+/// `$x !== X::A`).
+fn enum_case_receiver(receiver_resolved: &[ResolvedType], owner_name: &str) -> Option<PhpType> {
+    let mut cases = Vec::new();
+    for rt in receiver_resolved {
+        if rt
+            .class_info
+            .as_ref()
+            .is_none_or(|ci| ci.fqn().as_str() != owner_name)
+        {
+            continue;
+        }
+        if rt.class_info.as_ref()?.kind != crate::types::ClassLikeKind::Enum {
+            return None;
+        }
+        if !rt
+            .type_string
+            .union_members()
+            .iter()
+            .all(|member| member.as_enum_case().is_some())
+        {
+            return None;
+        }
+        cases.push(rt.type_string.clone());
+    }
+    match cases.len() {
+        0 => None,
+        1 => cases.pop(),
+        _ => Some(PhpType::union(cases)),
+    }
+}
+
 pub(super) fn receiver_type_for_owner(
     receiver_resolved: &[ResolvedType],
     owner_name: &str,

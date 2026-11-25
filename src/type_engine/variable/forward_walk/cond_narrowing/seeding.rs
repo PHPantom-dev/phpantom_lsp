@@ -1,18 +1,7 @@
 use super::*;
 
-/// The scope keys `expr` can narrow: every variable it names that the
-/// scope holds, and every compound key read through one of them.
-///
-/// Each narrowing extractor recognises its subject in the expression's own
-/// syntax, so a key whose variable the expression never mentions is one no
-/// extractor can match. Testing only these keeps the cost of a condition
-/// proportional to the condition rather than to the scope, which at the top
-/// level of a long script holds every variable assigned so far.
-///
-/// A compound key that is not rooted at a variable (`self::$cache`,
-/// `Config::get()`) is always included, since its spelling names no
-/// variable to look for.
-pub(crate) fn scope_keys_named_by(expr: &Expression<'_>, scope: &ScopeState) -> Vec<Atom> {
+/// Every plain variable `expr` names, each once, in source order.
+pub(crate) fn variables_named_by(expr: &Expression<'_>) -> Vec<Atom> {
     struct NamedVariables;
     impl<'ast, 'arena> mago_syntax::walker::Walker<'ast, 'arena, Vec<Atom>> for NamedVariables {
         fn walk_in_expression(&self, node: &'ast Expression<'arena>, names: &mut Vec<Atom>) {
@@ -26,6 +15,23 @@ pub(crate) fn scope_keys_named_by(expr: &Expression<'_>, scope: &ScopeState) -> 
     }
     let mut named = Vec::new();
     mago_syntax::walker::Walker::walk_expression(&NamedVariables, expr, &mut named);
+    named
+}
+
+/// The scope keys `expr` can narrow: every variable it names that the
+/// scope holds, and every compound key read through one of them.
+///
+/// Each narrowing extractor recognises its subject in the expression's own
+/// syntax, so a key whose variable the expression never mentions is one no
+/// extractor can match. Testing only these keeps the cost of a condition
+/// proportional to the condition rather than to the scope, which at the top
+/// level of a long script holds every variable assigned so far.
+///
+/// A compound key that is not rooted at a variable (`self::$cache`,
+/// `Config::get()`) is always included, since its spelling names no
+/// variable to look for.
+pub(crate) fn scope_keys_named_by(expr: &Expression<'_>, scope: &ScopeState) -> Vec<Atom> {
+    let named = variables_named_by(expr);
 
     let mut keys: Vec<Atom> = named
         .iter()

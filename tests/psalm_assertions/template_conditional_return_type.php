@@ -228,7 +228,7 @@ namespace PsalmTest_template_conditional_return_type_7 {
     });
 
     assertType('Promise<int>', $c1);
-    assertType('Promise<int>', $c2); // SKIP: a conditional on a callable argument's return type keeps both branches
+    assertType('Promise<int>', $c2);
 }
 
 // Test: conditionalOnArgCount

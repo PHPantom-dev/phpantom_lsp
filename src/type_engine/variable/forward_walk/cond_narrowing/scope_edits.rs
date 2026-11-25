@@ -165,7 +165,27 @@ pub(crate) fn narrow_to_false_in_scope(var_name: &str, scope: &mut ScopeState) {
 /// A variable nothing falsy could have been is exhausted: the branch is
 /// dead.
 pub(crate) fn narrow_to_falsy_in_scope(var_name: &str, scope: &mut ScopeState) {
+    // An untyped subject could have held anything, so what fails is any
+    // falsy value, the mirror of [`strip_falsy_from_scope`].
+    if scope.get(var_name).is_empty() {
+        if is_untyped_subject(var_name, scope)
+            && let Some(falsy) = PhpType::mixed().falsy_type()
+        {
+            scope.set(var_name, vec![ResolvedType::from_type_string(falsy)]);
+        }
+        return;
+    }
     narrow_to_falsy_part_in_scope(var_name, scope, PhpType::falsy_type);
+}
+
+/// Whether `var_name` is a subject the scope tracks without knowing its
+/// type: an untyped parameter, or a member path the seeding could not
+/// resolve.  A call key that carries arguments is seeded from its own
+/// expression elsewhere, so its absence means nothing.
+fn is_untyped_subject(var_name: &str, scope: &ScopeState) -> bool {
+    scope.contains(var_name)
+        || (condition_facts::is_member_path_key(var_name)
+            && !condition_facts::is_call_key_with_arguments(var_name))
 }
 
 /// Keep only what a variable could hold and still compare `== null`.
@@ -243,15 +263,10 @@ pub(crate) fn strip_null_from_scope(var_name: &str, scope: &mut ScopeState) {
 /// Used after falsy guard clauses (`if (!$var) { throw; }`) where the
 /// variable is known to be truthy (non-null and non-false) after the guard.
 pub(crate) fn strip_falsy_from_scope(var_name: &str, scope: &mut ScopeState) {
-    // A subject with no known type (an untyped parameter, or a path the
-    // seeding could not resolve) could have held anything, so what passes
-    // is any truthy value.  A call key that carries arguments is seeded
-    // from its own expression elsewhere, so its absence here means nothing.
+    // A subject with no known type could have held anything, so what
+    // passes is any truthy value.
     if scope.get(var_name).is_empty() {
-        let untyped = scope.contains(var_name)
-            || (condition_facts::is_member_path_key(var_name)
-                && !condition_facts::is_call_key_with_arguments(var_name));
-        if untyped {
+        if is_untyped_subject(var_name, scope) {
             scope.set(
                 var_name,
                 vec![ResolvedType::from_type_string(PhpType::non_empty_mixed())],

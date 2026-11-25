@@ -352,5 +352,30 @@ pub(crate) fn process_expression_statement<'b>(
     // about the very call it makes).
     process_receiver_mutation(expr, scope, ctx);
 
-    process_assert_narrowing(expr, scope, ctx);
+    process_assert_narrowing(asserting_call(expr).unwrap_or(expr), scope, ctx);
+}
+
+/// The call whose assertions a statement proves: the statement itself, or
+/// the call a plain assignment stores (`$r = Assert::check($o)` proves
+/// what `Assert::check($o);` does).
+///
+/// A call that names the variable being assigned is left alone: its
+/// assertion is about the value the assignment just replaced.
+fn asserting_call<'b>(expr: &'b Expression<'b>) -> Option<&'b Expression<'b>> {
+    let Expression::Assignment(assignment) = expr else {
+        return None;
+    };
+    if !assignment.operator.is_assign() {
+        return None;
+    }
+    let Expression::Variable(Variable::Direct(target)) = assignment.lhs else {
+        return None;
+    };
+    let rhs = crate::parser::unwrap_parens(assignment.rhs);
+    if !matches!(rhs, Expression::Call(_)) {
+        return None;
+    }
+    let target = atom(bytes_to_str(target.name));
+    let named = variables_named_by(rhs);
+    (!named.contains(&target)).then_some(rhs)
 }

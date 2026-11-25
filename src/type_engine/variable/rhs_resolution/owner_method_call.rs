@@ -42,9 +42,14 @@ pub(super) fn resolve_conditional_return_for_call(
     arg_type_resolver: crate::type_engine::conditional_resolution::ArgTypeResolver<'_>,
     default_type_resolver: crate::type_engine::conditional_resolution::DefaultTypeResolver<'_>,
     replace_self: impl Fn(&PhpType) -> PhpType,
+    receiver_type: Option<&PhpType>,
 ) -> Option<PhpType> {
     let method = method_ref?;
     let cond = method.conditional_return()?;
+    // `(T is static ? T : static)` tests against the class the call binds
+    // `static` to, so the keywords are bound before the condition is read.
+    let self_bound = cond.contains_self_ref().then(|| replace_self(cond));
+    let cond = self_bound.as_ref().unwrap_or(cond);
     let bound_cond = crate::type_engine::conditional_resolution::bind_callable_condition_templates(
         cond,
         template_subs,
@@ -59,11 +64,20 @@ pub(super) fn resolve_conditional_return_for_call(
     };
     let class_values =
         crate::inheritance::class_scoped_template_values(template_subs, method.template_params());
-    let this_type = crate::type_engine::conditional_resolution::receiver_type_for_condition(
-        declaring_fqn.as_str(),
-        &owner.template_params,
-        template_subs,
-    );
+    // A receiver narrowed below its class (an enum down to some of its
+    // cases) decides a `$this is self::A` condition by what it narrowed to.
+    let this_type = receiver_type.cloned().unwrap_or_else(|| {
+        crate::type_engine::conditional_resolution::receiver_type_for_condition(
+            declaring_fqn.as_str(),
+            &owner.template_params,
+            template_subs,
+        )
+    });
+    // A template the call's own arguments bound is judged by that binding,
+    // which splits an argument the condition leaves open between the
+    // branches.  One whose argument was left out is decided by the
+    // parameter's default instead, so it is not handed over.
+    let argument_subs = argument_bound_template_subs(method, text_args, template_subs);
     let tpl = crate::type_engine::conditional_resolution::TemplateContext {
         defaults: Some(class_values.as_ref()),
         params: method.template_params(),
@@ -71,7 +85,7 @@ pub(super) fn resolve_conditional_return_for_call(
         arg_type_resolver,
         default_type_resolver,
         this_type: Some(&this_type),
-        subs: None,
+        subs: argument_subs.as_ref(),
     };
     let resolved =
         crate::type_engine::conditional_resolution::resolve_conditional_with_text_args_and_defaults(
@@ -117,6 +131,49 @@ pub(super) fn resolve_conditional_return_for_call(
         substituted
     };
     Some(collapsed)
+}
+
+/// What a call knows about the object it was made on, for
+/// [`resolve_owner_method_call`].
+#[derive(Clone, Copy)]
+pub(super) struct OwnerReceiver<'a> {
+    /// Maps `static`/`self`/`$this` in a resolved return type to the
+    /// owner's concrete type: generic-aware (via
+    /// [`receiver_type_for_owner`](super::method_calls::receiver_type_for_owner))
+    /// for instance calls, a plain FQN swap for static calls, which have no
+    /// receiver expression to carry generics.
+    pub(super) self_replace: &'a dyn Fn(&PhpType) -> PhpType,
+    /// The receiver's own type where it is narrower than its class (an
+    /// enum narrowed to some of its cases), which a `$this`-keyed
+    /// conditional return is decided by.
+    pub(super) receiver_type: Option<&'a PhpType>,
+}
+
+/// The method-level entries of `template_subs` whose binding parameter the
+/// call supplied an argument for, or `None` when there are none.
+fn argument_bound_template_subs(
+    method: &MethodInfo,
+    text_args: &str,
+    template_subs: &HashMap<String, PhpType>,
+) -> Option<HashMap<String, PhpType>> {
+    if template_subs.is_empty() || method.template_bindings().is_empty() {
+        return None;
+    }
+    let args = crate::text_scan::split_top_level_commas(text_args);
+    let bound = crate::call_args::bind_text_args_to_params(&method.parameters, &args);
+    let subs: HashMap<String, PhpType> = method
+        .template_bindings()
+        .iter()
+        .filter(|(_, param)| {
+            method
+                .parameters
+                .iter()
+                .position(|p| p.name == *param)
+                .is_some_and(|idx| bound.get(idx).is_some_and(Option::is_some))
+        })
+        .filter_map(|(tpl, _)| Some((tpl.to_string(), template_subs.get(tpl.as_str())?.clone())))
+        .collect();
+    (!subs.is_empty()).then_some(subs)
 }
 
 /// The types the call site's arguments resolve to, indexed by the
@@ -237,11 +294,7 @@ fn refine_declared_return(
 ///
 /// Shared by instance method calls (called once per union-receiver branch)
 /// and static method calls (a single owner, no receiver-derived generics).
-/// `self_replace` maps `static`/`self`/`$this` in a resolved return type to
-/// the owner's concrete type: generic-aware (via
-/// [`receiver_type_for_owner`](super::method_calls::receiver_type_for_owner))
-/// for instance calls, a plain FQN swap for static calls, which have no
-/// receiver expression to carry generics.
+/// See [`OwnerReceiver`] for what `receiver` carries.
 ///
 /// `argument_list` is `None` for a first-class callable (`$obj->m(...)`),
 /// whose return type is the method's own, decided by no arguments.
@@ -252,8 +305,12 @@ pub(super) fn resolve_owner_method_call(
     ctx: &VarResolutionCtx<'_>,
     is_static: bool,
     template_subs: &HashMap<String, PhpType>,
-    self_replace: &dyn Fn(&PhpType) -> PhpType,
+    receiver: OwnerReceiver<'_>,
 ) -> Vec<ResolvedType> {
+    let OwnerReceiver {
+        self_replace,
+        receiver_type,
+    } = receiver;
     let current_class_fqn = ctx.current_class.fqn();
     let current_class_name: &str = &current_class_fqn;
     let arg_texts = argument_list
@@ -368,6 +425,7 @@ pub(super) fn resolve_owner_method_call(
         Some(&arg_ty_resolver),
         Some(&default_ty_resolver),
         self_replace,
+        receiver_type,
     );
 
     // Collapse any conditionals nested inside the (template-substituted)

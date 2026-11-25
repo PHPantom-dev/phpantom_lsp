@@ -57,6 +57,9 @@ pub(in crate::type_engine) struct CallAssertionInfo<'a> {
     template_param_bounds: AtomMap<PhpType>,
     /// The namespace the callee's parameter defaults were written in.
     default_namespace: Option<Atom>,
+    /// For a method, the class that declares it and the class it was
+    /// called on, which `self` and `static` in its tags name.
+    self_refs: Option<(Atom, Atom)>,
 }
 
 /// Try to extract assertion metadata from a call expression.
@@ -93,6 +96,7 @@ pub(in crate::type_engine) fn extract_call_assertions<'a>(
                 template_bindings: func_info.template_bindings,
                 template_param_bounds: func_info.template_param_bounds,
                 default_namespace: func_info.namespace.as_deref().map(atom),
+                self_refs: None,
             })
         }
         Call::StaticMethod(static_call) => {
@@ -203,7 +207,7 @@ fn build_method_assertion_info<'a>(
     receiver_key: Option<String>,
     ctx: &VarResolutionCtx<'_>,
 ) -> Option<CallAssertionInfo<'a>> {
-    let (method, _) = find_assertion_method_in_chain(
+    let (method, declaring) = find_assertion_method_in_chain(
         class,
         method_name,
         ctx.file.class_loader,
@@ -228,6 +232,7 @@ fn build_method_assertion_info<'a>(
             .map(|e| e.template_param_bounds.clone())
             .unwrap_or_default(),
         default_namespace: extras.and_then(|e| e.default_namespace),
+        self_refs: Some((declaring, class.fqn())),
     })
 }
 
@@ -423,8 +428,24 @@ pub(in crate::type_engine) fn scalar_inclusion_guard_kind(ty: &PhpType) -> Optio
             LiteralValue::String(_) => TypeGuardKind::String,
         }),
         TypeKind::ClassString(_) | TypeKind::InterfaceString(_) => Some(TypeGuardKind::String),
+        TypeKind::Named(_) if is_bool_value(ty) => Some(TypeGuardKind::Bool),
         _ => scalar_assert_guard_kind(ty),
     }
+}
+
+/// Whether `ty` is the `empty` an `@phpstan-assert empty $x` tag names.
+fn is_empty_keyword(ty: &PhpType) -> bool {
+    match ty.kind() {
+        TypeKind::Named(n) => n.eq_ignore_ascii_case("empty"),
+        TypeKind::Raw(raw) => raw.eq_ignore_ascii_case("empty"),
+        _ => false,
+    }
+}
+
+/// Whether `ty` is exactly `true` or `false`, the two single values a
+/// `bool` holds.
+fn is_bool_value(ty: &PhpType) -> bool {
+    matches!(ty.kind(), TypeKind::Named(n) if n.eq_ignore_ascii_case("true") || n.eq_ignore_ascii_case("false"))
 }
 
 /// The alternatives a positive assertion of `ty` accepts: the members of a
@@ -454,6 +475,7 @@ pub(in crate::type_engine) fn narrow_to_asserted_value(
     results: &mut Vec<ResolvedType>,
 ) {
     let exact = asserted.as_literal().is_some()
+        || is_bool_value(asserted)
         || matches!(
             asserted.kind(),
             TypeKind::ClassString(Some(_)) | TypeKind::InterfaceString(Some(_))
@@ -536,6 +558,12 @@ pub(in crate::type_engine) fn try_apply_custom_assert_narrowing(
             // arguments bind it to.
             let mut effective_type =
                 resolve_assertion_template_type(&assertion.asserted_type, &info, ctx);
+
+            // `empty` names no type; it is read as the falsy condition
+            // [`collect_assert_reexport_conditions`] narrows by.
+            if is_empty_keyword(&effective_type) {
+                continue;
+            }
 
             // The substitution failed when the effective type is still a
             // template parameter: no argument told the call what it stands
@@ -634,10 +662,12 @@ pub(in crate::type_engine) fn collect_assert_reexport_conditions<'a>(
         // Only a bare `true` / `false` literal assertion re-exports a
         // condition.  `@phpstan-assert true $c` (negated `!true` ⇒ false)
         // proves the argument true; `@phpstan-assert false $c` proves it
-        // false.
-        let asserts_true = if assertion.asserted_type.is_true() {
+        // false.  `@phpstan-assert empty $c` proves it falsy, which is
+        // what the condition `$c` being false narrows it to.
+        let asserted = resolve_assertion_template_type(&assertion.asserted_type, &info, ctx);
+        let asserts_true = if asserted.is_true() {
             !assertion.negated
-        } else if assertion.asserted_type.is_false() {
+        } else if asserted.is_false() || is_empty_keyword(&asserted) {
             assertion.negated
         } else {
             continue;
@@ -779,11 +809,32 @@ fn assertion_arg_expression<'a>(
     parameters: &[crate::types::ParameterInfo],
 ) -> Option<&'a Expression<'a>> {
     let param_idx = parameters.iter().position(|p| p.name == param_name)?;
-    let arg = argument_list.arguments.iter().nth(param_idx)?;
-    Some(match arg {
-        Argument::Positional(pos) => pos.value,
-        Argument::Named(named) => named.value,
-    })
+    argument_for_parameter(argument_list, param_idx, param_name)
+}
+
+/// The argument expression a call passes to the parameter at `param_idx`
+/// named `param_name` (with its `$`).
+///
+/// A named argument binds by name wherever it sits in the list; a
+/// positional one only reaches the parameter at its own index, and only
+/// before the first named argument.
+fn argument_for_parameter<'a>(
+    argument_list: &'a ArgumentList<'a>,
+    param_idx: usize,
+    param_name: &str,
+) -> Option<&'a Expression<'a>> {
+    let bare = param_name.strip_prefix('$').unwrap_or(param_name);
+    let mut positional = None;
+    for (index, arg) in argument_list.arguments.iter().enumerate() {
+        match arg {
+            Argument::Named(named) if bytes_to_str(named.name.value) == bare => {
+                return Some(named.value);
+            }
+            Argument::Positional(pos) if index == param_idx => positional = Some(pos.value),
+            _ => {}
+        }
+    }
+    positional
 }
 
 /// Report whether a call expression carries an unconditional not-null
@@ -838,6 +889,10 @@ pub(in crate::type_engine) fn call_asserts_not_null(
 ///   4. Reading the call-site argument at that index: `Foobar::class`
 ///   5. Extracting the class name `Foobar`
 ///
+/// A conditional tag (`($allow_null is true ? string|null : string)`) is
+/// first decided against the call's arguments, falling back to the
+/// parameters' defaults, the way a conditional return type is.
+///
 /// Returns the original type unchanged when it is not a template param
 /// or when the concrete type cannot be determined.
 fn resolve_assertion_template_type(
@@ -845,6 +900,22 @@ fn resolve_assertion_template_type(
     info: &CallAssertionInfo<'_>,
     ctx: &VarResolutionCtx<'_>,
 ) -> PhpType {
+    let bound;
+    let asserted_type = match &info.self_refs {
+        Some((declaring, called)) if asserted_type.contains_self_ref() => {
+            bound = asserted_type.replace_self_exact(declaring, &PhpType::named(*called));
+            &bound
+        }
+        _ => asserted_type,
+    };
+    if let TypeKind::Conditional(_) = asserted_type.kind() {
+        return match decide_assertion_conditional(asserted_type, info, ctx) {
+            Some(decided) if !matches!(decided.kind(), TypeKind::Conditional(_)) => {
+                resolve_assertion_template_type(&decided, info, ctx)
+            }
+            _ => asserted_type.clone(),
+        };
+    }
     let tpl_name = match asserted_type.kind() {
         TypeKind::Named(n) if info.template_params.iter().any(|t| t == n) => n.as_str(),
         _ => return asserted_type.clone(),
@@ -857,6 +928,52 @@ fn resolve_assertion_template_type(
     };
     template_argument_at_call(tpl_name, &callee, info.argument_list, ctx, &mut None)
         .unwrap_or_else(|| asserted_type.clone())
+}
+
+/// The branch of a conditional assertion type the call's arguments select.
+fn decide_assertion_conditional(
+    conditional: &PhpType,
+    info: &CallAssertionInfo<'_>,
+    ctx: &VarResolutionCtx<'_>,
+) -> Option<PhpType> {
+    use crate::type_engine::conditional_resolution::{
+        ConditionalClassContext, TemplateContext, resolve_conditional_with_text_args_and_defaults,
+    };
+    let arg_texts = crate::type_engine::variable::raw_type_inference::extract_arg_texts_from_ast(
+        info.argument_list,
+        ctx.file.content,
+    );
+    let text_args = arg_texts.join(", ");
+    let rctx = ctx.as_resolution_ctx();
+    let arg_ty_resolver = |t: &str| crate::Backend::resolve_arg_text_to_type(t, &rctx);
+    let default_ty_resolver = |t: &str, namespace: Option<&str>| {
+        crate::Backend::resolve_arg_text_to_type(t, &rctx.written_in(namespace))
+    };
+    let var_resolver = crate::type_engine::variable::resolution::build_var_resolver_from_ctx(ctx);
+    let current_class = ctx.current_class.fqn();
+    let tpl = TemplateContext {
+        defaults: None,
+        params: &info.template_params,
+        bindings: &info.template_bindings,
+        arg_type_resolver: Some(&arg_ty_resolver),
+        default_type_resolver: Some(&default_ty_resolver),
+        this_type: None,
+        subs: None,
+    };
+    resolve_conditional_with_text_args_and_defaults(
+        conditional,
+        &info.parameters,
+        &text_args,
+        Some(&var_resolver),
+        ConditionalClassContext {
+            calling: Some(&current_class),
+            declaring: None,
+            written_class: Some(&|name: &str| ctx.written_names().resolve_class(name)),
+            namespace: info.default_namespace.as_deref(),
+        },
+        ctx.file.class_loader,
+        &tpl,
+    )
 }
 
 /// `asserted` with each of the callee's own `@template` parameters replaced
@@ -972,11 +1089,7 @@ fn class_string_template_argument(
         return None;
     }
 
-    // Get the call-site argument at that position.
-    let arg_expr = match argument_list.arguments.iter().nth(param_idx)? {
-        Argument::Positional(pos) => pos.value,
-        Argument::Named(named) => named.value,
-    };
+    let arg_expr = argument_for_parameter(argument_list, param_idx, bound_param)?;
 
     // Try to extract a class name from the argument expression.
     if let Some(class_name) = extract_class_string_from_expr(arg_expr) {
@@ -1094,17 +1207,12 @@ pub(in crate::type_engine) fn find_assertion_arg_variable(
     param_name: &str,
     parameters: &[crate::types::ParameterInfo],
 ) -> Option<String> {
-    // Find the parameter index
     let param_idx = parameters.iter().position(|p| p.name == param_name)?;
-
-    // Get the argument at that position
-    let arg = argument_list.arguments.iter().nth(param_idx)?;
-    let arg_expr = match arg {
-        Argument::Positional(pos) => pos.value,
-        Argument::Named(named) => named.value,
-    };
-
-    expr_to_subject_key(arg_expr)
+    expr_to_subject_key(argument_for_parameter(
+        argument_list,
+        param_idx,
+        param_name,
+    )?)
 }
 
 /// Every subject key a tag on `param_name` names at the call site.

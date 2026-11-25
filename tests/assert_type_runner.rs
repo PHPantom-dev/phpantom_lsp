@@ -632,6 +632,10 @@ fn normalize_type(ty: &str) -> String {
     // Normalize whitespace around `|` and `&`.
     s = s.replace(" | ", "|").replace(" & ", "&");
 
+    // PHPStan spells a truthy `mixed` as `mixed` minus every falsy value;
+    // PHPantom names the same type `non-empty-mixed`.
+    s = s.replace("mixed~(0|0.0|''|'0'|array{}|false|null)", "non-empty-mixed");
+
     // Normalize callable return type syntax: `Closure(int): bool` → `Closure(int):bool`.
     s = s.replace("): ", "):");
 

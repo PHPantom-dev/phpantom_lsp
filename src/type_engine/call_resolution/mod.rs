@@ -90,7 +90,9 @@ mod template_binding;
 mod template_subs;
 
 pub(crate) use named_arguments::NamedArgumentDeclaration;
-pub(crate) use out_param::{OutParamCallee, effective_out_type, resolve_out_type_for_call};
+pub(crate) use out_param::{
+    OutParamCall, OutParamCallee, effective_out_type, resolve_out_type_for_call,
+};
 
 pub(crate) use arg_text_types::array_literal_shape_type_with;
 pub(crate) use array_callable::{

@@ -243,7 +243,10 @@ fn static_call_on_class(
         ctx,
         true,
         &template_subs,
-        &self_replace,
+        super::owner_method_call::OwnerReceiver {
+            self_replace: &self_replace,
+            receiver_type: None,
+        },
     );
     // The return-type lookup answers a `static` return with the class it
     // was declared on, but `parent::create()` from a subclass binds

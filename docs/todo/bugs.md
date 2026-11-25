@@ -29,66 +29,6 @@ No outstanding items.
 
 ## Conditional return types
 
-### B808. A conditional on a callable argument's return type keeps both branches
-
-**Impact: Low · Complexity: Medium**
-
-```php
-/**
- * @template T
- * @param callable(): T $callback
- * @return (T is Promise ? Promise<TPromise> : Promise<TReturn>)
- */
-function call(callable $callback): Promise {}
-
-call(function (): Promise { return new Success(9); });  // Promise<mixed>|Promise<int>, should be Promise<int>
-```
-
-`T` is bound from the closure's return, but the conditional is read as
-undecided and both branches are joined.
-
-**Fix:** decide the conditional once `T` is bound from the callable's
-return type. See `tests/psalm_assertions/template_conditional_return_type.php`.
-
-### B814. A conditional type in `@phpstan-assert` is not evaluated
-
-**Impact: Medium · Complexity: Low-Medium**
-
-```php
-/** @phpstan-assert ($allow_null is true ? string|null : string) $input */
-function check(mixed $input, bool $allow_null = false): void {}
-$a = x();
-check($a);
-$a;   // no type, should be string
-check(allow_null: true, input: $a);
-$a;   // mixed, should be string|null
-```
-
-With positional arguments the variable ends up with no type at all; with named arguments the assertion is not applied. The conditional should be resolved against the call's arguments (and defaults) before narrowing.
-
-It also shows as:
-
-- A conditional `@phpstan-assert` type leaves the variable without a type
-- A conditional `@phpstan-assert` type is not decided by the call's arguments
-- `@phpstan-assert empty $var` leaves the variable with no type
-
-**Cases** (PHPStan `nsrt/`, 42 assertions): `bug-9435.php` (35), `assert-conditional.php` (4), `bug-14249.php` (2), `assert-empty.php`.
-
-### B815. A `($this is self::Case ? ...)` conditional is not decided by narrowing the enum to a case
-
-**Impact: Low · Complexity: Low-Medium**
-
-```php
-enum X: string { case A = 'a'; case B = 'b';
-  /** @return ($this is self::A ? int : null) */ public function get(): ?int {}
-}
-if ($x !== X::A) { $x->get(); } // got int|null, should be null
-```
-
-Applies to `@return` and `@param-out` conditionals, for both `$this` inside the enum and an enum variable outside it.
-
-**Cases** (PHPStan `nsrt/`, 10 assertions): `bug-12244.php` (10).
-
 ### B816. A conditional return or `@param` type is not used to narrow the argument it tests
 
 **Impact: Low · Complexity: Medium**
@@ -107,22 +47,6 @@ It also shows as:
 - A conditional `@param` type is not narrowed by checks on the parameter it names
 
 **Cases** (PHPStan `nsrt/`, 15 assertions): `bug-7915.php` (6), `bug-9734.php` (5), `conditional-types-inference.php` (4).
-
-### B817. `static` in a static method's conditional return type or `@phpstan-assert` is not the class it is called on
-
-**Impact: Low · Complexity: Low**
-
-```php
-class A { /** @template T of object @param T $o @return (T is static ? T : static) @phpstan-assert static $o */ public static function check(object $o) {} }
-class B extends A {}
-$r = B::check($a); // $a: A
-$r; // got A|B, should be B
-$a; // got A, should be B
-```
-
-The conditional keeps both branches (`DateTime|A`) and the asserted `static` resolves to the declaring class.
-
-**Cases** (PHPStan `nsrt/`, 5 assertions): `bug-12376.php` (5).
 
 ## Standard-library return types
 

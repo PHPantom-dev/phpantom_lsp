@@ -191,6 +191,9 @@ fn this_condition_holds(
     declaring: Option<&str>,
     class_loader: &ResolvedClassLoader<'_>,
 ) -> Option<bool> {
+    if let Some(satisfied) = enum_case_condition_holds(this_ty, condition, declaring) {
+        return Some(satisfied ^ negated);
+    }
     let condition = match declaring {
         Some(declaring) => Cow::Owned(condition.replace_bare_self(declaring)),
         None => Cow::Borrowed(condition),
@@ -201,6 +204,44 @@ fn this_condition_holds(
         type_condition_result(this_ty, &condition, class_loader)?
     };
     Some(satisfied ^ negated)
+}
+
+/// Whether a receiver narrowed to enum cases is the case a `($this is
+/// self::A ? …)` condition names, `self` and `static` naming `declaring`.
+///
+/// `None` when the condition names no case of the receiver's enum, or when
+/// the receiver may still be a case the condition does not settle (a member
+/// that is the whole enum).
+fn enum_case_condition_holds(
+    this_ty: &PhpType,
+    condition: &PhpType,
+    declaring: Option<&str>,
+) -> Option<bool> {
+    let text = match condition.kind() {
+        TypeKind::Raw(text) => text.as_ref(),
+        TypeKind::Named(name) => name.as_str(),
+        _ => return None,
+    };
+    let (class, case) = text.rsplit_once("::")?;
+    let class = class.strip_prefix('\\').unwrap_or(class);
+    let class = if class.eq_ignore_ascii_case("self") || class.eq_ignore_ascii_case("static") {
+        declaring?
+    } else {
+        class
+    };
+    let mut held = None;
+    for member in this_ty.union_members() {
+        let (enum_name, member_case) = member.as_enum_case()?;
+        if !enum_name.eq_ignore_ascii_case(class) {
+            return None;
+        }
+        let is_case = member_case == case;
+        if held.is_some_and(|h| h != is_case) {
+            return None;
+        }
+        held = Some(is_case);
+    }
+    held
 }
 
 /// Whether a value of `arg_ty` satisfies `condition`, for callers outside
@@ -685,7 +726,10 @@ pub(crate) fn template_subs_within_bounds(
     bounds: &crate::atom::AtomMap<PhpType>,
     class_loader: &ResolvedClassLoader<'_>,
 ) -> HashMap<String, PhpType> {
-    let templates: Vec<crate::atom::Atom> = bounds.keys().copied().collect();
+    // Every template the call bound counts, not only the bounded ones:
+    // `T as Promise<TPromise>|TReturn` names two templates with no bound.
+    let mut templates: Vec<crate::atom::Atom> = bounds.keys().copied().collect();
+    templates.extend(subs.keys().map(|name| crate::atom::atom(name)));
     for (name, bound) in bounds {
         // `mixed` admits every binding, and a bound over another template
         // (`T of array<K>`) is not known until that one is, so the binding
