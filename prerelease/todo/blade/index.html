@@ -864,6 +864,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#bl26-a-component-method-called-from-its-view-loses-its-return-type" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        BL26. A component method called from its view loses its return type
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1393,6 +1404,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#bl26-a-component-method-called-from-its-view-loses-its-return-type" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        BL26. A component method called from its view loses its return type
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1522,6 +1544,24 @@ file every case PHPantom answers differently as a <code>// SKIP: reason</code>
 entry in <code>docs/todo/</code>. Tests of Bladestan's own compiler output (the
 PHP it generates for PHPStan) have no counterpart here; list them in
 the README as not ported.</p>
+<h2 id="bl26-a-component-method-called-from-its-view-loses-its-return-type">BL26. A component method called from its view loses its return type<a class="headerlink" href="#bl26-a-component-method-called-from-its-view-loses-its-return-type" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
+<p>Blade wraps every argument-less public method of a class component in
+<code>Illuminate\View\InvokableComponentVariable</code> before handing it to the view,
+and PHPantom declares the variable with that runtime type, which is right:
+it is what lets both <code>{{ $total }}</code> and <code>{{ $total() }}</code> work. But the
+wrapper's <code>__invoke()</code> returns <code>mixed</code>, so <code>$getFeature()-&gt;name</code> in the
+view neither completes nor is checked, although the backing class declares
+what <code>getFeature()</code> returns. Bladestan types the same variable as
+<code>Closure(): Feature</code>, which keeps the return type but loses the wrapper's
+own members.</p>
+<p>Carry the method's return type on the declared variable, for example as
+<code>InvokableComponentVariable&lt;Feature&gt;</code> with the class's <code>__invoke()</code>
+returning the template parameter (Laravel's class is not generic, so this
+needs a stub-level patch or a synthesized subclass), so that a call through
+the variable is typed like a direct call on the component. Compared
+against Bladestan's scopes on a large production Laravel project, this was
+53 variables across 23 component views.</p>
 
 
 

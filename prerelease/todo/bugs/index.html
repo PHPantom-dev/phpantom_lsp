@@ -900,6 +900,100 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Standard-library return types">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b773-constant-with-a-literal-name-returns-mixed" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B773. <code>constant()</code> with a literal name returns <code>mixed</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b774-filter_input-and-filter_var-with-filter_force_array-return-mixed" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B774. <code>filter_input()</code> and <code>filter_var()</code> with <code>FILTER_FORCE_ARRAY</code> return <code>mixed</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b775-compact-returns-array-rather-than-a-shape" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B775. <code>compact()</code> returns <code>array</code> rather than a shape
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b776-array_merge-with-a-spread-argument-returns-array" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B776. <code>array_merge()</code> with a spread argument returns <code>array</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b777-array_find-does-not-narrow-by-a-type-checking-callback" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B777. <code>array_find()</code> does not narrow by a type-checking callback
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b778-string-functions-and-on-literals-are-not-folded" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B778. String functions and <code>++</code> on literals are not folded
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b779-folding-reads-a-double-quoted-literals-escapes-as-written" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B779. Folding reads a double-quoted literal's escapes as written
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b795-array_column-on-a-constant-array-returns-array" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B795. <code>array_column()</code> on a constant array returns <code>array</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -910,6 +1004,23 @@
       </span>
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="Reachability">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b763-a-branch-that-cannot-run-keeps-its-subjects-type-instead-of-never" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B763. A branch that cannot run keeps its subject's type instead of <code>never</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -922,6 +1033,144 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Narrowing">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b764-match-narrows-through-fewer-subject-shapes-than-if-does" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B764. <code>match</code> narrows through fewer subject shapes than <code>if</code> does
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b765-an-assignment-inside-a-match-arms-condition-is-not-walked" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B765. An assignment inside a <code>match</code> arm's condition is not walked
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b780-keeps-its-right-side-when-the-left-side-cannot-be-null" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B780. <code>??</code> keeps its right side when the left side cannot be null
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b781-on-an-offset-or-variable-that-cannot-exist-gives-mixed" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B781. <code>??</code> on an offset or variable that cannot exist gives <code>mixed</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b782-array_key_exists-narrows-a-key-by-the-declared-key-type" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B782. <code>array_key_exists()</code> narrows a key by the declared key type
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b783-a-null-check-on-array_key_first-or-array_key_last-does-not-narrow-the-array" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B783. A null check on <code>array_key_first()</code> or <code>array_key_last()</code> does not narrow the array
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b784-comparing-a-shape-entry-with-true-does-not-pick-the-union-member" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B784. Comparing a shape entry with <code>=== true</code> does not pick the union member
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b785-comparing-an-array-with-array_filter-of-itself-narrows-nothing" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B785. Comparing an array with <code>array_filter()</code> of itself narrows nothing
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b786-in_array-with-enum-cases-does-not-narrow-and-a-negated-one-keeps-its-needle-in-the-haystack" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B786. <code>in_array()</code> with enum cases does not narrow, and a negated one keeps its needle in the haystack
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b787-a-strlen-comparison-does-not-narrow-a-string-to" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B787. A <code>strlen()</code> comparison does not narrow a string to <code>''</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b796-a-narrowed-call-result-survives-a-by-reference-call-that-can-change-it" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B796. A narrowed call result survives a by-reference call that can change it
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b798-a-key-a-list-is-known-to-have-does-not-make-the-keys-below-it-required" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B798. A key a list is known to have does not make the keys below it required
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -932,6 +1181,89 @@
       </span>
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="Array types">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b766-conditional-appends-forget-which-value-sits-at-which-offset" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B766. Conditional appends forget which value sits at which offset
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b767-a-value-written-into-an-array-inside-a-loop-loses-its-literals" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B767. A value written into an array inside a loop loses its literals
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b768-removing-an-end-entry-from-a-shape-with-optional-keys-gives-the-generic-array" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B768. Removing an end entry from a shape with optional keys gives the generic array
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b788-writing-below-a-mixed-element-replaces-every-elements-type" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B788. Writing below a <code>mixed</code> element replaces every element's type
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b789-a-nested-write-under-a-dynamic-key-inside-a-loop-is-lost-after-the-loop" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B789. A nested write under a dynamic key inside a loop is lost after the loop
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b794-an-append-after-unset-of-the-last-entry-reuses-its-index" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B794. An append after <code>unset()</code> of the last entry reuses its index
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b797-writing-the-offset-after-a-known-one-turns-a-list-into-an-array" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B797. Writing the offset after a known one turns a list into an array
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -965,6 +1297,78 @@
       </span>
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="Templates">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b769-a-template-bound-that-names-another-template-leaks-that-templates-name" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B769. A template bound that names another template leaks that template's name
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b770-a-template-inferred-from-several-closure-parameters-takes-the-first-one" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B770. A template inferred from several closure parameters takes the first one
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b771-phpstan-self-out-skips-this-and-a-return-this-result" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B771. <code>@phpstan-self-out</code> skips <code>$this</code> and a <code>@return $this</code> result
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b772-callables-written-as-strings-and-arrays-lose-the-targets-signature" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B772. Callables written as strings and arrays lose the target's signature
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b790-a-template-bound-from-a-literal-is-generalized-by-the-wrong-rule" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B790. A template bound from a literal is generalized by the wrong rule
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b791-an-inherited-phpstan-assert-on-a-template-leaves-the-variable-without-a-type" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B791. An inherited <code>@phpstan-assert</code> on a template leaves the variable without a type
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -1009,6 +1413,56 @@
       </span>
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="Miscellaneous">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b792-a-static-property-read-through-object-has-no-type" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B792. A static property read through <code>$object::</code> has no type
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b793-and-on-literal-ints-are-not-folded" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B793. <code>&lt;&lt;</code>, <code>&gt;&gt;</code> and <code>/</code> on literal ints are not folded
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b799-tcollection-on-a-native-collection-return-is-not-a-collection-of-t" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B799. <code>T[]|Collection</code> on a native <code>Collection</code> return is not a collection of <code>T</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b800-inside-a-trait-self-static-parent-and-this-do-not-stand-for-the-class-using-it" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B800. Inside a trait, <code>self</code>, <code>static</code>, <code>parent::</code> and <code>$this</code> do not stand for the class using it
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -1523,6 +1977,100 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Standard-library return types">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b773-constant-with-a-literal-name-returns-mixed" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B773. <code>constant()</code> with a literal name returns <code>mixed</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b774-filter_input-and-filter_var-with-filter_force_array-return-mixed" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B774. <code>filter_input()</code> and <code>filter_var()</code> with <code>FILTER_FORCE_ARRAY</code> return <code>mixed</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b775-compact-returns-array-rather-than-a-shape" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B775. <code>compact()</code> returns <code>array</code> rather than a shape
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b776-array_merge-with-a-spread-argument-returns-array" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B776. <code>array_merge()</code> with a spread argument returns <code>array</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b777-array_find-does-not-narrow-by-a-type-checking-callback" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B777. <code>array_find()</code> does not narrow by a type-checking callback
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b778-string-functions-and-on-literals-are-not-folded" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B778. String functions and <code>++</code> on literals are not folded
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b779-folding-reads-a-double-quoted-literals-escapes-as-written" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B779. Folding reads a double-quoted literal's escapes as written
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b795-array_column-on-a-constant-array-returns-array" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B795. <code>array_column()</code> on a constant array returns <code>array</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1533,6 +2081,23 @@
       </span>
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="Reachability">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b763-a-branch-that-cannot-run-keeps-its-subjects-type-instead-of-never" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B763. A branch that cannot run keeps its subject's type instead of <code>never</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -1545,6 +2110,144 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Narrowing">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b764-match-narrows-through-fewer-subject-shapes-than-if-does" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B764. <code>match</code> narrows through fewer subject shapes than <code>if</code> does
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b765-an-assignment-inside-a-match-arms-condition-is-not-walked" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B765. An assignment inside a <code>match</code> arm's condition is not walked
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b780-keeps-its-right-side-when-the-left-side-cannot-be-null" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B780. <code>??</code> keeps its right side when the left side cannot be null
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b781-on-an-offset-or-variable-that-cannot-exist-gives-mixed" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B781. <code>??</code> on an offset or variable that cannot exist gives <code>mixed</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b782-array_key_exists-narrows-a-key-by-the-declared-key-type" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B782. <code>array_key_exists()</code> narrows a key by the declared key type
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b783-a-null-check-on-array_key_first-or-array_key_last-does-not-narrow-the-array" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B783. A null check on <code>array_key_first()</code> or <code>array_key_last()</code> does not narrow the array
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b784-comparing-a-shape-entry-with-true-does-not-pick-the-union-member" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B784. Comparing a shape entry with <code>=== true</code> does not pick the union member
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b785-comparing-an-array-with-array_filter-of-itself-narrows-nothing" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B785. Comparing an array with <code>array_filter()</code> of itself narrows nothing
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b786-in_array-with-enum-cases-does-not-narrow-and-a-negated-one-keeps-its-needle-in-the-haystack" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B786. <code>in_array()</code> with enum cases does not narrow, and a negated one keeps its needle in the haystack
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b787-a-strlen-comparison-does-not-narrow-a-string-to" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B787. A <code>strlen()</code> comparison does not narrow a string to <code>''</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b796-a-narrowed-call-result-survives-a-by-reference-call-that-can-change-it" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B796. A narrowed call result survives a by-reference call that can change it
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b798-a-key-a-list-is-known-to-have-does-not-make-the-keys-below-it-required" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B798. A key a list is known to have does not make the keys below it required
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1555,6 +2258,89 @@
       </span>
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="Array types">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b766-conditional-appends-forget-which-value-sits-at-which-offset" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B766. Conditional appends forget which value sits at which offset
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b767-a-value-written-into-an-array-inside-a-loop-loses-its-literals" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B767. A value written into an array inside a loop loses its literals
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b768-removing-an-end-entry-from-a-shape-with-optional-keys-gives-the-generic-array" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B768. Removing an end entry from a shape with optional keys gives the generic array
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b788-writing-below-a-mixed-element-replaces-every-elements-type" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B788. Writing below a <code>mixed</code> element replaces every element's type
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b789-a-nested-write-under-a-dynamic-key-inside-a-loop-is-lost-after-the-loop" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B789. A nested write under a dynamic key inside a loop is lost after the loop
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b794-an-append-after-unset-of-the-last-entry-reuses-its-index" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B794. An append after <code>unset()</code> of the last entry reuses its index
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b797-writing-the-offset-after-a-known-one-turns-a-list-into-an-array" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B797. Writing the offset after a known one turns a list into an array
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -1588,6 +2374,78 @@
       </span>
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="Templates">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b769-a-template-bound-that-names-another-template-leaks-that-templates-name" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B769. A template bound that names another template leaks that template's name
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b770-a-template-inferred-from-several-closure-parameters-takes-the-first-one" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B770. A template inferred from several closure parameters takes the first one
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b771-phpstan-self-out-skips-this-and-a-return-this-result" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B771. <code>@phpstan-self-out</code> skips <code>$this</code> and a <code>@return $this</code> result
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b772-callables-written-as-strings-and-arrays-lose-the-targets-signature" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B772. Callables written as strings and arrays lose the target's signature
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b790-a-template-bound-from-a-literal-is-generalized-by-the-wrong-rule" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B790. A template bound from a literal is generalized by the wrong rule
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b791-an-inherited-phpstan-assert-on-a-template-leaves-the-variable-without-a-type" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B791. An inherited <code>@phpstan-assert</code> on a template leaves the variable without a type
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -1632,6 +2490,56 @@
       </span>
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="Miscellaneous">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b792-a-static-property-read-through-object-has-no-type" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B792. A static property read through <code>$object::</code> has no type
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b793-and-on-literal-ints-are-not-folded" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B793. <code>&lt;&lt;</code>, <code>&gt;&gt;</code> and <code>/</code> on literal ints are not folded
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b799-tcollection-on-a-native-collection-return-is-not-a-collection-of-t" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B799. <code>T[]|Collection</code> on a native <code>Collection</code> return is not a collection of <code>T</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b800-inside-a-trait-self-static-parent-and-this-do-not-stand-for-the-class-using-it" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B800. Inside a trait, <code>self</code>, <code>static</code>, <code>parent::</code> and <code>$this</code> do not stand for the class using it
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -1684,19 +2592,532 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <h2 id="conditional-return-types">Conditional return types<a class="headerlink" href="#conditional-return-types" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="standard-library-return-types">Standard-library return types<a class="headerlink" href="#standard-library-return-types" title="Permanent link">&para;</a></h2>
-<p>No outstanding items.</p>
+<h3 id="b773-constant-with-a-literal-name-returns-mixed">B773. <code>constant()</code> with a literal name returns <code>mixed</code><a class="headerlink" href="#b773-constant-with-a-literal-name-returns-mixed" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Complexity: Low</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">define('FOO', 'foo');</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">constant('FOO');                        // mixed, should be 'foo'</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">constant('\Constant\Baz::BAZ');         // mixed, should be 'baz'</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">constant('\Constant\Suit::Hearts');     // mixed, should be Suit::Hearts</span>
+</code></pre></div>
+<p><strong>Fix:</strong> resolve a literal (or literal-union) argument as the constant or
+class constant it names, the way the bare name resolves. <code>// SKIP</code> lines in
+<code>tests/phpstan_nsrt/constant.php</code>.</p>
+<h3 id="b774-filter_input-and-filter_var-with-filter_force_array-return-mixed">B774. <code>filter_input()</code> and <code>filter_var()</code> with <code>FILTER_FORCE_ARRAY</code> return <code>mixed</code><a class="headerlink" href="#b774-filter_input-and-filter_var-with-filter_force_array-return-mixed" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Complexity: Low</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">filter_input(INPUT_GET, 'foo', FILTER_VALIDATE_INT, ['flags' =&gt; FILTER_FORCE_ARRAY]);</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">// mixed, should be array&lt;int|false&gt;|null</span>
+</code></pre></div>
+<p><strong>Fix:</strong> teach the filter return-type rule the array flags, alone and
+combined with <code>FILTER_NULL_ON_FAILURE</code>. <code>// SKIP</code> lines in
+<code>tests/phpstan_nsrt/filter-input.php</code>.</p>
+<h3 id="b775-compact-returns-array-rather-than-a-shape">B775. <code>compact()</code> returns <code>array</code> rather than a shape<a class="headerlink" href="#b775-compact-returns-array-rather-than-a-shape" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Complexity: Low</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">$v = 1; $k = 'a';</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">compact('v', 'k');   // array, should be array{v: 1, k: 'a'}</span>
+</code></pre></div>
+<p><strong>Fix:</strong> build the shape from the literal names and the variables' types in
+scope. <code>// SKIP</code> line in <code>tests/phpstan_nsrt/array-find.php</code>.</p>
+<h3 id="b776-array_merge-with-a-spread-argument-returns-array">B776. <code>array_merge()</code> with a spread argument returns <code>array</code><a class="headerlink" href="#b776-array_merge-with-a-spread-argument-returns-array" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Complexity: Low</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">/** @param string[][] $foo */</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">array_merge([], ...$foo);   // array, should be array&lt;string&gt;</span>
+</code></pre></div>
+<p><strong>Fix:</strong> merge the spread iterable's element type like any other argument.
+<code>// SKIP</code> lines in <code>tests/phpstan_nsrt/array-merge.php</code>.</p>
+<h3 id="b777-array_find-does-not-narrow-by-a-type-checking-callback">B777. <code>array_find()</code> does not narrow by a type-checking callback<a class="headerlink" href="#b777-array_find-does-not-narrow-by-a-type-checking-callback" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Complexity: Low</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">/** @param array{1, 'foo', \DateTime} $array */</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x">array_find($array, 'is_int');   // 1|'foo'|DateTime|null, should be 1</span>
+</code></pre></div>
+<p><strong>Fix:</strong> narrow the found value by a callback named as a type check
+(<code>'is_int'</code>, <code>'is_string'</code>, …), as <code>array_filter()</code> does. <code>// SKIP</code> lines in
+<code>tests/phpstan_nsrt/array-find.php</code>.</p>
+<h3 id="b778-string-functions-and-on-literals-are-not-folded">B778. String functions and <code>++</code> on literals are not folded<a class="headerlink" href="#b778-string-functions-and-on-literals-are-not-folded" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">str_repeat($anyString, 0);               // string, should be ''</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="x">/** @param 'foo'|'bar' $fooOrBar */</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="x">trim('foo', $fooOrBar);                  // string, should be ''|'foo'</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="x">mb_strtolower('Ａｂｃ');                  // lowercase-string, should be 'ａｂｃ'</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="x">mb_convert_case('Česká', MB_CASE_UPPER); // string, should be 'ČESKÁ'</span>
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="x">ucwords('hello|world', '|');             // string, should be 'Hello|World'</span>
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="x">mb_substr('déjà_vu', 0, 3);              // string, should be 'déj'</span>
+<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a><span class="x">$a = 'a'; $a++;                          // string, should be 'b'</span>
+</code></pre></div>
+<p><code>strtolower()</code>, <code>trim()</code> with a literal character list, <code>str_repeat()</code> with a
+literal count and others already fold a literal argument. The multibyte
+variants, a union of literals in the second argument, a zero count, the
+delimiter form of <code>ucwords()</code>, and PHP's alphanumeric string increment do not.</p>
+<p><strong>Fix:</strong> fold these the way their single-byte, single-literal forms are
+folded, over each member of a literal union. <code>// SKIP</code> lines in
+<code>tests/phpstan_nsrt/str-casing.php</code>, <code>trim.php</code>, <code>literal-string.php</code>,
+<code>non-empty-string.php</code>, <code>non-empty-string-substr.php</code> and
+<code>mixed-to-number.php</code>.</p>
+<h3 id="b779-folding-reads-a-double-quoted-literals-escapes-as-written">B779. Folding reads a double-quoted literal's escapes as written<a class="headerlink" href="#b779-folding-reads-a-double-quoted-literals-escapes-as-written" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Complexity: Low</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="x">mb_strtolower("\xfe\xff\x65", 'CP1252');   // '\xfe\xff\x65', the source text</span>
+</code></pre></div>
+<p>A string literal keeps its source spelling, so a function folded over a
+double-quoted literal works on the backslash sequences rather than the bytes
+they stand for, and the result can be a value PHP never produces.</p>
+<p><strong>Fix:</strong> fold over the literal's decoded value and print the result in a
+spelling that round-trips. <code>// SKIP</code> line in <code>tests/phpstan_nsrt/str-casing.php</code>.</p>
+<h3 id="b795-array_column-on-a-constant-array-returns-array">B795. <code>array_column()</code> on a constant array returns <code>array</code><a class="headerlink" href="#b795-array_column-on-a-constant-array-returns-array" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Complexity: Low</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="x">$plop = [12 =&gt; ['name' =&gt; 'ROLE_USER'], 28 =&gt; ['name' =&gt; 'ROLE_ADMIN']];</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="x">array_column($plop, 'name', null);   // array, should be array{'ROLE_USER', 'ROLE_ADMIN'}</span>
+</code></pre></div>
+<p><strong>Fix:</strong> when the input is a shape whose rows are shapes, build the result
+from the named column of each row (and the index column's values as keys,
+when given). <code>// SKIP</code> line in <code>tests/phpstan_nsrt/bug-12954.php</code>.</p>
 <h2 id="reachability">Reachability<a class="headerlink" href="#reachability" title="Permanent link">&para;</a></h2>
-<p>No outstanding items.</p>
+<h3 id="b763-a-branch-that-cannot-run-keeps-its-subjects-type-instead-of-never">B763. A branch that cannot run keeps its subject's type instead of <code>never</code><a class="headerlink" href="#b763-a-branch-that-cannot-run-keeps-its-subjects-type-instead-of-never" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Complexity: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="x">/** @param 1|2|3|4 $i */</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="x">function f(int $i): void {</span>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="x">    $x = match ($i) { 0 =&gt; $i };                  // 1|2|3|4, should be never</span>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="x">    foreach (['a', 'b', 'c'] as $item) {</span>
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="x">        if (!in_array($item, ['a', 'b', 'c'], true)) {</span>
+<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a><span class="x">            $item;                                // 'a'|'b'|'c', should be never</span>
+<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a><span class="x">        }</span>
+<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a><span class="x">    }</span>
+<a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a><span class="x">    $key = 'x';</span>
+<a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a><span class="x">    X::get($key);  // @phpstan-assert key-of&lt;self::KEYS&gt; $key, KEYS = ['a' =&gt; 1, 'b' =&gt; 2]</span>
+<a id="__codelineno-8-11" name="__codelineno-8-11" href="#__codelineno-8-11"></a><span class="x">    $key;                                         // 'x', should be never</span>
+<a id="__codelineno-8-12" name="__codelineno-8-12" href="#__codelineno-8-12"></a><span class="x">}</span>
+</code></pre></div>
+<p>When a check rules out every value a variable can hold, the code after it
+cannot run, but the narrowing keeps the type the variable came in with.
+<code>apply_in_array_narrowing</code> does this on purpose ("a branch that cannot run
+… keeps the type it came in with"), while <code>!==</code> against an enum's last case
+already narrows to <code>never</code>, so the two disagree. A <code>match</code> arm whose
+condition no value meets, a <code>match</code> with no arm that can match, and an
+<code>@phpstan-assert</code> disjoint from the argument behave the same way, and so
+does <code>!empty(X)</code> on a constant holding <code>[]</code>. An <code>array_filter()</code> callback no
+entry can pass (<code>fn ($v) =&gt; is_string($v)</code> over <code>array&lt;int, int&gt;</code>) should
+leave <code>array{}</code>, but <code>narrow_type_by_condition</code> reports the impossible
+narrowing as no narrowing at all, so the filter keeps its input type.</p>
+<p><strong>Fix:</strong> decide once whether an impossible narrowing yields <code>never</code>, and
+apply it to <code>in_array()</code>, <code>match</code> arms and conditions, assertion tags and
+filter callbacks alike, and to the code after an always-throwing
+<code>$x ??= throw …</code> on a value that is always <code>null</code> and to an ordering against
+<code>null</code> that never holds (<code>$i &lt; null</code>). The <code>// SKIP</code> lines in
+<code>tests/phpstan_nsrt/enum-in-array.php</code>, <code>match-expr.php</code>, <code>bug-8559.php</code>,
+<code>bug-14369.php</code>, <code>bug-7913.php</code>, <code>comparison-operators.php</code> and
+<code>strlen-int-range.php</code> are the cases; the unported
+<code>array-filter-arrow-functions.php</code> and <code>array-filter-callables.php</code> in
+PHPStan's <code>nsrt/</code> have the filter ones.</p>
 <h2 id="narrowing">Narrowing<a class="headerlink" href="#narrowing" title="Permanent link">&para;</a></h2>
-<p>No outstanding items.</p>
+<h3 id="b764-match-narrows-through-fewer-subject-shapes-than-if-does">B764. <code>match</code> narrows through fewer subject shapes than <code>if</code> does<a class="headerlink" href="#b764-match-narrows-through-fewer-subject-shapes-than-if-does" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="x">match (get_debug_type($class)) {                  // FinalFoo|FinalBar $class</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="x">    FinalFoo::class =&gt; $class,                    // still FinalFoo|FinalBar</span>
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="x">};</span>
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="x">match ($foo = $val) {                             // ?int $val</span>
+<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a><span class="x">    null =&gt; $val,                                 // ?int, should be null ($foo is narrowed)</span>
+<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a><span class="x">};</span>
+<a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a><span class="x">$intOrString = rand(0, 1) ? 'integer' : 'string';</span>
+<a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a><span class="x">match (gettype($value)) {</span>
+<a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a><span class="x">    $intOrString =&gt; $value,                       // unchanged, should be int|string</span>
+<a id="__codelineno-9-10" name="__codelineno-9-10" href="#__codelineno-9-10"></a><span class="x">};</span>
+</code></pre></div>
+<p>The match subject is recognised as <code>$x::class</code>, <code>get_class($x)</code>, a plain
+variable, or <code>gettype($x)</code> against literal arms. <code>get_debug_type($x)</code>
+(which also returns scalar names such as <code>'int'</code>), the source of an
+assignment used as the subject, and an arm condition that is a variable
+holding literals narrow nothing.</p>
+<p><strong>Fix:</strong> route each of these through the same comparison narrowing <code>if
+(get_debug_type($x) === Foo::class)</code> and <code>$a = $b</code> aliasing use. The cases
+are the <code>// SKIP</code> lines in <code>tests/phpstan_nsrt/match-expr.php</code> and
+<code>bug-10084.php</code>.</p>
+<h3 id="b765-an-assignment-inside-a-match-arms-condition-is-not-walked">B765. An assignment inside a <code>match</code> arm's condition is not walked<a class="headerlink" href="#b765-an-assignment-inside-a-match-arms-condition-is-not-walked" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Complexity: Low</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="x">match ($i) {</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="x">    $a = $i, 1, $b = $i =&gt; null,</span>
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="x">};</span>
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="x">// hover on $a or $b: no type</span>
+</code></pre></div>
+<p>The forward walker resolves arm conditions as comparisons but never walks
+them as expressions, so an assignment written there (or anything else with
+a side effect on the scope) is lost.</p>
+<p><strong>Fix:</strong> walk each arm condition in order, the way the subject is walked.
+<code>tests/phpstan_nsrt/match-expr.php</code> has the <code>// SKIP</code> lines.</p>
+<h3 id="b780-keeps-its-right-side-when-the-left-side-cannot-be-null">B780. <code>??</code> keeps its right side when the left side cannot be null<a class="headerlink" href="#b780-keeps-its-right-side-when-the-left-side-cannot-be-null" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Medium · Complexity: Low</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="x">function f(int $i, Foo $foo): void {</span>
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="x">    $i ?? false;            // int|false, should be int</span>
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="x">    $foo-&gt;string ?? false;  // string|false, should be string (@var string)</span>
+<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="x">    $three = 3;</span>
+<a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a><span class="x">    $three ?? 4;            // 3|4, should be 3</span>
+<a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a><span class="x">    $shape = ['dim' =&gt; 1];</span>
+<a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a><span class="x">    $shape['dim'] ?? 0;     // 1|0, should be 1</span>
+<a id="__codelineno-11-8" name="__codelineno-11-8" href="#__codelineno-11-8"></a><span class="x">}</span>
+</code></pre></div>
+<p>The fallback is joined in whether or not the left side can be <code>null</code> or
+missing, so a non-nullable value gains the fallback's type, which then shows
+up in hover and in argument-type checks downstream.</p>
+<p><strong>Fix:</strong> add the right side only when the left side's type includes <code>null</code>
+or it may be unset (an optional shape key, a maybe-defined variable, an
+offset the array type cannot rule out). <code>// SKIP</code> lines in
+<code>tests/phpstan_nsrt/isset-coalesce-empty-type.php</code> and
+<code>isset-coalesce-empty-type-root.php</code>.</p>
+<h3 id="b781-on-an-offset-or-variable-that-cannot-exist-gives-mixed">B781. <code>??</code> on an offset or variable that cannot exist gives <code>mixed</code><a class="headerlink" href="#b781-on-an-offset-or-variable-that-cannot-exist-gives-mixed" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Complexity: Low</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="x">$list = [1, 2, 3];</span>
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="x">$list['string'] ?? 0;          // mixed, should be 0</span>
+<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="x">function g(): void {</span>
+<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a><span class="x">    $bar-&gt;bar ?? 'foo';        // mixed, should be 'foo' ($bar is never defined)</span>
+<a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a><span class="x">}</span>
+</code></pre></div>
+<p>When the left side is known not to exist (a key a sealed shape does not
+have, an undefined variable) the result is the right side alone. An
+undefined plain variable already works (<code>$doesNotExist ?? 0</code> is <code>0</code>); an
+offset or property read through one does not.</p>
+<p><strong>Fix:</strong> treat a left side that is certainly missing as contributing nothing.
+<code>// SKIP</code> lines in <code>tests/phpstan_nsrt/isset-coalesce-empty-type.php</code>.</p>
+<h3 id="b782-array_key_exists-narrows-a-key-by-the-declared-key-type">B782. <code>array_key_exists()</code> narrows a key by the declared key type<a class="headerlink" href="#b782-array_key_exists-narrows-a-key-by-the-declared-key-type" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Complexity: Low</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="x">/**</span>
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="x"> * @param array&lt;int, mixed&gt; $a</span>
+<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="x"> * @param array&lt;mixed&gt; $c</span>
+<a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a><span class="x"> */</span>
+<a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a><span class="x">function f(array $a, array $c, int|string $k, mixed $m): void {</span>
+<a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a><span class="x">    if (array_key_exists($k, $a)) { $k; }  // int, should be int|numeric-string</span>
+<a id="__codelineno-13-7" name="__codelineno-13-7" href="#__codelineno-13-7"></a><span class="x">    if (array_key_exists($m, $c)) { $m; }  // mixed, should be int|string</span>
+<a id="__codelineno-13-8" name="__codelineno-13-8" href="#__codelineno-13-8"></a><span class="x">}</span>
+</code></pre></div>
+<p>PHP casts a numeric-string key to an int, so a string can find an int key,
+and any key that is found is an <code>array-key</code>. The narrowing intersects the
+key with the array's key type instead.</p>
+<p><strong>Fix:</strong> narrow to what can be found: the array's key type plus the numeric
+strings that cast to its int keys, and <code>int|string</code> when the key type says
+nothing. <code>// SKIP</code> lines in <code>tests/phpstan_nsrt/array-key-exists.php</code>.</p>
+<h3 id="b783-a-null-check-on-array_key_first-or-array_key_last-does-not-narrow-the-array">B783. A null check on <code>array_key_first()</code> or <code>array_key_last()</code> does not narrow the array<a class="headerlink" href="#b783-a-null-check-on-array_key_first-or-array_key_last-does-not-narrow-the-array" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Complexity: Low</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="x">/** @param list&lt;string&gt; $array */</span>
+<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="x">function f(array $array) {</span>
+<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a><span class="x">    if (array_key_first($array) !== null) { return; }</span>
+<a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a><span class="x">    $array;   // list&lt;string&gt;, should be array{}</span>
+<a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a><span class="x">}</span>
+</code></pre></div>
+<p><strong>Fix:</strong> treat <code>array_key_first($a) !== null</code> (and <code>array_key_last()</code>, either
+operand order, also through an assignment) like <code>$a !== []</code>. <code>// SKIP</code> lines in
+<code>tests/phpstan_nsrt/bug-13546.php</code>.</p>
+<h3 id="b784-comparing-a-shape-entry-with-true-does-not-pick-the-union-member">B784. Comparing a shape entry with <code>=== true</code> does not pick the union member<a class="headerlink" href="#b784-comparing-a-shape-entry-with-true-does-not-pick-the-union-member" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Medium · Complexity: Low</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="x">/** @return array{success: false, reason: string}|array{success: true, id: int} */</span>
+<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a><span class="x">function r(): array {}</span>
+<a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a><span class="x">$ret = r();</span>
+<a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a><span class="x">if ($ret['success'] === true) {</span>
+<a id="__codelineno-15-5" name="__codelineno-15-5" href="#__codelineno-15-5"></a><span class="x">    $ret;   // both shapes, should be array{success: true, id: int}</span>
+<a id="__codelineno-15-6" name="__codelineno-15-6" href="#__codelineno-15-6"></a><span class="x">}</span>
+</code></pre></div>
+<p>Tagged unions keyed on a literal string or int narrow already. A <code>true</code> or
+<code>false</code> entry does not, so the <code>id</code> key is reported as possibly missing.</p>
+<p><strong>Fix:</strong> let the comparison narrowing that picks union members by a literal
+entry accept the bool literals. <code>// SKIP</code> lines in
+<code>tests/phpstan_nsrt/bug-6728.php</code>.</p>
+<h3 id="b785-comparing-an-array-with-array_filter-of-itself-narrows-nothing">B785. Comparing an array with <code>array_filter()</code> of itself narrows nothing<a class="headerlink" href="#b785-comparing-an-array-with-array_filter-of-itself-narrows-nothing" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Complexity: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="x">if (is_array($c) &amp;&amp; $c === array_filter($c, 'is_string', ARRAY_FILTER_USE_KEY)) {</span>
+<a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a><span class="x">    $c;     // array, should be array&lt;string, mixed&gt;</span>
+<a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a><span class="x">}</span>
+<a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a><span class="x">$args = [$one, $two];                       // array{string, string}</span>
+<a id="__codelineno-16-5" name="__codelineno-16-5" href="#__codelineno-16-5"></a><span class="x">assert(array_filter($args) === $args);</span>
+<a id="__codelineno-16-6" name="__codelineno-16-6" href="#__codelineno-16-6"></a><span class="x">$args;      // array{string, string}, should be array{non-falsy-string, non-falsy-string}</span>
+</code></pre></div>
+<p><strong>Fix:</strong> when an identity comparison has a side whose type is a narrowing of
+the other variable, narrow the variable to it. <code>// SKIP</code> lines in
+<code>tests/phpstan_nsrt/bug-6329.php</code> and <code>bug-8373.php</code>.</p>
+<h3 id="b786-in_array-with-enum-cases-does-not-narrow-and-a-negated-one-keeps-its-needle-in-the-haystack">B786. <code>in_array()</code> with enum cases does not narrow, and a negated one keeps its needle in the haystack<a class="headerlink" href="#b786-in_array-with-enum-cases-does-not-narrow-and-a-negated-one-keeps-its-needle-in-the-haystack" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Complexity: Low</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a><span class="x">function f(mixed $v, array $haystack): void {</span>
+<a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a><span class="x">    if (in_array($v, Suit::cases())) {</span>
+<a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a><span class="x">        $v;            // mixed, should be Suit::A|Suit::B</span>
+<a id="__codelineno-17-4" name="__codelineno-17-4" href="#__codelineno-17-4"></a><span class="x">    }</span>
+<a id="__codelineno-17-5" name="__codelineno-17-5" href="#__codelineno-17-5"></a><span class="x">    /** @var array&lt;Suit|int&gt; $haystack */</span>
+<a id="__codelineno-17-6" name="__codelineno-17-6" href="#__codelineno-17-6"></a><span class="x">    if (!in_array(Suit::A, $haystack)) {</span>
+<a id="__codelineno-17-7" name="__codelineno-17-7" href="#__codelineno-17-7"></a><span class="x">        $haystack;     // array&lt;Suit|int&gt;, should be array&lt;Suit::B|int&gt;</span>
+<a id="__codelineno-17-8" name="__codelineno-17-8" href="#__codelineno-17-8"></a><span class="x">    }</span>
+<a id="__codelineno-17-9" name="__codelineno-17-9" href="#__codelineno-17-9"></a><span class="x">}</span>
+<a id="__codelineno-17-10" name="__codelineno-17-10" href="#__codelineno-17-10"></a><span class="x">/** @param array{string, string|null} $data */</span>
+<a id="__codelineno-17-11" name="__codelineno-17-11" href="#__codelineno-17-11"></a><span class="x">function g(array $data): void {</span>
+<a id="__codelineno-17-12" name="__codelineno-17-12" href="#__codelineno-17-12"></a><span class="x">    if (in_array(null, $data, true)) { throw new Exception(); }</span>
+<a id="__codelineno-17-13" name="__codelineno-17-13" href="#__codelineno-17-13"></a><span class="x">    $data;             // array{string, ?string}, should be array{string, string}</span>
+<a id="__codelineno-17-14" name="__codelineno-17-14" href="#__codelineno-17-14"></a><span class="x">}</span>
+</code></pre></div>
+<p><strong>Fix:</strong> read <code>Enum::cases()</code> as the union of its cases when narrowing a
+needle, and remove a single-value needle (an enum case, <code>null</code>, any literal)
+from the haystack's element type in the negated strict branch. <code>// SKIP</code>
+lines in <code>tests/phpstan_nsrt/in-array-enum.php</code> and <code>bug-7153.php</code>.</p>
+<h3 id="b787-a-strlen-comparison-does-not-narrow-a-string-to">B787. A <code>strlen()</code> comparison does not narrow a string to <code>''</code><a class="headerlink" href="#b787-a-strlen-comparison-does-not-narrow-a-string-to" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Complexity: Low</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a><span class="x">if (0 &lt; strlen($s)) { return; }</span>
+<a id="__codelineno-18-2" name="__codelineno-18-2" href="#__codelineno-18-2"></a><span class="x">$s;   // string, should be ''</span>
+</code></pre></div>
+<p>The non-empty branch narrows; the branch where the length must be zero does
+not.</p>
+<p><strong>Fix:</strong> narrow to <code>''</code> in the branch where the comparison rules out every
+length above zero. <code>// SKIP</code> line in <code>tests/phpstan_nsrt/non-empty-string.php</code>.</p>
+<h3 id="b796-a-narrowed-call-result-survives-a-by-reference-call-that-can-change-it">B796. A narrowed call result survives a by-reference call that can change it<a class="headerlink" href="#b796-a-narrowed-call-result-survives-a-by-reference-call-that-can-change-it" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a><span class="x">if (false === openssl_error_string()) {</span>
+<a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a><span class="x">    openssl_sign('1', $signature, '');</span>
+<a id="__codelineno-19-3" name="__codelineno-19-3" href="#__codelineno-19-3"></a><span class="x">    openssl_error_string();   // false, should be string|false</span>
+<a id="__codelineno-19-4" name="__codelineno-19-4" href="#__codelineno-19-4"></a><span class="x">}</span>
+</code></pre></div>
+<p>A condition on a call's result is remembered under the call's text, and a
+later call to an impure function is meant to forget it. <code>openssl_sign()</code>
+writes through a reference and queues an error, yet the remembered <code>false</code>
+is still read back after it.</p>
+<p><strong>Fix:</strong> treat a call to a function with by-reference parameters (and any
+other impure builtin) as forgetting remembered call results, the way an
+impure method call does. <code>// SKIP</code> line in <code>tests/phpstan_nsrt/bug-7106.php</code>.</p>
+<h3 id="b798-a-key-a-list-is-known-to-have-does-not-make-the-keys-below-it-required">B798. A key a list is known to have does not make the keys below it required<a class="headerlink" href="#b798-a-key-a-list-is-known-to-have-does-not-make-the-keys-below-it-required" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a><span class="x">/** @param list{0?: string, 1?: string, 2?: string} $l */</span>
+<a id="__codelineno-20-2" name="__codelineno-20-2" href="#__codelineno-20-2"></a><span class="x">function f(array $l): void {</span>
+<a id="__codelineno-20-3" name="__codelineno-20-3" href="#__codelineno-20-3"></a><span class="x">    if (array_key_exists(2, $l)) {</span>
+<a id="__codelineno-20-4" name="__codelineno-20-4" href="#__codelineno-20-4"></a><span class="x">        $l;   // array{0?: string, 1?: string, 2: string}, should be array{string, string, string}</span>
+<a id="__codelineno-20-5" name="__codelineno-20-5" href="#__codelineno-20-5"></a><span class="x">        if (!array_key_exists(1, $l)) {</span>
+<a id="__codelineno-20-6" name="__codelineno-20-6" href="#__codelineno-20-6"></a><span class="x">            $l;   // array{0?: string, 2: string}, should be never</span>
+<a id="__codelineno-20-7" name="__codelineno-20-7" href="#__codelineno-20-7"></a><span class="x">        }</span>
+<a id="__codelineno-20-8" name="__codelineno-20-8" href="#__codelineno-20-8"></a><span class="x">    }</span>
+<a id="__codelineno-20-9" name="__codelineno-20-9" href="#__codelineno-20-9"></a><span class="x">}</span>
+</code></pre></div>
+<p>A list's keys run from <code>0</code> without gaps, so proving key <code>n</code> exists proves
+every key below it does too. The narrowing marks only the key it tested as
+required, and in doing so stops treating the shape as a list.</p>
+<p><strong>Fix:</strong> when a key check on a list shape proves an index set, mark every
+lower index required as well and keep the shape a list. <code>// SKIP</code> lines in
+<code>tests/phpstan_nsrt/bug-14177.php</code>.</p>
 <h2 id="array-types">Array types<a class="headerlink" href="#array-types" title="Permanent link">&para;</a></h2>
-<p>No outstanding items.</p>
+<h3 id="b766-conditional-appends-forget-which-value-sits-at-which-offset">B766. Conditional appends forget which value sits at which offset<a class="headerlink" href="#b766-conditional-appends-forget-which-value-sits-at-which-offset" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Complexity: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a><span class="x">$x = [];</span>
+<a id="__codelineno-21-2" name="__codelineno-21-2" href="#__codelineno-21-2"></a><span class="x">if (rand(0, 1)) { $x[] = 'ab'; }</span>
+<a id="__codelineno-21-3" name="__codelineno-21-3" href="#__codelineno-21-3"></a><span class="x">if (rand(0, 1)) { $x[] = 'xy'; }</span>
+<a id="__codelineno-21-4" name="__codelineno-21-4" href="#__codelineno-21-4"></a><span class="x">// array{}|array{'ab'|'xy'}|array{'ab'|'xy', 1: 'xy'}</span>
+<a id="__codelineno-21-5" name="__codelineno-21-5" href="#__codelineno-21-5"></a><span class="x">// should be array{}|array{'xy'}|array{0: 'ab', 1?: 'xy'}</span>
+</code></pre></div>
+<p>Joining the two branches of each <code>if</code> merges the shapes entry by entry, so
+the first offset takes both values even in the two-entry shape, where it can
+only hold <code>'ab'</code>.</p>
+<p>The same join turns <code>rand(0, 1) ? ['b' =&gt; 1] : ['c' =&gt; 2]</code> into
+<code>array{b?: 1, c?: 2}</code>, which also allows an empty array and one holding
+both keys.</p>
+<p><strong>Fix:</strong> keep the shapes from the two branches apart when they differ in
+length or keys, as PHPStan's constant-array builder does. <code>// SKIP</code> lines in
+<code>tests/phpstan_nsrt/narrow-tagged-union.php</code>,
+<code>array-merge-const-non-const.php</code> and <code>array-replace-const-non-const.php</code>.</p>
+<h3 id="b767-a-value-written-into-an-array-inside-a-loop-loses-its-literals">B767. A value written into an array inside a loop loses its literals<a class="headerlink" href="#b767-a-value-written-into-an-array-inside-a-loop-loses-its-literals" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Complexity: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-22-1" name="__codelineno-22-1" href="#__codelineno-22-1"></a><span class="x">$ints = [];</span>
+<a id="__codelineno-22-2" name="__codelineno-22-2" href="#__codelineno-22-2"></a><span class="x">foreach ($xs as $x) { $ints[] = rand(0, 1) ? 1 : 2; }</span>
+<a id="__codelineno-22-3" name="__codelineno-22-3" href="#__codelineno-22-3"></a><span class="x">// list&lt;int&gt;, should be list&lt;1|2&gt;</span>
+</code></pre></div>
+<p><code>loop_written_value</code> widens every non-constant value written into an array
+in a loop body to its base type, so that a value that grows on each pass
+(<code>$s .= 'x'</code>) cannot keep the walk from settling. A literal union that is
+the same on every pass loses its literals too, including one that reads
+nothing the loop changes.</p>
+<p><strong>Fix:</strong> widen only what the loop's own fixed-point walk shows to grow
+between passes, as <code>widen_grown_int_locals</code> does for integers. <code>// SKIP</code>
+lines in <code>tests/phpstan_nsrt/foreach-loop-variables.php</code>.</p>
+<h3 id="b768-removing-an-end-entry-from-a-shape-with-optional-keys-gives-the-generic-array">B768. Removing an end entry from a shape with optional keys gives the generic array<a class="headerlink" href="#b768-removing-an-end-entry-from-a-shape-with-optional-keys-gives-the-generic-array" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-23-1" name="__codelineno-23-1" href="#__codelineno-23-1"></a><span class="x">/** @var array{a: 0, b: 1, c?: 2} $arr */</span>
+<a id="__codelineno-23-2" name="__codelineno-23-2" href="#__codelineno-23-2"></a><span class="x">array_pop($arr);</span>
+<a id="__codelineno-23-3" name="__codelineno-23-3" href="#__codelineno-23-3"></a><span class="x">$arr;   // array&lt;string, 0|1|2&gt;, should be array{a: 0, b?: 1}</span>
+</code></pre></div>
+<p><code>array_pop()</code> and <code>array_shift()</code> rebuild the shape when every entry is
+required, but fall back to <code>after_unknown_removal</code> once one is optional,
+though which entries can remain is still known.</p>
+<p><strong>Fix:</strong> when an optional entry sits at the removed end, take the union of
+the shapes for each entry that may be the one removed. <code>// SKIP</code> lines in
+<code>tests/phpstan_nsrt/array-pop.php</code> and <code>array-shift.php</code>.</p>
+<h3 id="b788-writing-below-a-mixed-element-replaces-every-elements-type">B788. Writing below a <code>mixed</code> element replaces every element's type<a class="headerlink" href="#b788-writing-below-a-mixed-element-replaces-every-elements-type" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-24-1" name="__codelineno-24-1" href="#__codelineno-24-1"></a><span class="x">/** @param array&lt;mixed&gt; $data */</span>
+<a id="__codelineno-24-2" name="__codelineno-24-2" href="#__codelineno-24-2"></a><span class="x">function f(array $data): void {</span>
+<a id="__codelineno-24-3" name="__codelineno-24-3" href="#__codelineno-24-3"></a><span class="x">    foreach ($data as $k =&gt; $v) {</span>
+<a id="__codelineno-24-4" name="__codelineno-24-4" href="#__codelineno-24-4"></a><span class="x">        $data[$k]['a'] = true;</span>
+<a id="__codelineno-24-5" name="__codelineno-24-5" href="#__codelineno-24-5"></a><span class="x">        $data;   // array&lt;array{a: true}&gt;, should be non-empty-array&lt;mixed&gt;</span>
+<a id="__codelineno-24-6" name="__codelineno-24-6" href="#__codelineno-24-6"></a><span class="x">    }</span>
+<a id="__codelineno-24-7" name="__codelineno-24-7" href="#__codelineno-24-7"></a><span class="x">}</span>
+</code></pre></div>
+<p>The write sets one element, which was <code>mixed</code> and may hold other keys, yet
+the array's element type becomes the written shape for every element.</p>
+<p><strong>Fix:</strong> join the written element with the existing element type, and keep
+<code>mixed</code> when the element was <code>mixed</code>. <code>// SKIP</code> line in
+<code>tests/phpstan_nsrt/bug-13270a.php</code>.</p>
+<h3 id="b789-a-nested-write-under-a-dynamic-key-inside-a-loop-is-lost-after-the-loop">B789. A nested write under a dynamic key inside a loop is lost after the loop<a class="headerlink" href="#b789-a-nested-write-under-a-dynamic-key-inside-a-loop-is-lost-after-the-loop" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Medium · Complexity: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-25-1" name="__codelineno-25-1" href="#__codelineno-25-1"></a><span class="x">$files[$ns] = [];</span>
+<a id="__codelineno-25-2" name="__codelineno-25-2" href="#__codelineno-25-2"></a><span class="x">foreach ($helpers as $helper) {</span>
+<a id="__codelineno-25-3" name="__codelineno-25-3" href="#__codelineno-25-3"></a><span class="x">    $files[$ns][$helper['name']] = $helper;</span>
+<a id="__codelineno-25-4" name="__codelineno-25-4" href="#__codelineno-25-4"></a><span class="x">}</span>
+<a id="__codelineno-25-5" name="__codelineno-25-5" href="#__codelineno-25-5"></a><span class="x">$files[$ns];   // array{}, should be array&lt;string, …&gt;</span>
+</code></pre></div>
+<p>The assignment before the loop survives, and the writes inside it are
+dropped, so the variable reads as always empty.</p>
+<p><strong>Fix:</strong> carry nested-dimension writes under a non-literal key out of the
+loop's fixed-point walk the way single-dimension writes are, so they also
+reach the loop head for the next pass. <code>// SKIP</code> lines in
+<code>tests/phpstan_nsrt/bug-13629.php</code> and <code>bug-10438.php</code>.</p>
+<h3 id="b794-an-append-after-unset-of-the-last-entry-reuses-its-index">B794. An append after <code>unset()</code> of the last entry reuses its index<a class="headerlink" href="#b794-an-append-after-unset-of-the-last-entry-reuses-its-index" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-26-1" name="__codelineno-26-1" href="#__codelineno-26-1"></a><span class="x">$a = [1, 2, 3];</span>
+<a id="__codelineno-26-2" name="__codelineno-26-2" href="#__codelineno-26-2"></a><span class="x">unset($a[2]);</span>
+<a id="__codelineno-26-3" name="__codelineno-26-3" href="#__codelineno-26-3"></a><span class="x">$a[] = 4;</span>
+<a id="__codelineno-26-4" name="__codelineno-26-4" href="#__codelineno-26-4"></a><span class="x">$a;   // array{1, 2, 4}, should be array{0: 1, 1: 2, 3: 4}</span>
+</code></pre></div>
+<p>PHP keeps an array's next free index when an entry is removed, so the
+append lands at <code>3</code>. The shape left by the <code>unset()</code> is positional and has
+forgotten that index.</p>
+<p><strong>Fix:</strong> have the shape remember the next free index once an <code>unset()</code> has
+removed the entry that set it, and let an append read it. <code>// SKIP</code> line in
+<code>tests/phpstan_nsrt/array-is-list-unset.php</code>.</p>
+<h3 id="b797-writing-the-offset-after-a-known-one-turns-a-list-into-an-array">B797. Writing the offset after a known one turns a list into an array<a class="headerlink" href="#b797-writing-the-offset-after-a-known-one-turns-a-list-into-an-array" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-27-1" name="__codelineno-27-1" href="#__codelineno-27-1"></a><span class="x">/** @param list&lt;int&gt; $list */</span>
+<a id="__codelineno-27-2" name="__codelineno-27-2" href="#__codelineno-27-2"></a><span class="x">function f(array $list): void {</span>
+<a id="__codelineno-27-3" name="__codelineno-27-3" href="#__codelineno-27-3"></a><span class="x">    if (isset($list[5])) {</span>
+<a id="__codelineno-27-4" name="__codelineno-27-4" href="#__codelineno-27-4"></a><span class="x">        $list[6] = 21;</span>
+<a id="__codelineno-27-5" name="__codelineno-27-5" href="#__codelineno-27-5"></a><span class="x">    }</span>
+<a id="__codelineno-27-6" name="__codelineno-27-6" href="#__codelineno-27-6"></a><span class="x">    $list;   // list&lt;int&gt;|non-empty-array&lt;int, int&gt;, should be list&lt;int&gt;</span>
+<a id="__codelineno-27-7" name="__codelineno-27-7" href="#__codelineno-27-7"></a><span class="x">}</span>
+</code></pre></div>
+<p>A write to an integer key a list may not have breaks its key order in
+general, but once the previous index is known to exist the write extends the
+list or overwrites an entry, and either way it stays a list.</p>
+<p><strong>Fix:</strong> keep a list a list when the written index is one past an index a
+condition proved set. <code>// SKIP</code> lines in <code>tests/phpstan_nsrt/list-type.php</code>.</p>
 <h2 id="laravel">Laravel<a class="headerlink" href="#laravel" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="blade">Blade<a class="headerlink" href="#blade" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="templates">Templates<a class="headerlink" href="#templates" title="Permanent link">&para;</a></h2>
-<p>No outstanding items.</p>
+<h3 id="b769-a-template-bound-that-names-another-template-leaks-that-templates-name">B769. A template bound that names another template leaks that template's name<a class="headerlink" href="#b769-a-template-bound-that-names-another-template-leaks-that-templates-name" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Medium · Complexity: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-28-1" name="__codelineno-28-1" href="#__codelineno-28-1"></a><span class="x">/**</span>
+<a id="__codelineno-28-2" name="__codelineno-28-2" href="#__codelineno-28-2"></a><span class="x"> * @template T</span>
+<a id="__codelineno-28-3" name="__codelineno-28-3" href="#__codelineno-28-3"></a><span class="x"> * @template U of SomeFoo&lt;T&gt;</span>
+<a id="__codelineno-28-4" name="__codelineno-28-4" href="#__codelineno-28-4"></a><span class="x"> * @param U $foo</span>
+<a id="__codelineno-28-5" name="__codelineno-28-5" href="#__codelineno-28-5"></a><span class="x"> * @return U</span>
+<a id="__codelineno-28-6" name="__codelineno-28-6" href="#__codelineno-28-6"></a><span class="x"> */</span>
+<a id="__codelineno-28-7" name="__codelineno-28-7" href="#__codelineno-28-7"></a><span class="x">function testSome($foo) {}</span>
+<a id="__codelineno-28-8" name="__codelineno-28-8" href="#__codelineno-28-8"></a>
+<a id="__codelineno-28-9" name="__codelineno-28-9" href="#__codelineno-28-9"></a><span class="x">testSome($someBar);                    // SomeFoo&lt;T&gt;, should be SomeFoo&lt;mixed&gt;</span>
+<a id="__codelineno-28-10" name="__codelineno-28-10" href="#__codelineno-28-10"></a>
+<a id="__codelineno-28-11" name="__codelineno-28-11" href="#__codelineno-28-11"></a><span class="x">/**</span>
+<a id="__codelineno-28-12" name="__codelineno-28-12" href="#__codelineno-28-12"></a><span class="x"> * @template T of SomeFoo&lt;U&gt;</span>
+<a id="__codelineno-28-13" name="__codelineno-28-13" href="#__codelineno-28-13"></a><span class="x"> * @template U</span>
+<a id="__codelineno-28-14" name="__codelineno-28-14" href="#__codelineno-28-14"></a><span class="x"> * @return T</span>
+<a id="__codelineno-28-15" name="__codelineno-28-15" href="#__codelineno-28-15"></a><span class="x"> */</span>
+<a id="__codelineno-28-16" name="__codelineno-28-16" href="#__codelineno-28-16"></a><span class="x">function unwrapGenericWithoutParam() {}</span>
+<a id="__codelineno-28-17" name="__codelineno-28-17" href="#__codelineno-28-17"></a><span class="x">unwrapGenericWithoutParam();           // SomeFoo&lt;U&gt;, should be SomeFoo&lt;mixed&gt;</span>
+</code></pre></div>
+<p>When <code>U</code> cannot be inferred from the argument it falls back to its bound,
+but the other template the bound names is left unsubstituted, so a raw
+template name reaches hover and completion.</p>
+<p><strong>Fix:</strong> resolve the fallback bounds of a call's templates together, each
+bound substituted with what the others resolved to (or their own bounds).
+<code>// SKIP</code> lines in <code>tests/phpstan_nsrt/nested-generic-types.php</code>.</p>
+<h3 id="b770-a-template-inferred-from-several-closure-parameters-takes-the-first-one">B770. A template inferred from several closure parameters takes the first one<a class="headerlink" href="#b770-a-template-inferred-from-several-closure-parameters-takes-the-first-one" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Complexity: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-29-1" name="__codelineno-29-1" href="#__codelineno-29-1"></a><span class="x">/**</span>
+<a id="__codelineno-29-2" name="__codelineno-29-2" href="#__codelineno-29-2"></a><span class="x"> * @template T as object</span>
+<a id="__codelineno-29-3" name="__codelineno-29-3" href="#__codelineno-29-3"></a><span class="x"> * @param \Closure(T, T): void $outmaker</span>
+<a id="__codelineno-29-4" name="__codelineno-29-4" href="#__codelineno-29-4"></a><span class="x"> * @return T</span>
+<a id="__codelineno-29-5" name="__codelineno-29-5" href="#__codelineno-29-5"></a><span class="x"> */</span>
+<a id="__codelineno-29-6" name="__codelineno-29-6" href="#__codelineno-29-6"></a><span class="x">function createProxy2(\Closure $outmaker): object {}</span>
+<a id="__codelineno-29-7" name="__codelineno-29-7" href="#__codelineno-29-7"></a>
+<a id="__codelineno-29-8" name="__codelineno-29-8" href="#__codelineno-29-8"></a><span class="x">createProxy2(function (A $a, B $o): void {});   // A, should be B (B extends A)</span>
+</code></pre></div>
+<p>A template in parameter positions is contravariant, so every position must
+accept the bound type and the narrowest one is the answer. The binding
+takes the first parameter it meets.</p>
+<p><strong>Fix:</strong> when a template is bound from more than one contravariant position,
+keep the most specific type. <code>// SKIP</code> line in <code>tests/phpstan_nsrt/bug-3158.php</code>.</p>
+<h3 id="b771-phpstan-self-out-skips-this-and-a-return-this-result">B771. <code>@phpstan-self-out</code> skips <code>$this</code> and a <code>@return $this</code> result<a class="headerlink" href="#b771-phpstan-self-out-skips-this-and-a-return-this-result" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Complexity: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-30-1" name="__codelineno-30-1" href="#__codelineno-30-1"></a><span class="x">/** @template T of object */</span>
+<a id="__codelineno-30-2" name="__codelineno-30-2" href="#__codelineno-30-2"></a><span class="x">class Foo {</span>
+<a id="__codelineno-30-3" name="__codelineno-30-3" href="#__codelineno-30-3"></a><span class="x">    /**</span>
+<a id="__codelineno-30-4" name="__codelineno-30-4" href="#__codelineno-30-4"></a><span class="x">     * @template U of object</span>
+<a id="__codelineno-30-5" name="__codelineno-30-5" href="#__codelineno-30-5"></a><span class="x">     * @param class-string&lt;U&gt; $class</span>
+<a id="__codelineno-30-6" name="__codelineno-30-6" href="#__codelineno-30-6"></a><span class="x">     * @return $this</span>
+<a id="__codelineno-30-7" name="__codelineno-30-7" href="#__codelineno-30-7"></a><span class="x">     * @phpstan-self-out static&lt;T&amp;U&gt;</span>
+<a id="__codelineno-30-8" name="__codelineno-30-8" href="#__codelineno-30-8"></a><span class="x">     */</span>
+<a id="__codelineno-30-9" name="__codelineno-30-9" href="#__codelineno-30-9"></a><span class="x">    public function add(string $class) { return $this; }</span>
+<a id="__codelineno-30-10" name="__codelineno-30-10" href="#__codelineno-30-10"></a><span class="x">}</span>
+<a id="__codelineno-30-11" name="__codelineno-30-11" href="#__codelineno-30-11"></a>
+<a id="__codelineno-30-12" name="__codelineno-30-12" href="#__codelineno-30-12"></a><span class="x">/** @param Bar&lt;A&gt; $bar */</span>
+<a id="__codelineno-30-13" name="__codelineno-30-13" href="#__codelineno-30-13"></a><span class="x">function f(Bar $bar): void {</span>
+<a id="__codelineno-30-14" name="__codelineno-30-14" href="#__codelineno-30-14"></a><span class="x">    $bar-&gt;add(B::class);    // Bar&lt;A&gt;, should be Bar&lt;A&amp;B&gt;</span>
+<a id="__codelineno-30-15" name="__codelineno-30-15" href="#__codelineno-30-15"></a><span class="x">    $bar;                   // Bar&lt;A&amp;B&gt;</span>
+<a id="__codelineno-30-16" name="__codelineno-30-16" href="#__codelineno-30-16"></a><span class="x">}</span>
+<a id="__codelineno-30-17" name="__codelineno-30-17" href="#__codelineno-30-17"></a><span class="x">// and inside Bar: $this-&gt;add(A::class); $this  → Bar, should be Bar&lt;A&amp;T&gt;</span>
+</code></pre></div>
+<p>The self-out type is applied to a variable receiver after the call, but not
+to the value the call returns when that is <code>$this</code>, nor to <code>$this</code> itself
+when the method is called on it inside the class.</p>
+<p><strong>Fix:</strong> apply the self-out type to <code>$this</code> in the class body, and give a
+<code>@return $this</code> call the receiver's post-call type. <code>// SKIP</code> lines in
+<code>tests/phpstan_nsrt/bug-12575.php</code>.</p>
+<h3 id="b772-callables-written-as-strings-and-arrays-lose-the-targets-signature">B772. Callables written as strings and arrays lose the target's signature<a class="headerlink" href="#b772-callables-written-as-strings-and-arrays-lose-the-targets-signature" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Complexity: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-31-1" name="__codelineno-31-1" href="#__codelineno-31-1"></a><span class="x">'strlen'(...);                                   // Closure(): int&lt;0, max&gt;, should be Closure(string): int&lt;0, max&gt;</span>
+<a id="__codelineno-31-2" name="__codelineno-31-2" href="#__codelineno-31-2"></a><span class="x">array_map([Enum::class, 'get'], ['test']);      // array, should be array{Enum}</span>
+<a id="__codelineno-31-3" name="__codelineno-31-3" href="#__codelineno-31-3"></a><span class="x">$g = \Closure::fromCallable([$this, 'doFoo']);   // doFoo is @template T, @param T, @return T</span>
+<a id="__codelineno-31-4" name="__codelineno-31-4" href="#__codelineno-31-4"></a><span class="x">$g(1);                                           // T, should be 1</span>
+</code></pre></div>
+<p><code>strlen(...)</code> and <code>$this-&gt;doFoo(...)</code> resolve to their targets, but the same
+targets named through a string or a <code>[class, method]</code> array keep only part
+of the signature: the parameters, the return type at the call site, or the
+template binding.</p>
+<p><strong>Fix:</strong> resolve a string or array callable to the function or method it
+names once, and hand that signature to first-class callable syntax,
+<code>Closure::fromCallable()</code> and callback-taking functions alike. <code>// SKIP</code> lines
+in <code>tests/phpstan_nsrt/first-class-callables.php</code> and <code>bug-4213.php</code>.</p>
+<h3 id="b790-a-template-bound-from-a-literal-is-generalized-by-the-wrong-rule">B790. A template bound from a literal is generalized by the wrong rule<a class="headerlink" href="#b790-a-template-bound-from-a-literal-is-generalized-by-the-wrong-rule" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-32-1" name="__codelineno-32-1" href="#__codelineno-32-1"></a><span class="x">/** @template T */ class Foo { /** @param T $p */ public function __construct($p) {} }</span>
+<a id="__codelineno-32-2" name="__codelineno-32-2" href="#__codelineno-32-2"></a><span class="x">/** @template-covariant T */ class FooCovariant { /** @param T $p */ public function __construct($p) {} }</span>
+<a id="__codelineno-32-3" name="__codelineno-32-3" href="#__codelineno-32-3"></a><span class="x">/** @template T @param T $p @return Foo&lt;T&gt; */ function test2($p) {}</span>
+<a id="__codelineno-32-4" name="__codelineno-32-4" href="#__codelineno-32-4"></a>
+<a id="__codelineno-32-5" name="__codelineno-32-5" href="#__codelineno-32-5"></a><span class="x">new Foo(1);            // Foo&lt;int&gt;, right</span>
+<a id="__codelineno-32-6" name="__codelineno-32-6" href="#__codelineno-32-6"></a><span class="x">test2(1);              // Foo&lt;1&gt;, should be Foo&lt;int&gt;</span>
+<a id="__codelineno-32-7" name="__codelineno-32-7" href="#__codelineno-32-7"></a><span class="x">new FooCovariant(1);   // FooCovariant&lt;int&gt;, should be FooCovariant&lt;1&gt;</span>
+</code></pre></div>
+<p>A literal bound to an invariant template inside a generic type is widened
+to its base type, and one bound to a covariant template is kept. <code>new</code>
+widens regardless of variance, and a function's generic return widens
+nothing.</p>
+<p><strong>Fix:</strong> apply one rule wherever a literal binds a template that ends up in
+a generic argument: widen for an invariant template, keep for a covariant
+one. <code>// SKIP</code> lines in <code>tests/phpstan_nsrt/generics-do-not-generalize.php</code>.</p>
+<h3 id="b791-an-inherited-phpstan-assert-on-a-template-leaves-the-variable-without-a-type">B791. An inherited <code>@phpstan-assert</code> on a template leaves the variable without a type<a class="headerlink" href="#b791-an-inherited-phpstan-assert-on-a-template-leaves-the-variable-without-a-type" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Medium · Complexity: Low-Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-33-1" name="__codelineno-33-1" href="#__codelineno-33-1"></a><span class="x">/** @template T */</span>
+<a id="__codelineno-33-2" name="__codelineno-33-2" href="#__codelineno-33-2"></a><span class="x">interface WrapperInterface {</span>
+<a id="__codelineno-33-3" name="__codelineno-33-3" href="#__codelineno-33-3"></a><span class="x">    /** @phpstan-assert T $param */</span>
+<a id="__codelineno-33-4" name="__codelineno-33-4" href="#__codelineno-33-4"></a><span class="x">    public function assert(mixed $param): void;</span>
+<a id="__codelineno-33-5" name="__codelineno-33-5" href="#__codelineno-33-5"></a><span class="x">}</span>
+<a id="__codelineno-33-6" name="__codelineno-33-6" href="#__codelineno-33-6"></a><span class="x">/** @implements WrapperInterface&lt;int&gt; */</span>
+<a id="__codelineno-33-7" name="__codelineno-33-7" href="#__codelineno-33-7"></a><span class="x">class IntWrapper implements WrapperInterface {</span>
+<a id="__codelineno-33-8" name="__codelineno-33-8" href="#__codelineno-33-8"></a><span class="x">    public function assert(mixed $param): void {}</span>
+<a id="__codelineno-33-9" name="__codelineno-33-9" href="#__codelineno-33-9"></a><span class="x">}</span>
+<a id="__codelineno-33-10" name="__codelineno-33-10" href="#__codelineno-33-10"></a>
+<a id="__codelineno-33-11" name="__codelineno-33-11" href="#__codelineno-33-11"></a><span class="x">$test-&gt;assert($val);</span>
+<a id="__codelineno-33-12" name="__codelineno-33-12" href="#__codelineno-33-12"></a><span class="x">$val;   // no type at all, should be int</span>
+</code></pre></div>
+<p><code>@phpstan-assert-if-true</code> inherited the same way narrows correctly, so the
+gap is in applying the unconditional tag after a statement call, where the
+template is not substituted and the narrowed type is lost entirely.</p>
+<p><strong>Fix:</strong> substitute the implementing class's template arguments into an
+inherited <code>@phpstan-assert</code> before applying it. <code>// SKIP</code> line in
+<code>tests/phpstan_nsrt/assert-inheritance.php</code>.</p>
 <h2 id="framework-names-in-strings">Framework names in strings<a class="headerlink" href="#framework-names-in-strings" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="name-resolution">Name resolution<a class="headerlink" href="#name-resolution" title="Permanent link">&para;</a></h2>
@@ -1704,7 +3125,97 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <h2 id="code-actions">Code actions<a class="headerlink" href="#code-actions" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
-<p>No outstanding items.</p>
+<h3 id="b792-a-static-property-read-through-object-has-no-type">B792. A static property read through <code>$object::</code> has no type<a class="headerlink" href="#b792-a-static-property-read-through-object-has-no-type" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Medium · Complexity: Low</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-34-1" name="__codelineno-34-1" href="#__codelineno-34-1"></a><span class="x">class Foo { /** @var string */ public static $s = ''; }</span>
+<a id="__codelineno-34-2" name="__codelineno-34-2" href="#__codelineno-34-2"></a><span class="x">function f(Foo $foo): void {</span>
+<a id="__codelineno-34-3" name="__codelineno-34-3" href="#__codelineno-34-3"></a><span class="x">    $foo::$s;   // no type, should be string (Foo::$s works)</span>
+<a id="__codelineno-34-4" name="__codelineno-34-4" href="#__codelineno-34-4"></a><span class="x">}</span>
+</code></pre></div>
+<p><strong>Fix:</strong> resolve the class of <code>$object::</code> from the variable's type, as
+<code>$object::method()</code> and <code>$object::CONST</code> do. <code>// SKIP</code> lines in
+<code>tests/phpstan_nsrt/isset-coalesce-empty-type.php</code>.</p>
+<h3 id="b793-and-on-literal-ints-are-not-folded">B793. <code>&lt;&lt;</code>, <code>&gt;&gt;</code> and <code>/</code> on literal ints are not folded<a class="headerlink" href="#b793-and-on-literal-ints-are-not-folded" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Complexity: Low</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-35-1" name="__codelineno-35-1" href="#__codelineno-35-1"></a><span class="x">/** @param 1|3.0|"5" $e */</span>
+<a id="__codelineno-35-2" name="__codelineno-35-2" href="#__codelineno-35-2"></a><span class="x">function f($e, int $x): void {</span>
+<a id="__codelineno-35-3" name="__codelineno-35-3" href="#__codelineno-35-3"></a><span class="x">    $e &lt;&lt; 1;      // int, should be 2|6|10</span>
+<a id="__codelineno-35-4" name="__codelineno-35-4" href="#__codelineno-35-4"></a><span class="x">    true &lt;&lt; 1;    // int, should be 2</span>
+<a id="__codelineno-35-5" name="__codelineno-35-5" href="#__codelineno-35-5"></a><span class="x">    15.9 &gt;&gt; 1;    // int, should be 7</span>
+<a id="__codelineno-35-6" name="__codelineno-35-6" href="#__codelineno-35-6"></a><span class="x">}</span>
+<a id="__codelineno-35-7" name="__codelineno-35-7" href="#__codelineno-35-7"></a><span class="x">/** @param 20|40|60 $x @param 2|4 $y */</span>
+<a id="__codelineno-35-8" name="__codelineno-35-8" href="#__codelineno-35-8"></a><span class="x">function g($x, $y) { $x / $y; }   // int|float, should be 5|10|15|20|30</span>
+</code></pre></div>
+<p><code>+</code>, <code>-</code>, <code>*</code> and the bitwise <code>&amp;</code>, <code>|</code>, <code>^</code> fold literal operands and literal
+unions; the shifts and division do not.</p>
+<p><strong>Fix:</strong> fold them over each pair of literal members, coercing operands the
+way PHP does, and fall back to the current type when a member is not a
+literal or the result is not exact. <code>// SKIP</code> lines in
+<code>tests/phpstan_nsrt/integer-range-types.php</code>.</p>
+<h3 id="b799-tcollection-on-a-native-collection-return-is-not-a-collection-of-t">B799. <code>T[]|Collection</code> on a native <code>Collection</code> return is not a collection of <code>T</code><a class="headerlink" href="#b799-tcollection-on-a-native-collection-return-is-not-a-collection-of-t" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low-Medium · Complexity: Low-Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-36-1" name="__codelineno-36-1" href="#__codelineno-36-1"></a><span class="x">interface Collection extends \Traversable {}</span>
+<a id="__codelineno-36-2" name="__codelineno-36-2" href="#__codelineno-36-2"></a><span class="x">class Bar {</span>
+<a id="__codelineno-36-3" name="__codelineno-36-3" href="#__codelineno-36-3"></a><span class="x">    /** @return static[]|Collection */</span>
+<a id="__codelineno-36-4" name="__codelineno-36-4" href="#__codelineno-36-4"></a><span class="x">    public function items(): Collection {}</span>
+<a id="__codelineno-36-5" name="__codelineno-36-5" href="#__codelineno-36-5"></a><span class="x">}</span>
+<a id="__codelineno-36-6" name="__codelineno-36-6" href="#__codelineno-36-6"></a><span class="x">function f(Bar $bar): void {</span>
+<a id="__codelineno-36-7" name="__codelineno-36-7" href="#__codelineno-36-7"></a><span class="x">    $bar-&gt;items();                     // Collection, should be iterable&lt;Bar&gt;&amp;Collection</span>
+<a id="__codelineno-36-8" name="__codelineno-36-8" href="#__codelineno-36-8"></a><span class="x">    foreach ($bar-&gt;items() as $item) {</span>
+<a id="__codelineno-36-9" name="__codelineno-36-9" href="#__codelineno-36-9"></a><span class="x">        $item;                         // mixed, should be Bar</span>
+<a id="__codelineno-36-10" name="__codelineno-36-10" href="#__codelineno-36-10"></a><span class="x">    }</span>
+<a id="__codelineno-36-11" name="__codelineno-36-11" href="#__codelineno-36-11"></a><span class="x">}</span>
+</code></pre></div>
+<p>Before generics, <code>Foo[]|Collection</code> was the usual way to say "a collection of
+<code>Foo</code>", and PHPStan still reads it that way when the other member is a
+<code>Traversable</code> class: the union becomes the class intersected with
+<code>iterable&lt;Foo&gt;</code>. PHPantom drops the array member because the native return
+type rules it out, and with it the only thing that said what the collection
+holds.</p>
+<p><strong>Fix:</strong> when a docblock union pairs an array type with a <code>Traversable</code>
+class, read it as that class intersected with an iterable of the array's
+value type before the native type is applied. <code>// SKIP</code> lines in
+<code>tests/phpstan_nsrt/methodPhpDocs-trait.php</code> and
+<code>methodPhpDocs-recursiveTrait.php</code>.</p>
+<h3 id="b800-inside-a-trait-self-static-parent-and-this-do-not-stand-for-the-class-using-it">B800. Inside a trait, <code>self</code>, <code>static</code>, <code>parent::</code> and <code>$this</code> do not stand for the class using it<a class="headerlink" href="#b800-inside-a-trait-self-static-parent-and-this-do-not-stand-for-the-class-using-it" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Medium · Complexity: Medium-High</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-37-1" name="__codelineno-37-1" href="#__codelineno-37-1"></a><span class="x">class FooParent {</span>
+<a id="__codelineno-37-2" name="__codelineno-37-2" href="#__codelineno-37-2"></a><span class="x">    /** @return static */</span>
+<a id="__codelineno-37-3" name="__codelineno-37-3" href="#__codelineno-37-3"></a><span class="x">    public function doLorem() {}</span>
+<a id="__codelineno-37-4" name="__codelineno-37-4" href="#__codelineno-37-4"></a><span class="x">    private function helper(): array {}</span>
+<a id="__codelineno-37-5" name="__codelineno-37-5" href="#__codelineno-37-5"></a><span class="x">}</span>
+<a id="__codelineno-37-6" name="__codelineno-37-6" href="#__codelineno-37-6"></a><span class="x">class FooWithTrait extends FooParent {</span>
+<a id="__codelineno-37-7" name="__codelineno-37-7" href="#__codelineno-37-7"></a><span class="x">    use FooTrait;</span>
+<a id="__codelineno-37-8" name="__codelineno-37-8" href="#__codelineno-37-8"></a><span class="x">    private function helper() {}</span>
+<a id="__codelineno-37-9" name="__codelineno-37-9" href="#__codelineno-37-9"></a><span class="x">}</span>
+<a id="__codelineno-37-10" name="__codelineno-37-10" href="#__codelineno-37-10"></a><span class="x">trait FooTrait {</span>
+<a id="__codelineno-37-11" name="__codelineno-37-11" href="#__codelineno-37-11"></a><span class="x">    /** @param self $other */</span>
+<a id="__codelineno-37-12" name="__codelineno-37-12" href="#__codelineno-37-12"></a><span class="x">    public function doFoo($other): void {</span>
+<a id="__codelineno-37-13" name="__codelineno-37-13" href="#__codelineno-37-13"></a><span class="x">        $other;              // FooTrait&amp;FooWithTrait&amp;FooParent, should be FooWithTrait</span>
+<a id="__codelineno-37-14" name="__codelineno-37-14" href="#__codelineno-37-14"></a><span class="x">        parent::doLorem();   // no type, should be static(FooWithTrait)</span>
+<a id="__codelineno-37-15" name="__codelineno-37-15" href="#__codelineno-37-15"></a><span class="x">        static::doLorem();   // no type</span>
+<a id="__codelineno-37-16" name="__codelineno-37-16" href="#__codelineno-37-16"></a><span class="x">        $this-&gt;helper();     // FooParent's private `array`, should be FooWithTrait's own</span>
+<a id="__codelineno-37-17" name="__codelineno-37-17" href="#__codelineno-37-17"></a><span class="x">    }</span>
+<a id="__codelineno-37-18" name="__codelineno-37-18" href="#__codelineno-37-18"></a><span class="x">}</span>
+</code></pre></div>
+<p>PHP flattens a trait into each class that uses it, so inside its methods
+<code>self</code>, <code>static</code>, <code>parent</code> and <code>$this</code> all refer to that class. PHPStan
+analyses a trait body once per using class. PHPantom analyses it on its own,
+standing <code>$this</code> in for the intersection of the trait with everything its
+users share (<code>type_engine/trait_context.rs</code>); <code>self</code> gets the same
+intersection, <code>parent::</code> and <code>static::</code> get nothing, and a member lookup on
+the intersection can land on an ancestor's private method. A trait method's
+<code>{@inheritdoc}</code> likewise never sees the using class's interface (PHPStan's
+<code>inheritdoc-from-trait.php</code> in <code>nsrt/</code>, unported).</p>
+<p><strong>Fix:</strong> when a trait has a single using class (or a <code>@phpstan-require-extends</code>
+bound), resolve <code>self</code>, <code>static</code>, <code>parent</code> and <code>$this</code> in its body against
+that class, and look its members up with that class's visibility. With
+several users, keep the shared-ancestor intersection for <code>$this</code> but resolve
+<code>parent::</code> against the users' common parent. Fix C13 in
+<a href="../completion/">completion.md</a> alongside, since <code>self::</code>/<code>static::</code>
+completion goes through the same path. <code>// SKIP</code> lines in
+<code>tests/phpstan_nsrt/methodPhpDocs-trait.php</code> and
+<code>methodPhpDocs-recursiveTrait.php</code>.</p>
 
 
 
