@@ -192,10 +192,15 @@ impl Backend {
                     let name = atom_bytes(func.name.value);
                     let name_offset = func.name.span.start.offset;
 
-                    let type_assertions = info
+                    let mut type_assertions = info
                         .as_ref()
                         .map(docblock::extract_type_assertions_from_info)
                         .unwrap_or_default();
+                    docblock::add_conditional_return_assertions(
+                        conditional_return.as_ref(),
+                        &parameters,
+                        &mut type_assertions,
+                    );
 
                     let depr_info = merge_deprecation_info(
                         info.as_ref()

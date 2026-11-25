@@ -135,6 +135,17 @@ pub(super) fn extract_method<'a>(
     };
 
     let info = method_docblock_info.as_ref();
+    // `@phpstan-assert` / `@psalm-assert` tags, so that the narrowing
+    // engine can apply type guards from static method calls like
+    // `Assert::instanceOf($v, Foo::class)`.
+    let mut type_assertions = info
+        .map(docblock::extract_type_assertions_from_info)
+        .unwrap_or_default();
+    docblock::add_conditional_return_assertions(
+        conditional_return.as_ref(),
+        &parameters,
+        &mut type_assertions,
+    );
     Some(MethodInfo {
         name: atom_bytes(method.name.value),
         name_offset: method.name.span.start.offset,
@@ -182,12 +193,7 @@ pub(super) fn extract_method<'a>(
             template_param_bounds: method_template_param_bounds,
             template_bindings: method_template_bindings,
             template_param_defaults: method_template_param_defaults,
-            // `@phpstan-assert` / `@psalm-assert` tags, so that the
-            // narrowing engine can apply type guards from static method
-            // calls like `Assert::instanceOf($v, Foo::class)`.
-            type_assertions: info
-                .map(docblock::extract_type_assertions_from_info)
-                .unwrap_or_default(),
+            type_assertions,
             // `@throws` tags, so that cross-file throws propagation can
             // look up which exceptions a method declares without needing
             // access to the source text.

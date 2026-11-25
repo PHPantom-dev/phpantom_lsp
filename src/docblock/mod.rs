@@ -52,8 +52,8 @@ pub use tag_kind::{TagKind, TagVendor};
 // Core tags
 pub(crate) use tags::merge_param_docblock_into_parameters;
 pub use tags::{
-    declares_impure, declares_pure, docblocks_with_global_tags, extract_all_param_tags,
-    extract_all_param_tags_from_info, extract_deprecation_message,
+    add_conditional_return_assertions, declares_impure, declares_pure, docblocks_with_global_tags,
+    extract_all_param_tags, extract_all_param_tags_from_info, extract_deprecation_message,
     extract_deprecation_message_from_info, extract_deprecation_with_see,
     extract_deprecation_with_see_from_info, extract_doc_readonly_from_info, extract_global_tags,
     extract_if_this_is_type, extract_if_this_is_type_from_info, extract_link_urls,

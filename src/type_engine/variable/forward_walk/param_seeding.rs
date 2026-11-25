@@ -7,9 +7,9 @@ use super::*;
 
 use mago_span::HasSpan;
 
-use crate::atom::bytes_to_str;
+use crate::atom::{Atom, atom, bytes_to_str};
 use crate::parser::extract_hint_type;
-use crate::php_type::PhpType;
+use crate::php_type::{PhpType, TypeKind};
 use crate::types::{ClassInfo, MethodInfo, ResolvedType};
 
 /// What seeding a function-like body needs to know about its declaration.
@@ -241,6 +241,82 @@ pub(crate) fn seed_params<'b>(
             scope.set_empty(&pname);
         }
     }
+
+    // Only `$this` and the parameters are in scope yet, and a conditional
+    // `@param` is rare, so the names are only collected when there is one.
+    let conditional: Vec<Atom> = scope
+        .locals
+        .variables()
+        .filter(|(_, types)| {
+            matches!(types.as_slice(), [only] if matches!(only.type_string.kind(), TypeKind::Conditional(_)))
+        })
+        .map(|(name, _)| *name)
+        .collect();
+    for name in conditional {
+        seed_conditional_param(name.as_str(), scope, ctx);
+    }
+}
+
+/// Resolve a parameter whose `@param` type is conditional on another
+/// parameter, and record what checking that parameter proves about it.
+///
+/// `@param ($k is 'a' ? int : string) $v` makes `$v` an `int` once `$k`
+/// is shown to be `'a'`, and a `string` once it is shown not to be.  The
+/// two outcomes are recorded as proofs held by `$k`, so whichever branch
+/// narrows `$k` narrows `$v` with it.  Until then `$v` is whatever the
+/// condition answers for `$k`'s declared type: one branch when that type
+/// settles it, both otherwise.
+fn seed_conditional_param(name: &str, scope: &mut ScopeState, ctx: &ForwardWalkCtx<'_>) {
+    let [declared] = scope.get(name) else {
+        return;
+    };
+    let TypeKind::Conditional(cond) = declared.type_string.kind() else {
+        return;
+    };
+    let cond = cond.clone();
+    let holder = cond.param.as_str();
+    if holder == name || holder == "$this" || scope.get(holder).is_empty() {
+        return;
+    }
+    let (when_holds, when_fails) = if cond.negated {
+        (&cond.else_type, &cond.then_type)
+    } else {
+        (&cond.then_type, &cond.else_type)
+    };
+    let holder_types = scope.get(holder);
+    let settled = match holder_types {
+        [only] => crate::type_engine::type_ops::conditional::condition_holds_for_type(
+            &only.type_string,
+            &cond.condition,
+            ctx.file.class_loader,
+        ),
+        _ => None,
+    };
+    let seeded = match settled {
+        Some(true) => when_holds.clone(),
+        Some(false) => when_fails.clone(),
+        None => PhpType::union(vec![when_holds.clone(), when_fails.clone()]).simplified(),
+    };
+    scope.seed(name, ctx.resolved_types_for(seeded));
+    if settled.is_some() {
+        return;
+    }
+    let condition = vec![ResolvedType::from_type_string(cond.condition.clone())];
+    let key = atom(name);
+    let proofs = [
+        (ProofTrigger::Within(condition.clone()), when_holds),
+        (ProofTrigger::Outside(condition), when_fails),
+    ]
+    .into_iter()
+    .map(|(trigger, ty)| ImpliedNarrowing {
+        trigger,
+        key,
+        types: ctx.resolved_types_for(ty.clone()),
+    })
+    .collect::<Vec<_>>();
+    scope
+        .implied_narrowings
+        .update(atom(holder), |held| held.extend(proofs));
 }
 
 /// The type a Drupal route's controller receives for the parameter `name`

@@ -421,6 +421,19 @@ impl PhpType {
                 _ => {}
             }
         }
+
+        // ── Bare array keyword <: generic array-like ────────────────
+        // `list` is `list<mixed>`, which a declared `array<mixed>` holds.
+        if let TypeKind::Named(sub) = self.kind()
+            && is_array_like_name(sub)
+            && !sub.eq_ignore_ascii_case("iterable")
+            && let TypeKind::Generic(sup) = supertype.kind()
+            && is_array_like_name(&sup.name)
+        {
+            return Some(
+                PhpType::generic(sub.as_str(), vec![PhpType::mixed()]).is_subtype_of(supertype),
+            );
+        }
         None
     }
 

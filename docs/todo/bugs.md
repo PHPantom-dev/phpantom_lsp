@@ -29,24 +29,7 @@ No outstanding items.
 
 ## Conditional return types
 
-### B816. A conditional return or `@param` type is not used to narrow the argument it tests
-
-**Impact: Low · Complexity: Medium**
-
-```php
-/** @return ($value is list<string> ? true : false) */
-function isStringList(array $value): bool {}
-if (isStringList($a)) { $a; }   // array<mixed>, should be list<string>
-```
-
-PHPStan treats such a conditional return as an implicit `@phpstan-assert-if-true`; PHPantom only evaluates it for the return value.
-
-It also shows as:
-
-- A conditional return type on a parameter is not used to narrow that argument
-- A conditional `@param` type is not narrowed by checks on the parameter it names
-
-**Cases** (PHPStan `nsrt/`, 15 assertions): `bug-7915.php` (6), `bug-9734.php` (5), `conditional-types-inference.php` (4).
+No outstanding items.
 
 ## Standard-library return types
 
@@ -575,12 +558,13 @@ filter callbacks alike, and to the code after an always-throwing
 `$x ??= throw …` on a value that is always `null` and to an ordering against
 `null` that never holds (`$i < null`). The `// SKIP` lines in
 `tests/phpstan_nsrt/enum-in-array.php`, `match-expr.php`, `bug-8559.php`,
-`bug-14369.php`, `bug-7913.php`, `comparison-operators.php` and
+`bug-14369.php`, `bug-7913.php`, `comparison-operators.php`,
+`conditional-types-inference.php`, `bug-9734.php` and
 `strlen-int-range.php` are the cases; the unported
 `array-filter-arrow-functions.php` and `array-filter-callables.php` in
 PHPStan's `nsrt/` have the filter ones.
 
-**Upstream cases** (PHPStan `nsrt/`, 72 assertions): `math.php` (28), `conditional-types-inference.php` (5), `array-filter-callables.php` (3), `bug-4099-php8.php` (3), `array-is-list-type-specifying.php` (3), `functions.php` (3), `array-shape-list-optional.php` (2), `assert-docblock.php` (2), `bug-12376.php` (2), `bug-13481.php` (2), `count-type.php` (2), `bug-4434.php` (2), 14 more.
+**Upstream cases** (PHPStan `nsrt/`, 67 assertions): `math.php` (28), `array-filter-callables.php` (3), `bug-4099-php8.php` (3), `array-is-list-type-specifying.php` (3), `functions.php` (3), `array-shape-list-optional.php` (2), `assert-docblock.php` (2), `bug-12376.php` (2), `bug-13481.php` (2), `count-type.php` (2), `bug-4434.php` (2), 14 more.
 
 ### B838. Loops nested more than six deep are not walked, so nothing inside them has a type
 
@@ -1188,7 +1172,7 @@ if (array_is_list($a)) { $a; }   // array<mixed>, should be list<mixed>
 
 No type-specifying rule for `array_is_list()`; a `mixed` argument even loses its type in the true branch.
 
-**Cases** (PHPStan `nsrt/`, 6 assertions): `bug-9734.php` (3), `array-is-list-type-specifying.php` (3).
+**Cases:** the `// SKIP` lines in `tests/phpstan_nsrt/bug-9734.php`, and `array-is-list-type-specifying.php` (3) in PHPStan's `nsrt/`.
 
 ### B854. The negation of an array-element-type assertion narrows `mixed[]` to `never`
 

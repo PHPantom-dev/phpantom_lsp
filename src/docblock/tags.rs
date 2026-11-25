@@ -595,6 +595,53 @@ pub fn extract_type_assertions_from_info(info: &DocblockInfo) -> Vec<TypeAsserti
     results
 }
 
+/// Add the assertions a conditional return type implies about the
+/// parameter it tests.
+///
+/// `@return ($value is int ? true : false)` promises exactly what
+/// `@phpstan-assert-if-true int $value` does, and
+/// `@return ($value is int ? void : never)` cannot return unless `$value`
+/// is an `int`, which is `@phpstan-assert int $value`.  PHPStan reads both
+/// shapes this way, and only these: the conditional must be the whole
+/// return type, its branches must be `true` / `false` (in either order) or
+/// have exactly one `never`, and it must test one of the parameters.  A
+/// parameter that already carries an explicit assertion keeps it.
+pub fn add_conditional_return_assertions(
+    conditional_return: Option<&PhpType>,
+    parameters: &[ParameterInfo],
+    assertions: &mut Vec<TypeAssertion>,
+) {
+    let Some(TypeKind::Conditional(cond)) = conditional_return.map(PhpType::kind) else {
+        return;
+    };
+    if !parameters.iter().any(|p| p.name == cond.param)
+        || assertions.iter().any(|a| a.param_name == cond.param)
+    {
+        return;
+    }
+    let (then_ty, else_ty) = (&cond.then_type, &cond.else_type);
+    // `holds` is whether the condition itself (before `is not`) holds in
+    // the outcome the assertion describes.
+    let (kind, holds) = if then_ty.is_true() && else_ty.is_false() {
+        (AssertionKind::IfTrue, true)
+    } else if then_ty.is_false() && else_ty.is_true() {
+        (AssertionKind::IfTrue, false)
+    } else if else_ty.is_never() && !then_ty.is_never() {
+        (AssertionKind::Always, true)
+    } else if then_ty.is_never() && !else_ty.is_never() {
+        (AssertionKind::Always, false)
+    } else {
+        return;
+    };
+    assertions.push(TypeAssertion {
+        kind,
+        param_name: cond.param.to_string(),
+        asserted_type: cond.condition.clone(),
+        negated: holds == cond.negated,
+        is_equality: false,
+    });
+}
+
 /// Split an assertion tag into `(negated, is_equality, asserted_type, subject)`.
 ///
 /// The grammar reports the negation flag, the equality flag, the pattern and

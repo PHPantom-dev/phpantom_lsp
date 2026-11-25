@@ -489,6 +489,11 @@ pub(crate) fn narrow_to_assertion(
         }
     }
 
+    if is_array_refinement(asserted_type) {
+        refine_array_members(results, asserted_type, should_exclude);
+        return true;
+    }
+
     // Only a check that names no class proves nothing survived it.  A
     // class exclusion ignores type arguments, so ruling out
     // `ReflectionClass<Picture>` empties a `ReflectionClass<object>` the
@@ -604,6 +609,68 @@ fn is_scalar_refinement(ty: &PhpType) -> bool {
             .union_members()
             .iter()
             .all(|member| member.is_subtype_of(&string) || member.is_subtype_of(&int))
+}
+
+/// Whether `ty` is an array type narrower than "any array" (`list`,
+/// `non-empty-array`, `list<string>`, a shape), which an assertion cannot
+/// apply as the blanket `is_array()` guard: a value that is not a
+/// `list<string>` may well still be an array.
+fn is_array_refinement(ty: &PhpType) -> bool {
+    condition_facts::scalar_assert_guard_kind(ty) == Some(condition_facts::TypeGuardKind::Array)
+        && !PhpType::array().is_subtype_of(ty)
+}
+
+/// Apply an assertion of a refined array type to the subject's members.
+///
+/// Inclusion keeps the arrays and replaces any the assertion is narrower
+/// than with the asserted type: `array<mixed>` asserted `list<string>` is
+/// a `list<string>`.  Exclusion drops only the members wholly inside the
+/// asserted type, since a value outside `list<string>` can still be some
+/// other array.
+fn refine_array_members(results: &mut Vec<ResolvedType>, asserted: &PhpType, exclude: bool) {
+    let had_types = !results.is_empty();
+    results.retain_mut(|rt| {
+        let kept: Vec<PhpType> = rt
+            .type_string
+            .union_members()
+            .into_iter()
+            .filter_map(|member| {
+                let inside = member.is_subtype_of(asserted);
+                if exclude {
+                    return (!inside).then(|| member.clone());
+                }
+                if inside {
+                    Some(member.clone())
+                } else if member.is_mixed() || asserted.is_subtype_of(member) {
+                    Some(asserted.clone())
+                } else if condition_facts::scalar_assert_guard_kind(member)
+                    == Some(condition_facts::TypeGuardKind::Array)
+                {
+                    // Two arrays that overlap without either containing
+                    // the other: the subject keeps its own type.
+                    Some(member.clone())
+                } else {
+                    None
+                }
+            })
+            .collect();
+        if kept.is_empty() {
+            return false;
+        }
+        let mut kept = kept;
+        kept.dedup();
+        rt.replace_type(if kept.len() == 1 {
+            kept.pop().unwrap_or_else(PhpType::mixed)
+        } else {
+            PhpType::union(kept)
+        });
+        true
+    });
+    // An inclusion every member contradicts trusts the check over the
+    // static type, the way the `is_array()` guard does.
+    if !exclude && had_types && results.is_empty() {
+        results.push(ResolvedType::from_type_string(asserted.clone()));
+    }
 }
 
 /// Give entries of the asserted class the type arguments the assertion
