@@ -1867,6 +1867,7 @@ callable parameter of <code>__construct</code> at the argument's position the wa
 <code>infer_callable_params_from_static_receiver_fw</code> does for a static call,
 and use it from both walks so diagnostics and completion agree.</p>
 <hr />
+<p><strong>Upstream cases</strong> (PHPStan <code>nsrt/</code>, 7 assertions): <code>closure-passed-to-type-fiberscope-php81.php</code> (4), <code>closure-in-attribute.php</code> (3).</p>
 <h2 id="t61-a-regression-that-changes-where-a-call-resolves-goes-unnoticed">T61. A regression that changes where a call resolves goes unnoticed<a class="headerlink" href="#t61-a-regression-that-changes-where-a-call-resolves-goes-unnoticed" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Complexity: Medium</strong></p>
 <p>The only real-project check for type-engine changes is
@@ -1995,6 +1996,7 @@ key) the fallback can never be assigned, so <code>$string ??= 1</code> is still
 - Psalm: <code>Context::$vars_in_scope</code> and <code>Context::$vars_possibly_in_scope</code>
   (<code>Psalm\Context</code>)</p>
 <hr />
+<p><strong>Upstream cases</strong> (PHPStan <code>nsrt/</code>, 3 assertions): <code>bug-2816.php</code> (3).</p>
 <h2 id="t46-template-arguments-are-not-inferred-from-how-the-object-is-used-later">T46. Template arguments are not inferred from how the object is used later<a class="headerlink" href="#t46-template-arguments-are-not-inferred-from-how-the-object-is-used-later" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Complexity: High</strong></p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">/** @template T */</span>
@@ -2391,6 +2393,7 @@ that class, a <code>class-string&lt;C&gt;</code> gives <code>C</code>, anything 
 assertions of the WordPress stubs fixtures (<code>tests/wordpress_stubs/</code>)
 are marked with this.</p>
 <hr />
+<p><strong>Upstream cases</strong> (PHPStan <code>nsrt/</code>, 4 assertions): <code>bug-9704.php</code> (4).</p>
 <h2 id="t59-tk-on-a-class-template-is-not-resolved">T59. <code>T[K]</code> on a class template is not resolved<a class="headerlink" href="#t59-tk-on-a-class-template-is-not-resolved" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Complexity: Medium</strong></p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="x">/**</span>
@@ -2418,6 +2421,7 @@ the key, or the union of its values for a key it does not declare. A REST
 API endpoint that types its request this way gets every parameter wrong.
 8 assertions of the WordPress stubs fixtures.</p>
 <hr />
+<p><strong>Upstream cases</strong> (PHPStan <code>nsrt/</code>, 3 assertions): <code>offset-access.php</code> (3).</p>
 <h2 id="t62-a-sealed-hierarchy-is-not-narrowed-by-ruling-out-its-other-members">T62. A sealed hierarchy is not narrowed by ruling out its other members<a class="headerlink" href="#t62-a-sealed-hierarchy-is-not-narrowed-by-ruling-out-its-other-members" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Complexity: Medium</strong></p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="x">/** @psalm-inheritors LeafNode|TreeNode */</span>
@@ -2439,6 +2443,7 @@ the subject keeps the declared interface. Store the permitted list on
 enum's cases are subtracted.</p>
 <p>Found by <code>analyze</code> on azjezz/psl, whose tree nodes are sealed this way.</p>
 <hr />
+<p><strong>Upstream cases</strong> (PHPStan <code>nsrt/</code>, 4 assertions): <code>bug-5259.php</code> (2), <code>allowed-subtypes-datetime.php</code>, <code>allowed-subtypes-throwable.php</code>.</p>
 <h2 id="t71-a-service-asdecorator-registers-does-not-take-over-the-id">T71. A service <code>#[AsDecorator]</code> registers does not take over the ID<a class="headerlink" href="#t71-a-service-asdecorator-registers-does-not-take-over-the-id" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Complexity: Low</strong></p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="x">#[AsDecorator(decorates: 'app.mailer')]</span>
