@@ -1,0 +1,20 @@
+// test: unknown members, variables and classes are reported on exactly their names
+// feature: diagnostics
+// php: 8.5
+---
+<?php
+namespace App;
+
+class Greeter {
+    public function hello(string $name): string { return "Hi $name"; }
+}
+
+function run(Greeter $g): void {
+    $g->hello('world');
+    $g->goodbye();
+    //  ^^^^^^^ unknown_member: Method App\Greeter::goodbye() not found
+    echo $undefined;
+    //   ^^^^^^^^^^ unknown_variable
+    new Missing();
+    //  ^^^^^^^ unknown_class: Class App\Missing not found
+}

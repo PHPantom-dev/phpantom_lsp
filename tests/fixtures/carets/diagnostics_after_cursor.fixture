@@ -1,0 +1,9 @@
+// test: annotations on the cursor's line are read with the marker removed
+// feature: diagnostics
+// php: 8.5
+---
+<?php
+function run(): void {
+    echo 1; <>echo $missing;
+    //             ^^^^^^^^ unknown_variable: Undefined variable $missing
+}

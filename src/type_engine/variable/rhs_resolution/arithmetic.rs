@@ -455,6 +455,11 @@ pub(crate) fn infer_arithmetic_result_type(
         }
         // At least one float, the other is known: result is float.
         (Some(true), Some(_)) | (Some(_), Some(true)) => PhpType::float(),
+        // A float against a value PHP coerces to a number (`'1.5'`, `true`,
+        // `null`, or `int|float`) is float too: the coerced side can only
+        // ever be an int or a float.
+        (Some(true), None) if coerces_to_number(rhs_types) => PhpType::float(),
+        (None, Some(true)) if coerces_to_number(lhs_types) => PhpType::float(),
         // One or both operands are unknown: fall back to int|float.
         _ => {
             let union = PhpType::union(vec![PhpType::int(), PhpType::float()]);
@@ -477,6 +482,22 @@ pub(crate) fn infer_arithmetic_result_type(
             }
         }
     }
+}
+
+/// Whether every alternative of an operand is a scalar arithmetic turns into
+/// an int or a float, rather than an object that may overload the operator
+/// or a value it rejects.
+fn coerces_to_number(types: &[ResolvedType]) -> bool {
+    !types.is_empty()
+        && types.iter().all(|rt| {
+            rt.type_string.union_members().into_iter().all(|member| {
+                member.is_int_subtype()
+                    || member.is_float_subtype()
+                    || member.is_string_subtype()
+                    || member.is_bool()
+                    || member.is_null()
+            })
+        })
 }
 
 /// How many pairs of alternatives two integer operands may make before

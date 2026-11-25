@@ -112,6 +112,42 @@ pub(super) fn apply_null_order_narrowing<'b>(
     }
 }
 
+/// Narrow a subject ordered against a written `null` the way the loose
+/// comparison it amounts to does.
+///
+/// Nothing is smaller than `null` (PHP orders it against a string as `''`
+/// and against anything else as `false`), so `$x <= null` holds exactly when
+/// `$x == null` does, and `$x > null` exactly when `$x != null` does. The
+/// other two orderings always hold or never do, which says nothing a
+/// subject can be narrowed by.
+pub(super) fn apply_null_order_equality_narrowing<'b>(
+    condition: &'b Expression<'b>,
+    scope: &mut ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+    truthy: bool,
+) {
+    let (inner, negated) = condition_facts::unwrap_condition_negation(condition);
+    let Expression::Binary(bin) = inner else {
+        return;
+    };
+    let (subject, equal) = match bin.operator {
+        BinaryOperator::LessThanOrEqual(_) if is_null_expr(bin.rhs) => (bin.lhs, true),
+        BinaryOperator::GreaterThan(_) if is_null_expr(bin.rhs) => (bin.lhs, false),
+        BinaryOperator::GreaterThanOrEqual(_) if is_null_expr(bin.lhs) => (bin.rhs, true),
+        BinaryOperator::LessThan(_) if is_null_expr(bin.lhs) => (bin.rhs, false),
+        _ => return,
+    };
+    let Some(key) = expr_to_subject(subject) else {
+        return;
+    };
+    if equal == (truthy != negated) {
+        seed_synthetic_key_if_needed(&key, scope, ctx);
+        narrow_to_loosely_null_in_scope(&key, scope);
+    } else {
+        strip_null_from_subject(&key, scope, ctx);
+    }
+}
+
 /// Whether every value `expr` can evaluate to is truthy (`Some(true)`) or
 /// every one is falsy (`Some(false)`), for a comparand `null` is ordered
 /// against by casting to `bool`.  `None` when that is undecided, unknown,

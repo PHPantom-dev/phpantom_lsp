@@ -112,6 +112,26 @@ class ProfileComposer
         );
     }
 
+    /// Laravel's own view service provider shares the application under
+    /// `$app`, so every template has it without the project sharing it.
+    #[tokio::test]
+    async fn the_framework_shares_the_application_with_every_template() {
+        let (backend, _dir) = workspace(&[("resources/views/about.blade.php", "{{ $app }}\n")]);
+        let uri =
+            open_initialized_blade_template(&backend, "resources/views/about.blade.php").await;
+
+        assert!(
+            blade_undefined_variables(&backend, &uri).is_empty(),
+            "$app is defined: {:?}",
+            blade_undefined_variables(&backend, &uri)
+        );
+        let hover = markup_hover_at(&backend, &uri, 0, 5).await;
+        assert!(
+            hover.contains("Illuminate\\Foundation") && hover.contains("Application"),
+            "$app is the application, got: {hover}"
+        );
+    }
+
     /// A shared object keeps its class, so its members resolve in the
     /// template.
     #[tokio::test]

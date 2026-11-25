@@ -1,0 +1,18 @@
+// test: references to a class from a use site with a cursor, past non-ASCII text
+// feature: references
+---
+<?php
+namespace App;
+
+class Café {}
+//    ^^^^ def
+
+function make(): Café {
+    //           ^^^^ ref
+    return new <>Café();
+    //           ^^^^ ref
+}
+
+/** @var Café $x 😀 ünïcode before the name */ $y = new Café();
+//       ^^^^ ref
+//                                                     ^^^^ ref

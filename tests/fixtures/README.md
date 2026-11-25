@@ -29,7 +29,7 @@ $f-><>
 | Directive | Required | Repeatable | Description |
 |---|---|---|---|
 | `// test:` | yes | no | Human-readable test name. Shown in test output. |
-| `// feature:` | yes | no | One of `completion`, `hover`, `definition`, `signature_help`, `diagnostics`. |
+| `// feature:` | yes | no | One of `completion`, `hover`, `definition`, `signature_help`, `diagnostics`, `references`. |
 | `// expect:` | depends | yes | **Completion/hover:** a label prefix (completion) or substring (hover) that must appear. |
 | `// expect_absent:` | no | yes | **Completion:** a label prefix that must NOT appear. **Hover:** a substring that must NOT appear. |
 | `// expect_hover:` | no | yes | `symbol => substring` fires a hover on `symbol` and checks the response contains `substring`. |
@@ -68,6 +68,23 @@ file, and sends the request.
 $f = new Foo();
 $f-><>
 ```
+
+### Caret annotations
+
+`diagnostics` and `references` fixtures can state their expectations inline,
+under the code they are about:
+
+```
+    $g->goodbye();
+    //  ^^^^^^^ unknown_member: Method App\Greeter::goodbye() not found
+```
+
+A comment line whose first character after `//` is `^` is an annotation. Its
+carets mark columns of the closest line above that is not itself an
+annotation, so several annotations can stack under one line. Columns count
+characters as they read in the fixture, `<>` included, and the runner converts
+them to UTF-16 positions after stripping the marker. A range that starts in
+the first two columns, or spans lines, cannot be annotated.
 
 ### Multi-file fixtures
 
@@ -154,6 +171,14 @@ among them.
 function run(?object $a): object { return $a ?? throw new Missing(); }
 ```
 
+With `// ^^^ code` or `// ^^^ code: message` annotations in the body, the
+annotations are the whole answer: each must match a diagnostic's exact range
+and code (and message, when given), and every diagnostic the file reports
+must be annotated. A failing run prints each unannotated diagnostic as the
+annotation line that would cover it. An annotation ending in
+`// SKIP: reason` is one PHPantom does not report yet: it is not required, and
+a diagnostic with its range is not held against the fixture.
+
 A diagnostics fixture with a `// project:` has no body and no cursor. It analyses files of a
 fixture project (`tests/phpstan_symfony/`, `tests/phpstan_doctrine/`), the
 way the PHPStan extensions' rule tests analyse their data files, with the
@@ -186,6 +211,32 @@ The ported rule tests keep the upstream message and mark the gap
 this way rather than loosening the comparison. A fixture whose rule has no
 PHPantom counterpart yet names no codes and compares nothing; it records
 what to check once one exists.
+
+### `references`
+
+Mark the declaration with `// ^^^ def` and every reference with
+`// ^^^ ref`, in any of the fixture's files. The request fires at the `<>`
+cursor, or at the first `def` when there is none. The result must be exactly
+the `def` and `ref` ranges with the declaration included, and exactly the
+`ref` ranges without it.
+
+```
+// test: references to a method, across files
+// feature: references
+---
+=== src/Greeter.php ===
+<?php
+class Greeter {
+    public function hello(): string { return 'hi'; }
+    //              ^^^^^ def
+}
+=== src/main.php ===
+<?php
+function run(Greeter $g): void {
+    echo $g->hello();
+    //       ^^^^^ ref
+}
+```
 
 ## Directory layout
 

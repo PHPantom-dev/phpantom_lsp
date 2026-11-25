@@ -341,6 +341,10 @@ pub(in crate::type_engine) fn array_func_element_type(
         return min_max_type(args, func_name.eq_ignore_ascii_case("max"));
     }
 
+    if func_name.eq_ignore_ascii_case("count") || func_name.eq_ignore_ascii_case("sizeof") {
+        return count_type(args);
+    }
+
     // The key readers are stubbed `TKey|null` because an empty array has no
     // key to report. An argument that proves it has entries rules that out.
     if func_name.eq_ignore_ascii_case("array_key_first")
@@ -947,15 +951,27 @@ fn min_max_type(args: &dyn ArrayFuncArgs, want_max: bool) -> Option<PhpType> {
     if !args.has_arg(1) {
         let iterable = args.arg_raw_type(0)?;
         // Every number a literal array holds is known, so the one that
-        // comes out is too.
-        if let TypeKind::ArrayShape(entries) = iterable.kind()
-            && entries.iter().all(|entry| !entry.optional)
-            && let Some(extreme) =
+        // comes out is too: for a union of such arrays, one per array.
+        let shape_extreme = |member: &PhpType| match member.kind() {
+            TypeKind::ArrayShape(entries) if entries.iter().all(|entry| !entry.optional) => {
                 extreme_number(entries.iter().map(|entry| &entry.value_type), want_max)
-        {
-            return Some(extreme);
+            }
+            _ => None,
+        };
+        let mut extremes: Vec<PhpType> = Vec::new();
+        for member in iterable.union_members() {
+            let Some(extreme) = shape_extreme(member) else {
+                return iterable.iterable_element_type();
+            };
+            if !extremes.contains(&extreme) {
+                extremes.push(extreme);
+            }
         }
-        return iterable.iterable_element_type();
+        return match extremes.len() {
+            0 => iterable.iterable_element_type(),
+            1 => extremes.pop(),
+            _ => Some(PhpType::union(extremes)),
+        };
     }
 
     let mut raw_args = Vec::new();
@@ -1419,4 +1435,61 @@ fn array_map_element_type(
     // $strings)` would be reported as `list<string>` on the strength of an
     // input the callback exists to change.
     input_element.filter(|element| !element.is_scalar_leaf())
+}
+
+/// `count($array)` of an array whose size its type fixes: the number of
+/// entries of a shape, or the range its alternatives and optional entries
+/// span.
+/// `None` for anything else, which keeps the stub's `int<0, max>`.
+///
+/// A mode other than a written `COUNT_NORMAL` may count recursively, which
+/// adds the entries of nested arrays, so it gives the shape's size only
+/// when no entry can hold one.
+fn count_type(args: &dyn ArrayFuncArgs) -> Option<PhpType> {
+    if args.is_spread(0) || args.is_named(0) || args.is_spread(1) || args.is_named(1) {
+        return None;
+    }
+    let recursive =
+        args.has_arg(1) && !matches!(args.arg_atom_text(1).as_deref(), Some("COUNT_NORMAL" | "0"));
+    let raw = args.arg_raw_type(0)?;
+    let mut sizes: Vec<(usize, usize)> = Vec::new();
+    for member in raw.union_members() {
+        if member.as_unsealed_shape().is_some() {
+            return None;
+        }
+        let TypeKind::ArrayShape(entries) = member.kind() else {
+            return None;
+        };
+        if recursive
+            && entries
+                .iter()
+                .any(|entry| !is_never_an_array(&entry.value_type))
+        {
+            return None;
+        }
+        let required = entries.iter().filter(|entry| !entry.optional).count();
+        sizes.push((required, entries.len()));
+    }
+    let min = sizes.iter().map(|(min, _)| *min).min()?;
+    let max = sizes.iter().map(|(_, max)| *max).max()?;
+    if min == max {
+        return Some(PhpType::literal_int(min.to_string()));
+    }
+    Some(PhpType::int_range(min.to_string(), max.to_string()))
+}
+
+/// Whether no value of `ty` is an array, so a recursive `count()` skips it.
+pub(in crate::type_engine) fn is_never_an_array(ty: &PhpType) -> bool {
+    ty.union_members().iter().all(|member| {
+        member.is_int_subtype()
+            || member.is_string_subtype()
+            || member.is_float()
+            || matches!(member.as_literal(), Some(LiteralValue::Float(_)))
+            || member.is_bool()
+            || member.is_true()
+            || member.is_false()
+            || member.is_null()
+            // `count()` does not look inside an object, `Countable` or not.
+            || (member.is_object_like() && !member.is_array_like() && !member.is_iterable())
+    })
 }

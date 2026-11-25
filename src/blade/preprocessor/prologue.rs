@@ -141,6 +141,10 @@ pub(super) fn emit(
     virtual_php.push_str("$errors = new \\Illuminate\\Support\\ViewErrorBag();\n");
     virtual_php.push_str("/** @var \\Illuminate\\View\\Factory $__env */\n");
     virtual_php.push_str("$__env = new \\Illuminate\\View\\Factory();\n");
+    // Laravel's own `ViewServiceProvider` shares the application with every
+    // view, so no project provider registers it.
+    virtual_php.push_str("/** @var \\Illuminate\\Foundation\\Application $app */\n");
+    virtual_php.push_str("$app = new \\Illuminate\\Foundation\\Application();\n");
     for (_, decl) in &declared {
         virtual_php.push_str(decl);
     }
@@ -148,7 +152,7 @@ pub(super) fn emit(
     // Wrap the template body in a function so that diagnostic
     // collectors (which only analyse function/method bodies) treat
     // the Blade content as analysable code.  The closing brace is
-    // appended after the main loop.  `$errors`/`$__env` (and every
+    // appended after the main loop.  `$errors`/`$__env`/`$app` (and every
     // declared variable) are assigned in the outer scope above, so
     // pull them in with `global` — otherwise every use of them inside
     // the wrapped function is a false-positive "undefined variable".
@@ -168,7 +172,7 @@ pub(super) fn emit(
     }
     virtual_php.push_str("function ");
     virtual_php.push_str(crate::blade::WRAPPER_FUNCTION);
-    virtual_php.push_str("() { global $errors, $__env");
+    virtual_php.push_str("() { global $errors, $__env, $app");
     for (name, _) in &declared {
         virtual_php.push_str(", $");
         virtual_php.push_str(name);

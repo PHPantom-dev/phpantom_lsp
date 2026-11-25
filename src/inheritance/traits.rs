@@ -24,7 +24,7 @@ use super::generics::{
     fill_template_bounds, method_has_bare_self, method_references_params,
     property_references_params, replace_bare_self_in_method,
 };
-use super::{MergeDedup, TraitContext};
+use super::{MergeDedup, TraitContext, enrich_method_arc_from_ancestor};
 
 /// Merge all traits used by a class into its method/property/constant lists.
 ///
@@ -134,6 +134,7 @@ pub(crate) fn merge_traits_into(
                     use_generics: &substituted_use_generics,
                     precedences: &trait_info.trait_precedences,
                     aliases: &trait_info.trait_aliases,
+                    ancestor: ctx.ancestor,
                 },
                 class_loader,
                 depth + 1,
@@ -171,6 +172,7 @@ pub(crate) fn merge_traits_into(
                         use_generics: &parent.use_generics,
                         precedences: &parent.trait_precedences,
                         aliases: &parent.trait_aliases,
+                        ancestor: ctx.ancestor,
                     },
                     class_loader,
                     parent_depth + 1,
@@ -213,10 +215,30 @@ pub(crate) fn merge_traits_into(
                 continue;
             }
 
+            let needs_sub = method_references_params(method, &sub_keys);
             if !dedup
                 .methods
                 .insert(crate::atom::ascii_lowercase_atom(&method.name))
             {
+                if let Some(ancestor) = ctx.ancestor
+                    && ancestor.get_method(&method.name).is_none()
+                    && let Some(existing) = merged
+                        .methods
+                        .make_mut()
+                        .iter_mut()
+                        .find(|m| m.name.eq_ignore_ascii_case(&method.name))
+                {
+                    if needs_sub {
+                        let ancestor_method = intern_transformed_method(method, fp_sub, || {
+                            let mut m = (**method).clone();
+                            apply_substitution_to_method(&mut m, &trait_subs);
+                            m
+                        });
+                        enrich_method_arc_from_ancestor(existing, &ancestor_method, class_loader);
+                    } else {
+                        enrich_method_arc_from_ancestor(existing, method, class_loader);
+                    }
+                }
                 continue;
             }
 
@@ -235,7 +257,6 @@ pub(crate) fn merge_traits_into(
                 .filter_map(|alias| alias.visibility)
                 .next_back();
 
-            let needs_sub = method_references_params(method, &sub_keys);
             // Replace bare `self` with the using class (and its template
             // parameters) so that `self` resolves to the class that
             // imports the trait.

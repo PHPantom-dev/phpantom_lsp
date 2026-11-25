@@ -1,6 +1,7 @@
 use super::*;
 
 use crate::php_type::ShapeEntry;
+use crate::type_engine::variable::array_func_rules::is_never_an_array;
 
 /// The largest size a `count()` check spells out as a shape.  Beyond it
 /// the list keeps its generic form, the same cut-off PHPStan makes.
@@ -206,22 +207,6 @@ fn known_size(expr: &Expression<'_>, scope: &ScopeState) -> Option<i64> {
         size = Some(len);
     }
     size
-}
-
-/// Whether no value of `ty` is an array, so a recursive count skips it.
-fn is_never_an_array(ty: &PhpType) -> bool {
-    ty.union_members().iter().all(|member| {
-        member.is_int_subtype()
-            || member.is_string_subtype()
-            || member.is_float()
-            || matches!(member.as_literal(), Some(LiteralValue::Float(_)))
-            || member.is_bool()
-            || member.is_true()
-            || member.is_false()
-            || member.is_null()
-            // `count()` does not look inside an object, `Countable` or not.
-            || (member.is_object_like() && !member.is_array_like() && !member.is_iterable())
-    })
 }
 
 /// The alternatives of `ty` that have exactly `size` entries, or `None`

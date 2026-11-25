@@ -892,6 +892,9 @@ pub(crate) fn process_compound_assignment<'b>(
         return;
     };
 
+    // The variable holds a new value, so what was recorded against reads
+    // that use it (`$tokens[$i]`) describes the old one.
+    scope.invalidate_dependent_keys(&var_name);
     scope.set(&var_name, vec![ResolvedType::from_type_string(result_type)]);
 }
 

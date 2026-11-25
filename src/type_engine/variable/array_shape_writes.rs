@@ -613,8 +613,22 @@ pub(super) fn extract_array_key_for_shape(index: &Expression<'_>) -> Option<Stri
     }
 }
 
-/// The literal integer an index expression spells out, if it is one.
-///
+/// The key an index expression names, as [`PhpType::after_element_unset`]
+/// takes it: a string key as written, an integer key (or a string PHP casts
+/// to one) in decimal. `None` for a key that is not a literal.
+pub(super) fn extract_unset_key(index: &Expression<'_>) -> Option<String> {
+    match index {
+        Expression::Literal(Literal::Integer(integer)) => integer.value.map(|v| v.to_string()),
+        Expression::Literal(Literal::String(s)) => {
+            extract_array_key_for_shape(index).or_else(|| {
+                let key = literal_bytes_to_str(s.value?)?;
+                is_decimal_int_array_key(key).then(|| key.to_string())
+            })
+        }
+        _ => None,
+    }
+}
+
 /// The key a write through an index resolved to `key_type` lands on, when
 /// that type is a single literal: `Ok` holds a string key a shape tracks by
 /// name, `Err` the integer index of a slot. A literal held in a variable
@@ -1523,6 +1537,18 @@ fn normalize_key_type(ty: &PhpType, keep_literals: bool) -> Option<PhpType> {
     }
 
     fn collect(ty: &PhpType, keep_literals: bool, normalized: &mut Vec<PhpType>) -> bool {
+        // A template bounded by keys PHP stores unchanged (`TKey of
+        // array-key`) is a key as it is, and stays the template.
+        if let Some((_, bound)) = ty.as_template_param()
+            && bound.union_members().into_iter().all(|member| {
+                member.is_array_key()
+                    || (member.is_int_subtype() && member.as_literal().is_none())
+                    || member.is_named_ci("string")
+            })
+        {
+            push_unique(normalized, ty.clone());
+            return true;
+        }
         match ty.kind() {
             TypeKind::Union(members) => members
                 .iter()

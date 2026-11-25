@@ -319,8 +319,8 @@ impl PhpType {
     /// The type left behind after `unset($var[$key])` (or an element unset
     /// off a nested array-access chain) removes one entry.
     ///
-    /// `key` is the literal string key being removed, when known — `None`
-    /// for a dynamic key (`unset($arr[$i])`). A non-array-like type (an
+    /// `key` is the literal key being removed, when known (an integer key
+    /// spelled in decimal) — `None` for a dynamic key (`unset($arr[$i])`). A non-array-like type (an
     /// `ArrayAccess` object routes through `offsetUnset` instead of real
     /// array mutation) comes back unchanged.
     ///
@@ -345,8 +345,14 @@ impl PhpType {
                 PhpType::union(members.iter().map(|m| m.after_element_unset(key)).collect())
             }
             // A list has no string keys, so removing one leaves it as it was.
-            TypeKind::Named(name) if key.is_some() && is_list_name(name.as_str()) => self.clone(),
-            TypeKind::Generic(generic) if key.is_some() && is_list_name(generic.name.as_str()) => {
+            TypeKind::Named(name)
+                if key.is_some_and(is_string_key) && is_list_name(name.as_str()) =>
+            {
+                self.clone()
+            }
+            TypeKind::Generic(generic)
+                if key.is_some_and(is_string_key) && is_list_name(generic.name.as_str()) =>
+            {
                 self.clone()
             }
             TypeKind::Named(name) if name == "non-empty-array" => PhpType::named(atom("array")),
@@ -365,17 +371,43 @@ impl PhpType {
                 )
             }
             TypeKind::ArrayShape(entries) => {
-                let updated: Vec<ShapeEntry> = match key {
-                    Some(key) => entries
+                // A positional entry is addressed by its index, which only
+                // stays the same once it is spelled out: removing an earlier
+                // entry (or making it optional) would otherwise renumber it.
+                let runtime_keys = super::shape_keys::runtime_shape_keys(entries);
+                let updated: Vec<ShapeEntry> = match (key, runtime_keys) {
+                    (Some(key), Some(runtime_keys)) => {
+                        let Some(removed) = runtime_keys.iter().position(|k| k == key) else {
+                            return self.clone();
+                        };
+                        entries
+                            .iter()
+                            .zip(runtime_keys)
+                            .enumerate()
+                            .filter(|(slot, _)| *slot != removed)
+                            .map(|(slot, (entry, runtime_key))| {
+                                let mut entry = entry.clone();
+                                if slot > removed {
+                                    entry.key = Some(runtime_key);
+                                }
+                                entry
+                            })
+                            .collect()
+                    }
+                    (Some(key), None) => entries
                         .iter()
                         .filter(|entry| entry.key.as_deref() != Some(key))
                         .cloned()
                         .collect(),
-                    None => entries
+                    (None, runtime_keys) => entries
                         .iter()
-                        .cloned()
-                        .map(|mut entry| {
+                        .enumerate()
+                        .map(|(slot, entry)| {
+                            let mut entry = entry.clone();
                             entry.optional = true;
+                            if let Some(runtime_keys) = &runtime_keys {
+                                entry.key = Some(runtime_keys[slot].clone());
+                            }
                             entry
                         })
                         .collect(),
@@ -385,4 +417,10 @@ impl PhpType {
             _ => self.clone(),
         }
     }
+}
+
+/// Whether an array key, as [`PhpType::after_element_unset`] receives it,
+/// is a string key rather than an integer one.
+fn is_string_key(key: &str) -> bool {
+    !super::shape_keys::is_decimal_int_array_key(key)
 }

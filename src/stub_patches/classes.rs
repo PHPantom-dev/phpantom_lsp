@@ -541,7 +541,7 @@ fn patch_reflection_is_subclass_of(class: &mut ClassInfo) {
     });
 }
 
-/// Fix two `ReflectionClass` return types phpstorm-stubs understate.
+/// Fix the `ReflectionClass` return types phpstorm-stubs understate.
 ///
 /// `newInstanceArgs()` is declared `@return T|null` (mirroring php-src's
 /// vestigial `?object` hint), but the method has thrown a
@@ -555,12 +555,20 @@ fn patch_reflection_is_subclass_of(class: &mut ClassInfo) {
 /// interfaces that exist — arrive as plain strings and cannot be passed on to
 /// anything that asks for a `class-string`. PHPStan's stub says
 /// `list<class-string>`.
+///
+/// `getName()` is declared `string`, though it names the class `T` stands
+/// for; PHPStan's stub says `class-string<T>`.
 fn patch_reflection_class(class: &mut ClassInfo) {
     patch_reflection_is_subclass_of(class);
 
     with_method_mut(class, "getInterfaceNames", |method| {
         method.return_type = Some(PhpType::parse("list<class-string>"));
     });
+    if class.template_params.iter().any(|t| t.as_str() == "T") {
+        with_method_mut(class, "getName", |method| {
+            method.return_type = Some(PhpType::parse("class-string<T>"));
+        });
+    }
 
     let Some(idx) = method_index(class, "newInstanceArgs") else {
         return;

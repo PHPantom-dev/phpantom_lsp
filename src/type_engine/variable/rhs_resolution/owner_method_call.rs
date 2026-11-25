@@ -8,7 +8,6 @@ use std::collections::HashMap;
 use mago_syntax::cst::*;
 
 use crate::Backend;
-use crate::atom::atom;
 use crate::class_lookup::ResolvedClassLoader;
 use crate::php_type::{PhpType, TypeKind};
 use crate::types::{ClassInfo, MethodInfo, ResolvedType};
@@ -317,7 +316,7 @@ pub(super) fn resolve_owner_method_call(
             owner
                 .parent_class
                 .as_ref()
-                .map(|p| PhpType::named(atom(p.as_ref())))
+                .map(|p| substituted.replace_bare_parent(p.as_ref()))
                 .unwrap_or(substituted)
         } else {
             substituted

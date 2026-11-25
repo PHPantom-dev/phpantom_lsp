@@ -162,6 +162,11 @@ pub(crate) fn apply_in_array_narrowing<'b>(
                 let Some(element_type) = haystack.iterable_element_type() else {
                     continue;
                 };
+                // A needle with no type yet (an untyped parameter) could be
+                // anything, which is what a `mixed` one says.
+                if results.is_empty() {
+                    results.push(ResolvedType::from_type_string(PhpType::mixed()));
+                }
                 // A haystack of enum cases narrows the needle to those cases,
                 // the way `===` against each of them would.
                 if let Some(cases) = enum_case_values(element_type.union_members(), ctx) {

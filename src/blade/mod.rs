@@ -36,8 +36,8 @@ pub use view_paths::discover_view_paths;
 pub(crate) use markers::with_marker_stubs;
 
 /// Number of lines the Blade preprocessor injects as a prologue
-/// (<?php header, $errors declaration, $__env declaration, wrapper function, etc.).
-pub const PROLOGUE_LINES: u32 = 6;
+/// (<?php header, the `$errors`, `$__env` and `$app` declarations, wrapper function, etc.).
+pub const PROLOGUE_LINES: u32 = 8;
 
 /// Name of the function the preprocessor wraps a template's body in, so
 /// that collectors which only analyse function bodies see the template as

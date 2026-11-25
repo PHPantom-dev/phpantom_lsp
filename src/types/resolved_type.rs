@@ -105,7 +105,6 @@ impl ResolvedType {
 
     /// Strip null from the type, preserving class info (since
     /// null-stripping never invalidates the class).
-    #[allow(dead_code)]
     pub(crate) fn strip_null(&mut self) {
         if let Some(non_null) = self.type_string.non_null_type() {
             self.type_string = non_null;

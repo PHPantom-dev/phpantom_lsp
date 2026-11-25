@@ -24,7 +24,11 @@ pub(super) fn resolve_rhs_instantiation(
 ) -> Vec<ResolvedType> {
     let class_name = match inst.class {
         Expression::Self_(_) => Some("self".to_string()),
+        // `new $this` builds another instance of `$this`'s class.
         Expression::Static(_) => Some("static".to_string()),
+        Expression::Variable(Variable::Direct(dv)) if dv.name == b"$this" => {
+            Some("static".to_string())
+        }
         Expression::Parent(_) => Some("parent".to_string()),
         Expression::Identifier(ident) => Some(bytes_to_str(ident.value()).to_string()),
         _ => None,

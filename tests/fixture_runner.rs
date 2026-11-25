@@ -209,6 +209,7 @@ enum Feature {
     Definition,
     SignatureHelp,
     Diagnostics,
+    References,
 }
 
 /// A single file within a fixture (path + content).
@@ -219,18 +220,37 @@ struct FixtureFile {
     content: String,
 }
 
+/// A `// ^^^ label` line in a fixture body: the carets mark a range on the
+/// closest line above that is not itself an annotation.
+#[derive(Debug, Clone)]
+struct CaretAnnotation {
+    /// Index into `ParsedFixture::files`.
+    file: usize,
+    /// 0-based line the carets point at.
+    line: u32,
+    /// Start and end character (0-based, UTF-16 code units) on that line.
+    start: u32,
+    end: u32,
+    /// The text after the carets.
+    label: String,
+}
+
 /// Parsed fixture ready for execution.
 struct ParsedFixture {
     meta: TestMeta,
-    /// The files declared in the fixture body. The file containing the `<>`
-    /// cursor is always present. For single-file fixtures there is exactly one.
+    /// The files declared in the fixture body. For single-file fixtures
+    /// there is exactly one.
     files: Vec<FixtureFile>,
+    /// Whether the body has a `<>` cursor marker.
+    has_cursor: bool,
     /// Index into `files` for the file that contains the cursor.
     cursor_file: usize,
     /// Cursor line (0-based).
     cursor_line: u32,
     /// Cursor character (0-based, UTF-16 code units).
     cursor_char: u32,
+    /// Every `// ^^^` annotation in the body, in file order.
+    carets: Vec<CaretAnnotation>,
 }
 
 fn parse_fixture(content: &str) -> Result<ParsedFixture, String> {
@@ -242,39 +262,54 @@ fn parse_fixture(content: &str) -> Result<ParsedFixture, String> {
 
     let meta = parse_header(header)?;
     // A diagnostics fixture with a project analyses files of that project;
-    // it has no cursor and no body.  One without analyses its body, where
-    // a cursor marker is optional.
-    let (files, cursor_file, cursor_line, cursor_char) = if meta.feature == Feature::Diagnostics {
-        if meta.project.is_some() {
-            (Vec::new(), 0, 0, 0)
-        } else {
-            let content = body.trim_start();
-            let (content, line, char) = if content.contains("<>") {
-                strip_cursor(content)?
-            } else {
-                (content.to_string(), 0, 0)
-            };
-            (
-                vec![FixtureFile {
-                    path: "test.php".to_string(),
-                    content,
-                }],
-                0,
-                line,
-                char,
-            )
-        }
-    } else {
-        parse_body(body.trim_start())?
-    };
+    // it has no cursor and no body.
+    if meta.feature == Feature::Diagnostics && meta.project.is_some() {
+        return Ok(ParsedFixture {
+            meta,
+            files: Vec::new(),
+            has_cursor: false,
+            cursor_file: 0,
+            cursor_line: 0,
+            cursor_char: 0,
+            carets: Vec::new(),
+        });
+    }
 
-    Ok(ParsedFixture {
-        meta,
-        files,
-        cursor_file,
-        cursor_line,
-        cursor_char,
-    })
+    let mut fixture = parse_body(body.trim_start(), meta)?;
+    let cursor_optional = matches!(
+        fixture.meta.feature,
+        Feature::Diagnostics | Feature::References
+    );
+    if !fixture.has_cursor && !cursor_optional {
+        return Err("Fixture body missing `<>` cursor marker".to_string());
+    }
+    let meta = &fixture.meta;
+    if meta.feature == Feature::Diagnostics
+        && !meta.expect_clean
+        && meta.expect_codes.is_empty()
+        && meta.expect_absent_codes.is_empty()
+        && fixture.carets.is_empty()
+    {
+        return Err(
+            "Diagnostics fixture needs either a `// project:` and a `// file:`, \
+             or a body with `// expect_clean`, `// expect_code:`, `// expect_absent_code:` \
+             or `// ^^^` annotations"
+                .to_string(),
+        );
+    }
+    if meta.feature == Feature::References && !fixture.has_cursor {
+        // Without a cursor, the request fires on the first declaration.
+        let def = fixture
+            .carets
+            .iter()
+            .find(|c| c.label == "def")
+            .ok_or("References fixture needs a `<>` cursor or a `// ^^^ def` annotation")?;
+        fixture.cursor_file = def.file;
+        fixture.cursor_line = def.line;
+        fixture.cursor_char = def.start;
+        fixture.has_cursor = true;
+    }
+    Ok(fixture)
 }
 
 fn parse_header(header: &str) -> Result<TestMeta, String> {
@@ -308,6 +343,7 @@ fn parse_header(header: &str) -> Result<TestMeta, String> {
                 "definition" => Feature::Definition,
                 "signature_help" => Feature::SignatureHelp,
                 "diagnostics" => Feature::Diagnostics,
+                "references" => Feature::References,
                 other => return Err(format!("Unknown feature: {other}")),
             });
         } else if let Some(val) = line.strip_prefix("// expect:") {
@@ -367,17 +403,15 @@ fn parse_header(header: &str) -> Result<TestMeta, String> {
     if description.is_empty() {
         return Err("Fixture missing `// test:` header".to_string());
     }
-    if feature == Feature::Diagnostics {
+    if feature == Feature::Diagnostics && project.is_some() {
         let body_checks =
             expect_clean || !expect_codes.is_empty() || !expect_absent_codes.is_empty();
-        match (&project, body_checks) {
-            (Some(_), false) if !project_files.is_empty() => {}
-            (None, true) => {}
-            _ => {
-                return Err("Diagnostics fixture needs either a `// project:` and a `// file:`, \
-                     or a body with `// expect_clean`, `// expect_code:` or `// expect_absent_code:`"
-                    .to_string());
-            }
+        if body_checks || project_files.is_empty() {
+            return Err(
+                "A project diagnostics fixture needs a `// file:` and checks \
+                 only `// expect_diagnostic:` lines"
+                    .to_string(),
+            );
         }
     }
 
@@ -432,110 +466,147 @@ fn parse_expected_diagnostic(val: &str) -> Result<ExpectedDiagnostic, String> {
     })
 }
 
-fn parse_body(body: &str) -> Result<(Vec<FixtureFile>, usize, u32, u32), String> {
+fn parse_body(body: &str, meta: TestMeta) -> Result<ParsedFixture, String> {
     // Check for multi-file format: lines starting with `=== path ===`.
-    if body.contains("\n=== ") || body.starts_with("=== ") {
-        parse_multi_file_body(body)
+    let raw_files = if body.contains("\n=== ") || body.starts_with("=== ") {
+        split_multi_file_body(body)?
     } else {
-        parse_single_file_body(body)
+        vec![("test.php".to_string(), body.to_string())]
+    };
+
+    let mut fixture = ParsedFixture {
+        meta,
+        files: Vec::with_capacity(raw_files.len()),
+        has_cursor: false,
+        cursor_file: 0,
+        cursor_line: 0,
+        cursor_char: 0,
+        carets: Vec::new(),
+    };
+    for (index, (path, raw)) in raw_files.into_iter().enumerate() {
+        // Carets are written against the text as it reads, `<>` included,
+        // so they are read before the marker is stripped.
+        let carets = parse_carets(&raw);
+        let (content, marker) = match strip_cursor(&raw) {
+            Some((content, line, char_index)) => {
+                if fixture.has_cursor {
+                    return Err("More than one `<>` cursor marker".to_string());
+                }
+                fixture.has_cursor = true;
+                fixture.cursor_file = index;
+                fixture.cursor_line = line;
+                fixture.cursor_char = utf16_column(nth_line(&content, line), char_index);
+                (content, Some((line, char_index)))
+            }
+            None => (raw, None),
+        };
+        for (line, mut start, mut end, label) in carets {
+            if let Some((marker_line, marker_char)) = marker
+                && marker_line == line
+            {
+                if start > marker_char {
+                    start -= 2;
+                }
+                if end > marker_char {
+                    end -= 2;
+                }
+            }
+            let text = nth_line(&content, line);
+            fixture.carets.push(CaretAnnotation {
+                file: index,
+                line,
+                start: utf16_column(text, start),
+                end: utf16_column(text, end),
+                label,
+            });
+        }
+        fixture.files.push(FixtureFile { path, content });
     }
+    Ok(fixture)
 }
 
-fn parse_single_file_body(body: &str) -> Result<(Vec<FixtureFile>, usize, u32, u32), String> {
-    let (content, line, char) = strip_cursor(body)?;
-    Ok((
-        vec![FixtureFile {
-            path: "test.php".to_string(),
-            content,
-        }],
-        0,
-        line,
-        char,
-    ))
-}
-
-fn parse_multi_file_body(body: &str) -> Result<(Vec<FixtureFile>, usize, u32, u32), String> {
-    let mut files = Vec::new();
-    let mut cursor_file = None;
-    let mut cursor_line = 0u32;
-    let mut cursor_char = 0u32;
-
-    let mut current_path: Option<String> = None;
-    let mut current_content = String::new();
-
+/// Split a `=== path ===` body into its files, as paths and contents.
+fn split_multi_file_body(body: &str) -> Result<Vec<(String, String)>, String> {
+    let mut files: Vec<(String, String)> = Vec::new();
     for line in body.lines() {
         if let Some(rest) = line.strip_prefix("=== ")
             && let Some(path_str) = rest.strip_suffix(" ===")
         {
-            // Flush previous file if any.
-            if let Some(path) = current_path.take() {
-                let content = std::mem::take(&mut current_content);
-                if content.contains("<>") {
-                    let (stripped, cl, cc) = strip_cursor(&content)?;
-                    cursor_file = Some(files.len());
-                    cursor_line = cl;
-                    cursor_char = cc;
-                    files.push(FixtureFile {
-                        path,
-                        content: stripped,
-                    });
-                } else {
-                    files.push(FixtureFile { path, content });
-                }
-            }
-            current_path = Some(path_str.trim().to_string());
+            files.push((path_str.trim().to_string(), String::new()));
             continue;
         }
-        if current_path.is_some() {
-            if !current_content.is_empty() {
-                current_content.push('\n');
+        if let Some((_, content)) = files.last_mut() {
+            if !content.is_empty() {
+                content.push('\n');
             }
-            current_content.push_str(line);
+            content.push_str(line);
         }
     }
-
-    // Flush last file.
-    if let Some(path) = current_path {
-        let content = std::mem::take(&mut current_content);
-        if content.contains("<>") {
-            let (stripped, cl, cc) = strip_cursor(&content)?;
-            cursor_file = Some(files.len());
-            cursor_line = cl;
-            cursor_char = cc;
-            files.push(FixtureFile {
-                path,
-                content: stripped,
-            });
-        } else {
-            files.push(FixtureFile { path, content });
-        }
-    }
-
     if files.is_empty() {
         return Err("Multi-file fixture has no files".to_string());
     }
-    let cursor_file = cursor_file.ok_or("No file contains a `<>` cursor marker")?;
-
-    Ok((files, cursor_file, cursor_line, cursor_char))
+    Ok(files)
 }
 
 /// Strip the `<>` cursor marker from PHP source and return the cleaned
-/// content along with the cursor's line and character position.
-fn strip_cursor(source: &str) -> Result<(String, u32, u32), String> {
-    let marker_pos = source
-        .find("<>")
-        .ok_or("Fixture body missing `<>` cursor marker")?;
+/// content along with the marker's line and character index (in `char`s).
+fn strip_cursor(source: &str) -> Option<(String, u32, usize)> {
+    let marker_pos = source.find("<>")?;
 
     let before = &source[..marker_pos];
     let line = before.chars().filter(|&c| c == '\n').count() as u32;
     let last_newline = before.rfind('\n').map(|i| i + 1).unwrap_or(0);
-    let char = before[last_newline..].len() as u32;
+    let char_index = before[last_newline..].chars().count();
 
     let mut cleaned = String::with_capacity(source.len() - 2);
     cleaned.push_str(before);
     cleaned.push_str(&source[marker_pos + 2..]);
 
-    Ok((cleaned, line, char))
+    Some((cleaned, line, char_index))
+}
+
+fn nth_line(content: &str, line: u32) -> &str {
+    content.lines().nth(line as usize).unwrap_or("")
+}
+
+/// The UTF-16 column of the `char_index`-th character of `line`.
+fn utf16_column(line: &str, char_index: usize) -> u32 {
+    let width: usize = line.chars().take(char_index).map(char::len_utf16).sum();
+    // Past the end of the line, each missing character counts as one.
+    let missing = char_index.saturating_sub(line.chars().count());
+    (width + missing) as u32
+}
+
+/// Read every `// ^^^ label` line of a file.  The carets mark the columns
+/// (counted in characters) of the closest line above that is not itself an
+/// annotation, so several annotations can stack under one line.  Returns
+/// `(line, start, end, label)` with `end` exclusive.
+fn parse_carets(content: &str) -> Vec<(u32, usize, usize, String)> {
+    let mut carets = Vec::new();
+    let mut target: Option<u32> = None;
+    for (index, line) in content.lines().enumerate() {
+        let Some(caret) = parse_caret_line(line) else {
+            target = Some(index as u32);
+            continue;
+        };
+        if let Some(target) = target {
+            let (start, end, label) = caret;
+            carets.push((target, start, end, label));
+        }
+    }
+    carets
+}
+
+fn parse_caret_line(line: &str) -> Option<(usize, usize, String)> {
+    let rest = line.trim_start().strip_prefix("//")?;
+    if !rest.trim_start().starts_with('^') {
+        return None;
+    }
+    let chars: Vec<char> = line.chars().collect();
+    let start = chars.iter().position(|&c| c == '^')?;
+    let len = chars[start..].iter().take_while(|&&c| c == '^').count();
+    let label: String = chars[start + len..].iter().collect();
+    Some((start, start + len, label.trim().to_string()))
 }
 
 // ─── Test execution ─────────────────────────────────────────────────────────
@@ -569,9 +640,15 @@ fn run_fixture(path: &Path, content: String) -> datatest_stable::Result<()> {
             Feature::Definition => run_definition(&fixture).await,
             Feature::SignatureHelp => run_signature_help(&fixture).await,
             Feature::Diagnostics => run_body_diagnostics(&fixture).await,
+            Feature::References => run_references(&fixture).await,
         }
     })
-    .map_err(|e| format!("{} — {e}", path.display()))?;
+    .map_err(|e| {
+        // The harness prints the error escaped onto one line, which makes
+        // the suggested `// ^^^` annotations unreadable.
+        eprintln!("{e}");
+        format!("{} — {e}", path.display())
+    })?;
 
     Ok(())
 }
@@ -1004,7 +1081,7 @@ async fn run_body_diagnostics(fixture: &ParsedFixture) -> Result<(), String> {
     };
 
     let meta = &fixture.meta;
-    let mut failures = Vec::new();
+    let mut failures = check_diagnostic_carets(fixture, content, &diagnostics);
     if meta.expect_clean && !reported.is_empty() {
         failures.push("expected no diagnostics".to_string());
     }
@@ -1023,6 +1100,214 @@ async fn run_body_diagnostics(fixture: &ParsedFixture) -> Result<(), String> {
     } else {
         Err(format!("{}\nGot: {reported:#?}", failures.join("\n")))
     }
+}
+
+/// Compare the diagnostics against the body's `// ^^^ code[: message]`
+/// annotations.  When there are any, they are the whole answer: each must
+/// match a diagnostic's range and code (and its message, when given), and
+/// every diagnostic must be annotated.  An annotation ending in
+/// `// SKIP: reason` is one PHPantom does not report yet: it is not
+/// required, and a diagnostic with its range is not held against the
+/// fixture.
+fn check_diagnostic_carets(
+    fixture: &ParsedFixture,
+    content: &str,
+    diagnostics: &[Diagnostic],
+) -> Vec<String> {
+    struct Expected<'a> {
+        caret: &'a CaretAnnotation,
+        code: &'a str,
+        message: Option<&'a str>,
+        skip: bool,
+    }
+    if fixture.carets.is_empty() {
+        return Vec::new();
+    }
+    let expected: Vec<Expected> = fixture
+        .carets
+        .iter()
+        .map(|caret| {
+            let (label, skip) = match caret.label.split_once("// SKIP") {
+                Some((label, _)) => (label.trim(), true),
+                None => (caret.label.as_str(), false),
+            };
+            let (code, message) = match label.split_once(':') {
+                Some((code, message)) => (code.trim(), Some(message.trim())),
+                None => (label.trim(), None),
+            };
+            Expected {
+                caret,
+                code,
+                message,
+                skip,
+            }
+        })
+        .collect();
+    let code_of = |d: &Diagnostic| match &d.code {
+        Some(Code::String(code)) => code.clone(),
+        Some(Code::Int(code)) => code.to_string(),
+        None => String::new(),
+    };
+    let message_of = |d: &Diagnostic| match &d.message {
+        Message::String(text) => text.clone(),
+        Message::MarkupContent(markup) => markup.value.clone(),
+    };
+    let at = |caret: &CaretAnnotation, d: &Diagnostic| {
+        d.range.start.line == caret.line
+            && d.range.end.line == caret.line
+            && d.range.start.character == caret.start
+            && d.range.end.character == caret.end
+    };
+    let matches = |e: &Expected, d: &Diagnostic| {
+        at(e.caret, d) && code_of(d) == e.code && e.message.is_none_or(|m| message_of(d) == m)
+    };
+
+    let mut failures = Vec::new();
+    for e in expected.iter().filter(|e| !e.skip) {
+        if !diagnostics.iter().any(|d| matches(e, d)) {
+            failures.push(format!(
+                "missing at {}:{}-{}: {}",
+                e.caret.line + 1,
+                e.caret.start,
+                e.caret.end,
+                e.caret.label
+            ));
+        }
+    }
+    for d in diagnostics {
+        let accounted = expected.iter().any(|e| {
+            if e.skip {
+                at(e.caret, d)
+            } else {
+                matches(e, d)
+            }
+        });
+        if !accounted {
+            failures.push(format!(
+                "unexpected, annotate it as:\n{}",
+                render_diagnostic_caret(content, d, &code_of(d), &message_of(d))
+            ));
+        }
+    }
+    failures
+}
+
+/// Render a diagnostic the way a fixture annotates it: the line it starts
+/// on, then a `// ^^^ code: message` line under it.
+fn render_diagnostic_caret(content: &str, d: &Diagnostic, code: &str, message: &str) -> String {
+    let text = nth_line(content, d.range.start.line);
+    let utf16_to_char = |column: u32| {
+        let mut width = 0;
+        for (index, c) in text.chars().enumerate() {
+            if width >= column as usize {
+                return index;
+            }
+            width += c.len_utf16();
+        }
+        text.chars().count()
+    };
+    let start = utf16_to_char(d.range.start.character);
+    let end = if d.range.end.line == d.range.start.line {
+        utf16_to_char(d.range.end.character).max(start + 1)
+    } else {
+        text.chars().count().max(start + 1)
+    };
+    let mut note = String::new();
+    if d.range.end.line != d.range.start.line {
+        note = format!(
+            " (spans to line {}, cannot be annotated)",
+            d.range.end.line + 1
+        );
+    } else if start < 2 {
+        note = " (starts before column 2, cannot be annotated)".to_string();
+    }
+    // `//` sits at the line's indentation, or as far right as it fits.
+    let indent = text
+        .chars()
+        .take_while(|c| c.is_whitespace())
+        .count()
+        .min(start.saturating_sub(2));
+    let gap = start.saturating_sub(indent + 2);
+    format!(
+        "  {line}: {text}\n  {line}: {}//{}{} {code}: {message}{note}",
+        " ".repeat(indent),
+        " ".repeat(gap),
+        "^".repeat(end - start),
+        line = d.range.start.line + 1,
+    )
+}
+
+async fn run_references(fixture: &ParsedFixture) -> Result<(), String> {
+    let backend = fixture_backend(&fixture.meta);
+    let uri = open_files(&backend, fixture).await;
+    let uris: Vec<Uri> = fixture.files.iter().map(|f| file_uri(&f.path)).collect();
+
+    let request = |include_declaration: bool| ReferenceParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: fixture.cursor_line,
+                character: fixture.cursor_char,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: ReferenceContext {
+            include_declaration,
+        },
+    };
+    let render = |file: &str, line: u32, start: u32, end: u32| {
+        format!("{file}:{}:{}-{}", line + 1, start, end)
+    };
+    let path_of = |location: &Location| {
+        uris.iter()
+            .position(|u| *u == location.uri)
+            .map(|i| fixture.files[i].path.clone())
+            .unwrap_or_else(|| location.uri.to_string())
+    };
+
+    for include_declaration in [true, false] {
+        let mut expected: Vec<String> = fixture
+            .carets
+            .iter()
+            .filter(|c| c.label == "ref" || (include_declaration && c.label == "def"))
+            .map(|c| render(&fixture.files[c.file].path, c.line, c.start, c.end))
+            .collect();
+        if let Some(c) = fixture
+            .carets
+            .iter()
+            .find(|c| c.label != "ref" && c.label != "def")
+        {
+            return Err(format!(
+                "Unknown references annotation `{}` (use `def` or `ref`)",
+                c.label
+            ));
+        }
+        let mut actual: Vec<String> = backend
+            .references(request(include_declaration))
+            .await
+            .map_err(|e| format!("References request failed: {e}"))?
+            .unwrap_or_default()
+            .iter()
+            .map(|l| {
+                render(
+                    &path_of(l),
+                    l.range.start.line,
+                    l.range.start.character,
+                    l.range.end.character,
+                )
+            })
+            .collect();
+        expected.sort();
+        actual.sort();
+        if expected != actual {
+            return Err(format!(
+                "References (include_declaration: {include_declaration}) differ.\n\
+                 Expected: {expected:#?}\nGot: {actual:#?}"
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// Analyse the fixture's project files and compare the diagnostics whose

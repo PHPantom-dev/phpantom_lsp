@@ -667,10 +667,12 @@ fn normalize_type(ty: &str) -> String {
     ))
 }
 
-/// Spell a sealed list shape with no optional entries, Psalm's
-/// `list{int,string}`, as the `array{int,string}` it is equal to. A list
-/// shape with an optional entry or a `...` tail has no `array{…}` twin and
-/// is left alone.
+/// Spell a sealed list shape, Psalm's `list{int,string}`, as the
+/// `array{int,string}` it is equal to. An array shape whose optional entries
+/// all come last can only hold keys `0, 1, …` in order, so it is a list too:
+/// `list{0: 'a', 1?: 'b'}` is `array{0: 'a', 1?: 'b'}`, and `list{}` is
+/// `array{}`. A list shape with a `...` tail, or an optional entry ahead of a
+/// required one, has no `array{…}` twin and is left alone.
 ///
 /// Expects the output of the whitespace pass in [`normalize_type`].
 fn list_shapes_as_array(ty: &str) -> String {
@@ -708,9 +710,9 @@ fn list_shapes_as_array(ty: &str) -> String {
             break;
         };
         let body = &rest[body_start..body_end];
-        let sealed_and_required = !body.contains("?:") && !body.contains("...");
+        let has_array_twin = !body.contains("...") && optional_entries_trail(body);
         out.push_str(&rest[..at]);
-        out.push_str(if !prefixed && sealed_and_required && !body.is_empty() {
+        out.push_str(if !prefixed && has_array_twin {
             "array{"
         } else {
             OPEN
@@ -721,6 +723,46 @@ fn list_shapes_as_array(ty: &str) -> String {
     }
     out.push_str(rest);
     out
+}
+
+/// Whether no required entry of a shape body follows an optional one.
+fn optional_entries_trail(body: &str) -> bool {
+    let mut depth = 0i32;
+    let mut quote: Option<char> = None;
+    let mut entry_start = 0;
+    let mut seen_optional = false;
+    let mut entries = Vec::new();
+    for (i, ch) in body.char_indices() {
+        if let Some(q) = quote {
+            if ch == q {
+                quote = None;
+            }
+            continue;
+        }
+        match ch {
+            '\'' | '"' => quote = Some(ch),
+            '{' | '<' | '(' | '[' => depth += 1,
+            '}' | '>' | ')' | ']' => depth -= 1,
+            ',' if depth == 0 => {
+                entries.push(&body[entry_start..i]);
+                entry_start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    entries.push(&body[entry_start..]);
+    for entry in entries {
+        let entry = entry.trim();
+        let key_end = entry.find(':').unwrap_or(0);
+        let optional = entry[..key_end].ends_with('?')
+            && entry[..key_end - 1].chars().all(|c| c.is_ascii_digit());
+        if optional {
+            seen_optional = true;
+        } else if seen_optional && !entry.is_empty() {
+            return false;
+        }
+    }
+    true
 }
 
 /// Spell `array-key` as the `int|string` union it stands for, which is how

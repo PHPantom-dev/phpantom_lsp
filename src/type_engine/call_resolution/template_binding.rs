@@ -271,7 +271,18 @@ fn omitted_arg_default<'d>(
                 matches!(h.kind(), TypeKind::Nullable(_))
                     || h.union_members().iter().any(|m| m.is_null())
             });
-            ((default == "null" && !hint_takes_null) || default.ends_with("::class"))
+            // A scalar literal is the value PHP passes in the argument's
+            // place, so `@param T $test = 0` binds `T` to `0`.
+            let scalar_literal = default.parse::<f64>().is_ok()
+                || ["true", "false"]
+                    .iter()
+                    .any(|b| default.eq_ignore_ascii_case(b))
+                || (default.len() >= 2
+                    && (default.starts_with('\'') && default.ends_with('\'')
+                        || default.starts_with('"') && default.ends_with('"')));
+            ((default == "null" && !hint_takes_null)
+                || default.ends_with("::class")
+                || scalar_literal)
                 .then_some(default)
         }
         _ => None,

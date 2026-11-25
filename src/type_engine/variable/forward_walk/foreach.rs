@@ -551,13 +551,11 @@ pub(crate) fn process_foreach<'b>(
     // the loop is not an alternative to what the body left behind.  The
     // pre-loop sentinel (`$max = null` ahead of a loop that always
     // assigns) would otherwise survive the whole loop.  A body that never
-    // falls out of its own bottom has no fall-through state to keep, so
-    // it still takes the merge.
-    let body_always_runs = !scope.unreachable
-        && (is_non_empty_array_literal(foreach.expression)
-            || iter_type
-                .as_ref()
-                .is_some_and(PhpType::is_provably_non_empty));
+    // falls out of its own bottom leaves only its `break` edges.
+    let body_always_runs = is_non_empty_array_literal(foreach.expression)
+        || iter_type
+            .as_ref()
+            .is_some_and(PhpType::is_provably_non_empty);
 
     // A loop that started out unreachable (the branch it lives in was
     // already proven impossible) has no live "might not run" alternative
@@ -1303,6 +1301,17 @@ pub(crate) fn bind_foreach_value<'b>(
                     }
                 }
             }
+
+            if let TypeKind::Intersection(members) = it.kind()
+                && let Some(element_type) =
+                    crate::type_engine::variable::iterable_elements::intersection_iteration_value_type(
+                        members,
+                        &iterable_ctx(ctx),
+                    )
+                {
+                    scope.set(&var_name, ctx.resolved_types_for(element_type));
+                    return;
+                }
         }
         // A bare `array` holds `mixed` entries, which replaces whatever
         // the name held before, including what an enclosing loop's

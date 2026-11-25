@@ -37,6 +37,12 @@ pub(crate) struct TraitContext<'a> {
     pub precedences: &'a [crate::types::TraitPrecedence],
     /// `as` alias declarations.
     pub aliases: &'a [crate::types::TraitAlias],
+    /// The ancestor class these traits are used by, when they are merged
+    /// into a descendant. A trait method there is a parent method of the
+    /// descendant, so an override in the descendant inherits its docblock
+    /// types, unless the ancestor declares the method itself and so hides
+    /// the trait's version.
+    pub ancestor: Option<&'a ClassInfo>,
 }
 
 /// Tracks member names already present during inheritance merging.
@@ -145,6 +151,7 @@ pub(crate) fn resolve_class_with_inheritance(
             use_generics: &class.use_generics,
             precedences: &class.trait_precedences,
             aliases: &class.trait_aliases,
+            ancestor: None,
         },
         class_loader,
         0,
@@ -388,6 +395,7 @@ fn merge_parent_members(
             use_generics: &substituted_use_generics,
             precedences: &parent.trait_precedences,
             aliases: &parent.trait_aliases,
+            ancestor: Some(parent),
         },
         class_loader,
         0,

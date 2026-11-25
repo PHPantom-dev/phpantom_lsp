@@ -309,6 +309,7 @@ mod lsp_concurrency;
 mod lsp_progress_tokens;
 mod lsp_refresh_resilience;
 mod lsp_registration_resilience;
+mod lsp_wire_smoke;
 mod mock_method_names;
 mod move_cli;
 mod narrowing_branch_values;

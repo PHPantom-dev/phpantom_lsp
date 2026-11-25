@@ -650,6 +650,16 @@ fn convert(src: &str, ty: &cst::Type<'_>) -> PhpType {
             }
         }
 
+        // mago has no selector for a name with a wildcard at both ends: it
+        // reads `self::*OTHER*` as `self::*OTHER` and stops before the
+        // closing `*`, which the source still has.
+        cst::Type::MemberReference(m)
+            if matches!(m.member, cst::MemberReferenceSelector::EndsWith(..))
+                && src.as_bytes().get(m.span().end.offset as usize) == Some(&b'*') =>
+        {
+            PhpType::raw(format!("{ty}*"))
+        }
+
         // -- Catch-all for anything else (non_exhaustive) ---------------------
         other => PhpType::raw(other.to_string()),
     }

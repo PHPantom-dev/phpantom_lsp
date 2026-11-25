@@ -29,6 +29,7 @@ pub fn apply_function_stub_patches(func: &mut FunctionInfo) {
         "key" => patch_array_key_value_generics(func, "$array", "TKey|null"),
         "pathinfo" => patch_pathinfo(func),
         "print_r" => patch_print_r(func),
+        "base64_decode" => patch_base64_decode(func),
         "hrtime" => patch_hrtime(func),
         "microtime" => patch_microtime(func),
         "getenv" => patch_getenv(func),
@@ -670,7 +671,9 @@ fn conditional_on(
 /// route an explicit `PATHINFO_ALL` does.
 ///
 /// `extension` is optional in the shape because a path without a dot has no
-/// extension key at all. Mirrors PHPStan's
+/// extension key at all, and `dirname` because the empty path has no
+/// directory part (`pathinfo('')` holds only the basename and filename).
+/// Mirrors PHPStan's
 /// `PathinfoFunctionDynamicReturnTypeExtension`.
 fn patch_pathinfo(func: &mut FunctionInfo) {
     conditional_on(
@@ -678,7 +681,7 @@ fn patch_pathinfo(func: &mut FunctionInfo) {
         "$flags",
         PhpType::literal_int(PATHINFO_ALL.to_string()),
         PhpType::parse(
-            "array{dirname: string, basename: string, extension?: string, filename: string}",
+            "array{dirname?: string, basename: string, extension?: string, filename: string}",
         ),
         PhpType::string(),
     );
@@ -703,6 +706,22 @@ fn patch_print_r(func: &mut FunctionInfo) {
         PhpType::parse("true"),
         PhpType::string(),
         PhpType::parse("true"),
+    );
+}
+
+/// Patch `base64_decode()` to have a conditional return type keyed on
+/// `$strict`.
+///
+/// The stubs declare `string|false`, but only strict mode rejects input: the
+/// default mode skips every character outside the alphabet and decodes what
+/// is left, so it always returns a string.
+fn patch_base64_decode(func: &mut FunctionInfo) {
+    conditional_on(
+        func,
+        "$strict",
+        PhpType::parse("true"),
+        PhpType::parse("string|false"),
+        PhpType::string(),
     );
 }
 

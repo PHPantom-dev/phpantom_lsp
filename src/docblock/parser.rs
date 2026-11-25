@@ -714,6 +714,17 @@ fn variable_text(value: &[u8]) -> String {
 /// and the source indentation; both have to go before the string can be
 /// handed to the type parser.
 pub(crate) fn type_text(docblock: &str, base_offset: u32, span: Span) -> String {
+    // mago reads a constant wildcard open at both ends (`self::*OTHER*`) as
+    // `self::*OTHER` and ends the type before the closing `*`.
+    let mut span = span;
+    let end = span.end.offset.saturating_sub(base_offset) as usize;
+    if docblock.as_bytes().get(end) == Some(&b'*')
+        && docblock
+            .get(span.start.offset.saturating_sub(base_offset) as usize..end)
+            .is_some_and(|text| text.contains("::*"))
+    {
+        span.end = Position::new(span.end.offset + 1);
+    }
     let raw = source_text(docblock, base_offset, span);
     if raw.contains('\n') {
         collapse_newlines(&raw)

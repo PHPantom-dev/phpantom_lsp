@@ -86,3 +86,25 @@ file every case PHPantom answers differently as a `// SKIP: reason`
 entry in `docs/todo/`. Tests of Bladestan's own compiler output (the
 PHP it generates for PHPStan) have no counterpart here; list them in
 the README as not ported.
+
+## BL26. A component method called from its view loses its return type
+
+**Impact: Low-Medium · Complexity: Medium**
+
+Blade wraps every argument-less public method of a class component in
+`Illuminate\View\InvokableComponentVariable` before handing it to the view,
+and PHPantom declares the variable with that runtime type, which is right:
+it is what lets both `{{ $total }}` and `{{ $total() }}` work. But the
+wrapper's `__invoke()` returns `mixed`, so `$getFeature()->name` in the
+view neither completes nor is checked, although the backing class declares
+what `getFeature()` returns. Bladestan types the same variable as
+`Closure(): Feature`, which keeps the return type but loses the wrapper's
+own members.
+
+Carry the method's return type on the declared variable, for example as
+`InvokableComponentVariable<Feature>` with the class's `__invoke()`
+returning the template parameter (Laravel's class is not generic, so this
+needs a stub-level patch or a synthesized subclass), so that a call through
+the variable is typed like a direct call on the component. Compared
+against Bladestan's scopes on a large production Laravel project, this was
+53 variables across 23 component views.

@@ -591,6 +591,10 @@ pub(crate) fn infer_closure_literal_type(
             _ => return None,
         };
         let ret_expr = ret_expr?;
+        // `fn () => throw …` never returns.
+        if matches!(ret_expr, Expression::Throw(_)) {
+            return Some(PhpType::never());
+        }
 
         // The body may read the closure's own parameters (`fn (?string
         // $value): string => $value ?? '-'`), which nothing outside the
@@ -603,11 +607,8 @@ pub(crate) fn infer_closure_literal_type(
             .parameters
             .iter()
             .filter_map(|param| {
-                let hint = param.hint.as_ref()?;
+                let ty = closure_param_hint(param, ctx)?;
                 let name = bytes_to_str(param.variable.name).to_string();
-                let ty = ctx
-                    .written_names()
-                    .resolve_hint(&crate::parser::extract_hint_type(hint));
                 Some((name, resolve_return_type(ty, ctx)))
             })
             .collect();
@@ -821,6 +822,23 @@ fn partial_application_params(
         .collect()
 }
 
+/// The type a closure parameter's hint gives it, qualified against the
+/// file's imports. A `null` default makes the hint nullable, the
+/// implicit-nullable `Type $x = null` form PHP reads as `?Type`.
+fn closure_param_hint(
+    param: &FunctionLikeParameter<'_>,
+    ctx: &VarResolutionCtx<'_>,
+) -> Option<PhpType> {
+    let ty = ctx
+        .written_names()
+        .resolve_hint(&crate::parser::extract_hint_type(param.hint.as_ref()?));
+    Some(if crate::parser::param_default_is_null(param) {
+        ty.or_null()
+    } else {
+        ty
+    })
+}
+
 /// The parameter list a closure or arrow function literal declares, as
 /// callable-signature parameters.
 ///
@@ -846,14 +864,7 @@ fn declared_closure_params(
         .parameters
         .iter()
         .map(|param| CallableParam {
-            type_hint: param
-                .hint
-                .as_ref()
-                .map(|hint| {
-                    ctx.written_names()
-                        .resolve_hint(&crate::parser::extract_hint_type(hint))
-                })
-                .unwrap_or_else(PhpType::mixed),
+            type_hint: closure_param_hint(param, ctx).unwrap_or_else(PhpType::mixed),
             optional: param.default_value.is_some(),
             variadic: param.ellipsis.is_some(),
         })

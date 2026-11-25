@@ -820,8 +820,9 @@ namespace PsalmTest_template_class_template_26 {
 
     $c = new C();
 
-    // PHPantom, like PHPStan, widens a literal argument when inferring a class template.
-    assertType('C<string>', $c);
+    // Psalm says `C<string>`. A `string` bound keeps a literal argument
+    // (`new C("x")` is `C<'x'>`), and the omitted argument is the default.
+    assertType("C<'hello'>", $c);
 }
 
 // Test: templateDefaultClassConstant

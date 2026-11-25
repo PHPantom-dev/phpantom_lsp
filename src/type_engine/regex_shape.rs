@@ -108,6 +108,28 @@ pub(crate) fn preg_call<'b>(expr: &'b Expression<'b>) -> Option<PregCall<'b>> {
     })
 }
 
+/// The match `preg_replace_callback()` hands its callback, described as the
+/// `preg_match` call that would fill `$matches` the same way: the callback
+/// runs once per successful match, with the groups of that match.
+///
+/// `function` is the called name as written and `arguments` the call's
+/// argument list. `None` for any other function.
+pub(crate) fn preg_replace_callback_match<'b>(
+    function: &str,
+    arguments: &'b ArgumentList<'b>,
+) -> Option<PregCall<'b>> {
+    let name = function.strip_prefix('\\').unwrap_or(function);
+    if !name.eq_ignore_ascii_case("preg_replace_callback") {
+        return None;
+    }
+    Some(PregCall {
+        matches_all: false,
+        pattern: argument(arguments, 0, "pattern").and_then(literal_string),
+        matches_var: "",
+        flags: argument(arguments, 5, "flags"),
+    })
+}
+
 /// Recognise a condition whose truth decides whether a `preg_match` /
 /// `preg_match_all` call found anything.
 ///

@@ -129,13 +129,16 @@ pub(crate) fn clear_exit_frame(flow: &WalkFlow) {
 /// an alternative to the fall-through both for the next iteration and for
 /// the exit condition that follows.
 pub(crate) fn drain_continue_edges(flow: &WalkFlow, scope: &mut ScopeState) {
-    let edges = flow
-        .exit_edges
+    merge_exit_edges(scope, &take_continue_edges(flow));
+}
+
+/// Remove and return the innermost frame's `continue` states.
+pub(crate) fn take_continue_edges(flow: &WalkFlow) -> Vec<ScopeState> {
+    flow.exit_edges
         .borrow_mut()
         .last_mut()
         .map(|frame| std::mem::take(&mut frame.continues))
-        .unwrap_or_default();
-    merge_exit_edges(scope, &edges);
+        .unwrap_or_default()
 }
 
 /// Record the state a `break` or `continue` carries out of the structure

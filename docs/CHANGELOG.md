@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **Livewire 4's view locations are view roots.** Templates in the directories Livewire 4's `component_locations` and `component_namespaces` settings name (by default `resources/views/livewire` and `pages::`) are views by those names, so `view()` and `@include` calls naming them are no longer reported as unknown. A `<livewire:…>` tag is checked against the components in every location the config names.
+- **`$app` is defined in every Blade template.** Laravel shares the application with all views, so `{{ $app->getLocale() }}` is no longer reported as an undefined variable and its members complete.
 - **No unknown-component report for a bare tag a package path answers.** `<x-badge>` reaches a template a package registered with `Blade::anonymousComponentPath()` under a prefix, as Laravel resolves it, so it is no longer reported as unknown.
 
 - **Claude Code no longer sees outdated diagnostics after an edit.** Results from before an edit, at line numbers that no longer match the file, are not reported to the agent as new findings.
@@ -28,6 +29,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **No unknown members on a class whose parent cannot be found.** When a parent class, interface, or trait is missing, such as a test extending PHPUnit's `TestCase` before `composer install`, the missing class is reported once instead of every member it would have supplied.
 - **A guarded copy of a class no longer hides the real one.** A fallback declared behind `if (! class_exists(Foo::class))` or `if (false)` gives way to the class Composer would autoload, so members only the real class has are no longer reported unknown.
 - **A class declared in more than one file reads its own members.** Inside each declaration of a class that several files declare, such as a polyfill's variants, `$this`, `self` and `static` see the members declared there, not another file's.
+- **Looping over an intersection type.** `foreach` over a value typed `Collection&iterable<User>` gives each element as `User`, and its key as the iterable says, instead of `mixed`.
+- **Values assigned before `continue` reach the next iteration.** Hovering or completing inside a loop body now sees what a variable was assigned on a path that ended in `continue`.
+- **`$i++` forgets what was known about `$items[$i]`.** Incrementing a variable, or updating it with `+=` and the like, drops a narrowing recorded for an expression that reads it, as a plain assignment already did.
+- **An enum's `$this->value` follows narrowing.** After `if ($this === self::None) { return; }`, `$this->value` and `$this->name` only hold the remaining cases' values and names.
+- **Omitted arguments bind templates to their defaults.** Calling `@param T $test = 0` without the argument types `T` as `0`, the value PHP passes in its place.
+- **Wildcard class constants open at both ends.** `@param self::*OTHER* $x` covers every constant whose name contains `OTHER`.
+- **`(string)` on a generic object.** Casting an object whose `__toString()` returns a template type, such as `class-string<T>`, gives the type for that object's generic arguments.
+- **Arithmetic with a float is a float.** `$string * 1e-6`, or any other arithmetic between a float and a string, bool, or null, is typed `float` instead of `int|float`.
+- **`in_array()` narrows an untyped needle.** A parameter without a type, checked with `in_array($value, $strings, true)`, is a `string` inside the check.
+- **Writing under a template key keeps the template.** `$array[$key] = $value` with `$key` typed `TKey of array-key` builds an `array<TKey, …>` instead of `array<int|string, …>`.
+- **`min()` and `max()` on a union of literal arrays.** The result is the smallest or largest value of each array, rather than every value any of them holds.
+- **`ReflectionClass::getName()` returns a class string.** For a `ReflectionClass<Foo>` it is `class-string<Foo>`, so it can be passed where a class name is expected.
+- **`~` on a value that may be a string or an int.** The result is `int|string` instead of `int`.
+- **A loop body that always returns no longer feeds the next iteration.** Inside `while`, `for` and `foreach`, a value assigned just before a `return` or `throw` at the end of the body no longer shows up at the top of the loop, and after a loop over a non-empty array whose body always breaks out, a variable holds what the body assigned before breaking.
+- **`unset()` of an integer key.** `unset($a[1])` removes that entry from an array shape, so `[1, 2, 3]` becomes `array{0: 1, 2: 3}`, and a list loses its list promise.
+- **`count()` of a fixed-size array.** `count()` and `sizeof()` of an array shape give its size, or the range its optional entries allow, also with a `COUNT_NORMAL` or `COUNT_RECURSIVE` mode when no entry can hold an array.
+- **Comparing with `null` by order narrows.** `$x <= null` narrows the way `$x == null` does, and `$x > null` rules out `null`.
+- **Overriding a method a parent gets from a trait inherits its docblock.** When a parent class takes a method from a trait, an override without its own `@param` or `@return` types uses the trait method's.
+- **`preg_replace_callback()` callbacks know their matches.** The callback's `$matches` parameter holds the groups the pattern captures, typed the way `preg_match()` types them.
+- **`?parent` return types keep `null`.** A method declared `: ?parent` or `: parent|null` returns the parent class or `null`, instead of always the parent class.
+- **Closure parameters with a `null` default are nullable.** In `function (string $x = null)`, `$x` is `?string` in the closure's signature and in what calling it returns.
+- **`clone` never gives `null`.** `clone $x` on a `?Foo` is a `Foo`, cloning a value of unknown type gives an `object`, and `clone new $this` keeps the class.
+- **`throw` as an expression is `never`.** `fn () => throw new Exception()` returns `never`.
+- **`base64_decode()` returns `false` only in strict mode.** Without `$strict` it is typed `string`.
+- **`pathinfo()` may leave out `dirname`.** The empty path has no directory part, so the array's `dirname` key is optional.
 
 ## [1.1.0] - 2026-11-24
 

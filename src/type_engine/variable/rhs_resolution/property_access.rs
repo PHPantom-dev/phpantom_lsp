@@ -456,6 +456,17 @@ impl PropertyReceiver {
         receiver.owners = match object {
             Expression::Variable(Variable::Direct(dv)) if dv.name == b"$this" => {
                 receiver.lsb_open = true;
+                // An enum's `$this` narrowed to some of its cases
+                // (`if ($this === self::None) { return; }`) reads only
+                // those cases' names and values.
+                let narrowed = match ctx.match_arm_narrowing.get("$this") {
+                    Some(overridden) => overridden.clone(),
+                    None => ctx
+                        .scope_var_resolver
+                        .map(|resolver| resolver("$this"))
+                        .unwrap_or_default(),
+                };
+                receiver.enum_cases = held_enum_cases(&narrowed);
                 this_property_owners(prop_name, ctx)
             }
             Expression::Variable(Variable::Direct(dv)) => {

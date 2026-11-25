@@ -89,7 +89,30 @@ pub(crate) fn iteration_value_type(iter_type: &PhpType, ctx: &IterableCtx<'_>) -
             }
         }
     }
+    if let TypeKind::Intersection(members) = iter_type.kind() {
+        return intersection_iteration_value_type(members, ctx);
+    }
     None
+}
+
+/// What iterating an intersection yields.
+///
+/// Every member describes the same value, so the one that spells out its
+/// elements (`Collection&iterable<User>`) answers for all of them; a
+/// member's class only fills in when none does.
+pub(crate) fn intersection_iteration_value_type(
+    members: &[PhpType],
+    ctx: &IterableCtx<'_>,
+) -> Option<PhpType> {
+    members
+        .iter()
+        .find_map(PhpType::iterable_element_type)
+        .or_else(|| {
+            members.iter().find_map(|member| {
+                resolve_iterable_element_via_class(member, ctx)
+                    .filter(|et| !is_unsubstituted_template_param(et))
+            })
+        })
 }
 
 /// The type `foreach ($expr as $key => $value)` binds `$key` to, given
@@ -101,6 +124,14 @@ pub(crate) fn iteration_value_type(iter_type: &PhpType, ctx: &IterableCtx<'_>) -
 pub(crate) fn iteration_key_type(iter_type: &PhpType, ctx: &IterableCtx<'_>) -> Option<PhpType> {
     if let Some((Some(kt), _)) = declared_traversal_of_generic(iter_type, ctx.class_loader) {
         return Some(kt);
+    }
+    // As for the value, the member that spells its keys out answers.
+    if let TypeKind::Intersection(members) = iter_type.kind() {
+        return members
+            .iter()
+            .filter(|member| member.iterable_element_type().is_some())
+            .chain(members.iter())
+            .find_map(|member| iteration_key_type(member, ctx));
     }
     if let Some(kt) = key_domain(iter_type) {
         // Benevolent when part of the domain is ours rather than the

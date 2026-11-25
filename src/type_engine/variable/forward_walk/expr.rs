@@ -424,6 +424,9 @@ impl<'b> ExprWalk<'b> {
             return operand_result;
         };
         let name = bytes_to_str(dv.name);
+        // The variable holds a new value, so what was recorded against
+        // reads that use it (`$tokens[$i]`) describes the old one.
+        scope.invalidate_dependent_keys(name);
         let old = scope.get(name).to_vec();
         if old.is_empty() {
             return operand_result;

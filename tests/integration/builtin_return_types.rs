@@ -17,7 +17,7 @@ use tower_lsp_server::gen_lsp_types::*;
 #[test]
 fn pathinfo_returns_a_string_for_a_single_component() {
     const SHAPE: &str =
-        "array{dirname: string, basename: string, extension?: string, filename: string}";
+        "array{dirname?: string, basename: string, extension?: string, filename: string}";
     let content = r#"<?php
 function probe(string $path, int $flags): void {
     $all = pathinfo($path);

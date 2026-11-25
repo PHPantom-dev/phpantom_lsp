@@ -89,7 +89,7 @@ pub(crate) fn process_statement<'b>(
                                 array_access,
                             )
                         {
-                            let keys: Vec<Option<String>> = key_chain
+                            let mut keys: Vec<Option<String>> = key_chain
                                 .iter()
                                 .map(|idx| {
                                     super::super::array_shape_writes::extract_array_key_for_shape(
@@ -97,6 +97,12 @@ pub(crate) fn process_statement<'b>(
                                     )
                                 })
                                 .collect();
+                            // The entry removed is the only level an integer
+                            // key can address exactly; the levels above are
+                            // looked up the way a write looks them up.
+                            if let (Some(last), Some(index)) = (keys.last_mut(), key_chain.last()) {
+                                *last = super::super::array_shape_writes::extract_unset_key(index);
+                            }
                             let unset_below = |scope: &mut ScopeState, subject: &str, depth| {
                                 let Some(subject_type) =
                                     scope.get(subject).last().map(|rt| rt.type_string.clone())

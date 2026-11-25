@@ -271,7 +271,9 @@ namespace PsalmTest_loop_foreach_16 {
       }
     }
 
-    assertType('bool', $a);
+    // PHPantom is more precise than Psalm here: `["a", "b", "c"]` is
+    // non-empty and both arms set `$a = true` before breaking out.
+    assertType('true', $a);
 }
 
 // Test: falseToBoolInContinue

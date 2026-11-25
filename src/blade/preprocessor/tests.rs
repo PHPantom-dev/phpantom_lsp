@@ -60,7 +60,7 @@ fn test_preprocess_errors_bag_visible_inside_template_function() {
     let content = "{{ $errors->has('name') }}";
     let (php, _) = preprocess(content);
     assert!(
-        php.contains("function __blade_template() { global $errors, $__env;"),
+        php.contains("function __blade_template() { global $errors, $__env, $app;"),
         "$errors/$__env must be pulled into the wrapper function's scope: {}",
         php
     );
@@ -84,7 +84,7 @@ fn test_a_bound_this_wraps_the_body_in_a_subclass_method() {
         php.contains(
             "abstract class __blade_scope_App_Livewire_Counter \
              extends \\App\\Livewire\\Counter \
-             { public function __blade_template() { global $errors, $__env;"
+             { public function __blade_template() { global $errors, $__env, $app;"
         ),
         "the body must sit in a method of a subclass of the component: {}",
         php
@@ -122,7 +122,7 @@ fn test_component_prologue_declares_attributes_and_slot() {
     );
     assert!(
         php.contains(
-            "function __blade_template() { global $errors, $__env, $attributes, $slot, $componentName;"
+            "function __blade_template() { global $errors, $__env, $app, $attributes, $slot, $componentName;"
         ),
         "component variables must be pulled into the wrapper scope: {}",
         php
@@ -186,7 +186,9 @@ fn test_preprocess_with_vars_injects_declarations() {
         php
     );
     assert!(
-        php.contains("function __blade_template() { global $errors, $__env, $results, $user;"),
+        php.contains(
+            "function __blade_template() { global $errors, $__env, $app, $results, $user;"
+        ),
         "injected variables must be pulled into the wrapper scope: {}",
         php
     );
@@ -2188,7 +2190,7 @@ fn test_preprocess_props_directive_declares_variables() {
         php
     );
     assert!(
-        php.contains("global $errors, $__env, $caption, $count;"),
+        php.contains("global $errors, $__env, $app, $caption, $count;"),
         "props must be pulled into the wrapper scope: {}",
         php
     );
@@ -2301,7 +2303,7 @@ fn test_preprocess_props_directive_dynamic_argument_falls_back() {
         php
     );
     assert!(
-        php.contains("global $errors, $__env;"),
+        php.contains("global $errors, $__env, $app;"),
         "a non-literal @props argument declares nothing: {}",
         php
     );

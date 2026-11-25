@@ -91,6 +91,8 @@ pub(crate) fn apply_null_narrowing_truthy<'b>(
     apply_literal_order_narrowing(condition, scope, ctx, true);
     // `$x > $obj` — a `null` `$x` would be smaller than any object.
     apply_null_order_narrowing(condition, scope, ctx, true);
+    // `$x <= null` — what `$x == null` leaves.
+    apply_null_order_equality_narrowing(condition, scope, ctx, true);
     // `count($xs) === 3` — a list of that many entries.
     apply_count_size_narrowing(condition, scope, ctx, true);
     // `$x === Land::Be` — the subject holds whatever the constant holds,
@@ -213,6 +215,7 @@ pub(crate) fn apply_null_narrowing_inverse<'b>(
     apply_loose_literal_narrowing(condition, scope, ctx, false);
     apply_literal_order_narrowing(condition, scope, ctx, false);
     apply_null_order_narrowing(condition, scope, ctx, false);
+    apply_null_order_equality_narrowing(condition, scope, ctx, false);
     apply_count_size_narrowing(condition, scope, ctx, false);
     // When the condition is `$x !== Land::Be`, the inverse (else/guard)
     // means the subject is that constant, so it holds whatever the

@@ -1,0 +1,23 @@
+// test: references to a method from its declaration, across files
+// feature: references
+---
+=== src/Greeter.php ===
+<?php
+namespace App;
+
+class Greeter {
+    public function hello(): string { return 'hi'; }
+    //              ^^^^^ def
+}
+=== src/main.php ===
+<?php
+namespace App;
+
+function run(Greeter $g): void {
+    echo $g->hello();
+    //       ^^^^^ ref
+    $other = new Greeter();
+    $other->hello(); $g->hello();
+    //      ^^^^^ ref
+    //                   ^^^^^ ref
+}

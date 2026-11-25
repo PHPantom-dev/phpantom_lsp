@@ -436,8 +436,9 @@ fn resolve_rhs_expression_inner<'b>(
             }
         }
         Expression::Match(match_expr) => resolve_match_expression(match_expr, ctx),
-        // `clone $expr` copies an object of the type `$expr` has.
-        Expression::Clone(clone_expr) => resolve_rhs_expression(clone_expr.object, ctx),
+        Expression::Clone(clone_expr) => {
+            clone_result(resolve_rhs_expression(clone_expr.object, ctx))
+        }
         // ── Pipe operator (PHP 8.5): `$expr |> $callable` ──
         // The pipe calls the callable with `$expr`, so it returns what the
         // callable does, however it is written: `trim(...)`,
@@ -534,4 +535,21 @@ fn resolve_rhs_expression_inner<'b>(
         // inference pipeline.
         _ => vec![],
     }
+}
+
+/// What `clone $expr` gives back, from the type `$expr` has.
+///
+/// The copy has the operand's type, but only an object can be cloned (PHP
+/// throws for anything else), so a `null` in the operand's type never
+/// reaches the result, and an operand of unknown type still makes an
+/// `object`.
+fn clone_result(mut resolved: Vec<ResolvedType>) -> Vec<ResolvedType> {
+    resolved.retain(|rt| !rt.type_string.is_null());
+    for rt in &mut resolved {
+        rt.strip_null();
+    }
+    if resolved.iter().all(|rt| rt.type_string.is_mixed()) {
+        return vec![ResolvedType::from_type_string(PhpType::object())];
+    }
+    resolved
 }

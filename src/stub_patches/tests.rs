@@ -241,13 +241,18 @@ fn argument_dependent_builtins_get_conditional_returns() {
         (
             "pathinfo",
             &[("$path", "string"), ("$flags", "int")],
-            "$flags is 15 ? array{dirname: string, basename: string, \
+            "$flags is 15 ? array{dirname?: string, basename: string, \
              extension?: string, filename: string} : string",
         ),
         (
             "print_r",
             &[("$value", "mixed"), ("$return", "bool")],
             "$return is true ? string : true",
+        ),
+        (
+            "base64_decode",
+            &[("$string", "string"), ("$strict", "bool")],
+            "$strict is true ? string|false : string",
         ),
         (
             "hrtime",

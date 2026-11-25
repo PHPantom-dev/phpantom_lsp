@@ -64,6 +64,21 @@ pub(crate) fn infer_callable_params_from_function_fw(
             }
         }
 
+        // The callback's `$matches` holds one successful match of the
+        // pattern, which the stub's plain `callable` cannot say.
+        if arg_idx == 1
+            && let Some(call) = crate::type_engine::regex_shape::preg_replace_callback_match(
+                func_name,
+                argument_list,
+            )
+            && let Some(matched) = super::by_ref_builtins::preg_matched_type(&call, scope, ctx)
+        {
+            match params.first_mut() {
+                Some(first) => *first = matched,
+                None => params.push(matched),
+            }
+        }
+
         handed_to_callback(params, ctx)
     } else {
         vec![]

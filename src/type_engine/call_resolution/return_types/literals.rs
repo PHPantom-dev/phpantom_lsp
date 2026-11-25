@@ -60,7 +60,7 @@ pub(super) fn resolve_hint_keywords(
         owner
             .parent_class
             .as_ref()
-            .map(|p| PhpType::named(atom(p.as_ref())))
+            .map(|p| hint.replace_bare_parent(p.as_ref()))
             .unwrap_or(hint)
     } else if hint.contains_self_ref() {
         replace_self(hint)

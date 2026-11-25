@@ -251,7 +251,8 @@ fn string_cast_type(
         } else if member.is_named_ci("bool") || member.is_named_ci("boolean") {
             out.push(PhpType::literal_string_value(String::new()));
             PhpType::literal_string_value("1")
-        } else if let Some(declared) = class.and_then(to_string_return_type) {
+        } else if let Some(declared) = class.and_then(|class| to_string_return_type(class, member))
+        {
             declared
         } else {
             return false;
@@ -286,26 +287,44 @@ fn string_cast_type(
     PhpType::join_runtime_value_types(members)
 }
 
-/// The string type a class's `__toString()` declares, if it has one.
-fn to_string_return_type(class: &ClassInfo) -> Option<PhpType> {
-    class
-        .get_method_ci("__toString")?
-        .return_type
-        .clone()
-        .filter(|ty| ty.is_subtype_of(&PhpType::string()))
+/// The string type a class's `__toString()` declares, if it has one, with
+/// the class's templates read off `object` (`Bar<Exception>`), or their
+/// bounds when it names none.
+fn to_string_return_type(class: &ClassInfo, object: &PhpType) -> Option<PhpType> {
+    let declared = class.get_method_ci("__toString")?.return_type.as_ref()?;
+    let declared = if class.template_params.is_empty() {
+        declared.clone()
+    } else {
+        let args = match object.kind() {
+            TypeKind::Generic(generic) => generic.args.as_slice(),
+            _ => &[],
+        };
+        let mut subs = crate::inheritance::build_generic_subs(class, args);
+        crate::inheritance::fill_template_bounds(class, &mut subs);
+        declared.substitute(&subs)
+    };
+    declared
+        .is_subtype_of(&PhpType::string())
+        .then_some(declared)
 }
 
-/// `~` yields a string for string operands and an int otherwise.
+/// `~` yields a string for string operands and an int otherwise, member by
+/// member, so `~(string|int)` is `string|int`.
 fn bitwise_not_type(operand: &[ResolvedType]) -> PhpType {
-    let is_string = !operand.is_empty()
-        && operand
-            .iter()
-            .all(|rt| rt.type_string.is_subtype_of(&PhpType::string()));
-    if is_string {
-        PhpType::string()
-    } else {
-        PhpType::int()
+    if operand.is_empty() {
+        return PhpType::int();
     }
+    let joined = ResolvedType::types_joined(operand);
+    let mut results = Vec::new();
+    for member in joined.union_members() {
+        let result = if member.is_subtype_of(&PhpType::string()) {
+            PhpType::string()
+        } else {
+            PhpType::int()
+        };
+        push_unique_type(&mut results, result);
+    }
+    PhpType::union(results)
 }
 
 /// The type `++`/`--` produces for a numeric operand.

@@ -187,6 +187,7 @@
 //!    branch and the two stay in sync. `getInterfaceNames()` is declared
 //!    bare `array`, losing the fact that reflection only reports interfaces
 //!    that exist; it becomes `list<class-string>`, as in PHPStan's stub.
+//!    `getName()` becomes `class-string<T>` instead of `string`.
 //!
 //! 7. **`ReflectionObject`** -- the instance-only specialisation of
 //!    `ReflectionClass`, but without its `@template T of object` or an

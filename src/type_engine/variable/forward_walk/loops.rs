@@ -49,7 +49,8 @@ pub(crate) enum LoopSeedPoint {
 /// collected by the body walk belong in `scope`.  They join at the *end*
 /// of the body, so a caller asking about a position above that point must
 /// not see them — after `if (!$line) { continue; }` the guard has already
-/// ruled the falsy `$line` out.
+/// ruled the falsy `$line` out.  They still reach the next iteration either
+/// way: that is the back edge they take.
 pub(crate) fn walk_loop_body_to_fixed_point<'b>(
     body_stmts: &[&'b Statement<'b>],
     scope: &mut ScopeState,
@@ -69,20 +70,37 @@ pub(crate) fn walk_loop_body_to_fixed_point<'b>(
     // ── Initial walk (always performed) ─────────────────────────
     let initial_ctx = if re_walks > 0 { discovery_ctx } else { ctx };
     let mut previous_entry = (re_walks > 0).then(|| scope.clone());
+    // The `continue` states of the last walk when they are kept out of
+    // `scope`, still owed to the next iteration's entry.
+    let mut held_continues: Vec<ScopeState> = Vec::new();
+    let finish_walk = |scope: &mut ScopeState, held: &mut Vec<ScopeState>| {
+        // A body that always leaves (`return`, `throw`, `break`,
+        // `continue`) has no fall-through edge back to the loop head: only
+        // the `continue`s it recorded start the next iteration.
+        if !scope.unreachable && body_always_leaves(body_stmts, scope, ctx) {
+            scope.unreachable = true;
+        }
+        if fold_exit_edges {
+            drain_continue_edges(ctx.flow, scope);
+        } else {
+            *held = take_continue_edges(ctx.flow);
+        }
+    };
     clear_exit_frame(ctx.flow);
     walk_body_forward(body_stmts.iter().copied(), scope, initial_ctx);
-    if fold_exit_edges {
-        drain_continue_edges(ctx.flow, scope);
-    }
+    finish_walk(scope, &mut held_continues);
     let mut walked_at_cursor = re_walks == 0;
 
     // ── Re-walk iterations (only if types changed) ──────────────
     for iteration in 0..re_walks {
+        let mut walked = scope.clone();
+        merge_exit_edges(&mut walked, &std::mem::take(&mut held_continues));
+
         // Check for changes BEFORE re-walking: compare post-walk
         // scope against the pre-loop scope.  If no variable has a
         // type that differs from what was known before the loop,
         // there's nothing new to propagate — skip the re-walk.
-        if !scope_has_changes(pre_loop_scope, scope) {
+        if !scope_has_changes(pre_loop_scope, &walked) {
             break;
         }
 
@@ -90,7 +108,6 @@ pub(crate) fn walk_loop_body_to_fixed_point<'b>(
         // the same, so the loop has reached its fixed point.  The walked
         // scope is left as it ended rather than advanced by `AfterBody`,
         // exactly as the check above leaves it.
-        let mut walked = scope.clone();
         let mut entry = merged_loop_entry_scope(pre_loop_scope, &mut walked, &mut seed);
         if let Some(previous) = previous_entry.as_ref() {
             if entry.walks_the_same_as(previous) {
@@ -112,13 +129,12 @@ pub(crate) fn walk_loop_body_to_fixed_point<'b>(
             scope,
             if is_final { ctx } else { discovery_ctx },
         );
-        if fold_exit_edges {
-            drain_continue_edges(ctx.flow, scope);
-        }
+        finish_walk(scope, &mut held_continues);
         walked_at_cursor = is_final;
     }
 
     if !walked_at_cursor && discovery_ctx.cursor_offset != ctx.cursor_offset {
+        merge_exit_edges(scope, &std::mem::take(&mut held_continues));
         *scope = merged_loop_entry_scope(pre_loop_scope, scope, &mut seed);
         if let Some(previous) = previous_entry.as_ref() {
             widen_grown_int_locals(previous, scope, self_dependent);
@@ -129,6 +145,32 @@ pub(crate) fn walk_loop_body_to_fixed_point<'b>(
             drain_continue_edges(ctx.flow, scope);
         }
     }
+}
+
+/// Whether every path through a loop body leaves it.
+///
+/// The jumps are read from the syntax alone. Spotting a call to a `never`
+/// function takes its type, so only the body's last statement is resolved
+/// for one: this runs after every walk of the body, and resolving each call
+/// in it again on every pass is not worth the rarer shape of a loop that
+/// ends somewhere in the middle on `abort()`.
+fn body_always_leaves(
+    body_stmts: &[&Statement<'_>],
+    scope: &ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) -> bool {
+    if crate::type_engine::type_ops::condition_facts::statements_leave_block(
+        body_stmts.iter().copied(),
+        &|_| false,
+    ) {
+        return true;
+    }
+    let mut last = body_stmts.last().copied();
+    while let Some(Statement::Block(block)) = last {
+        last = block.statements.last();
+    }
+    matches!(last, Some(Statement::Expression(_)))
+        && super::if_else::branch_exits_stmts(last.into_iter(), scope, ctx)
 }
 
 /// How one loop's body should be walked.
