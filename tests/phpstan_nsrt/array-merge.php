@@ -22,9 +22,9 @@ function foo(): void
  */
 function unpackingArrays(array $foo, array $bar1, array $bar2, array $bar3): void
 {
-	assertType('array<string>', array_merge([], ...$foo)); // SKIP: array_merge() with a spread argument gives `array`
-	assertType('array<int>', array_merge([], ...$bar1)); // SKIP: array_merge() with a spread argument gives `array`
-	assertType('array<int>', array_merge([], ...$bar3)); // SKIP: array_merge() with a spread argument gives `array`
+	assertType('array<string>', array_merge([], ...$foo));
+	assertType('array<int>', array_merge([], ...$bar1));
+	assertType('array<int>', array_merge([], ...$bar3));
 }
 
 function unpackingConstantArrays(): void

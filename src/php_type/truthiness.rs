@@ -80,11 +80,17 @@ impl PhpType {
             TypeKind::ClassString(_) | TypeKind::InterfaceString(_) => Some(true),
             // An object shape or an intersection is an object, and an object
             // is always truthy.  A shape with at least one required field is
-            // a non-empty array; an empty one (`array{}`) is falsy.
+            // a non-empty array; an empty one (`array{}`) is falsy, and one
+            // whose keys are all optional may be either.
             TypeKind::Intersection(_) | TypeKind::ObjectShape(_) => Some(true),
-            TypeKind::ArrayShape(_) | TypeKind::ListShape(_) => self
-                .shape_entries()
-                .map(|entries| entries.iter().any(|entry| !entry.optional)),
+            TypeKind::ArrayShape(_) | TypeKind::ListShape(_) => {
+                let entries = self.shape_entries()?;
+                if entries.iter().any(|entry| !entry.optional) {
+                    Some(true)
+                } else {
+                    entries.is_empty().then_some(false)
+                }
+            }
             _ => None,
         }
     }

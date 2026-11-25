@@ -48,6 +48,8 @@ pub(super) fn resolve_rhs_function_call<'b>(
         let name_offset = func_call.function.span().start.offset;
         if let Some(resolved) = laravel_helper_call(name, argument_list, ctx)
             .or_else(|| call_user_func_return(name, argument_list, ctx))
+            .or_else(|| constant_call(name, argument_list, ctx))
+            .or_else(|| compact_call(name, expr, argument_list, ctx))
             .or_else(|| builtin_function_call(name, argument_list, ctx))
             .or_else(|| named_function_call(name, name_offset, argument_list, ctx))
         {
@@ -235,6 +237,157 @@ fn builtin_function_call(
         ctx,
     )?;
     Some(resolve_return_type(raw_type, ctx))
+}
+
+/// `constant('NAME')` and `constant('Foo::NAME')`: what the constant or
+/// enum case a literal (or union of literals) names holds.
+///
+/// The string is always a fully qualified name, read without the calling
+/// file's namespace or imports. `None` when any alternative is not a
+/// literal or names nothing that can be found, leaving the declared `mixed`.
+fn constant_call(
+    name: &str,
+    argument_list: &ArgumentList<'_>,
+    ctx: &VarResolutionCtx<'_>,
+) -> Option<Vec<ResolvedType>> {
+    if !name
+        .trim_start_matches('\\')
+        .eq_ignore_ascii_case("constant")
+    {
+        return None;
+    }
+    let Some(Argument::Positional(arg)) = argument_list.arguments.first() else {
+        return None;
+    };
+    let arg_ty = crate::type_engine::variable::resolution::resolve_arg_raw_type(arg.value, ctx)?;
+    let mut values: Vec<PhpType> = Vec::new();
+    for member in arg_ty.union_members() {
+        let written = member.as_literal()?.string_content()?;
+        let written = written.trim_start_matches('\\');
+        let value = match written.split_once("::") {
+            Some((class_name, const_name)) => {
+                named_class_constant_type(class_name, const_name, ctx)?
+            }
+            None => super::constant_access::global_constant_type(&format!("\\{written}"), 0, ctx)?,
+        };
+        if !values.contains(&value) {
+            values.push(value);
+        }
+    }
+    Some(vec![resolved_type_with_lookup(
+        PhpType::union(values),
+        ctx.file.all_classes,
+        ctx.file.class_loader,
+    )])
+}
+
+/// `compact('a', ['b'])`: a shape keyed by the named variables, each holding
+/// the variable's type here.
+///
+/// A name whose variable has no type in scope may be undefined, which
+/// `compact()` skips, so its key is optional. A name that is not written as
+/// a literal (or a nested array of literals) could be anything, giving
+/// `array<string, mixed>`.
+fn compact_call(
+    name: &str,
+    call: &Expression<'_>,
+    argument_list: &ArgumentList<'_>,
+    ctx: &VarResolutionCtx<'_>,
+) -> Option<Vec<ResolvedType>> {
+    if !name
+        .trim_start_matches('\\')
+        .eq_ignore_ascii_case("compact")
+    {
+        return None;
+    }
+    let mut names: Vec<&str> = Vec::new();
+    let mut known = true;
+    for arg in argument_list.arguments.iter() {
+        match arg {
+            Argument::Positional(positional) if positional.ellipsis.is_none() => {
+                known &= compact_names(positional.value, &mut names);
+            }
+            _ => known = false,
+        }
+    }
+    let ty = if known {
+        let offset = call.span().start.offset;
+        let entries = names
+            .into_iter()
+            .map(|var| {
+                let types = resolve_var_types(&format!("${var}"), ctx, offset);
+                crate::php_type::ShapeEntry {
+                    key: Some(var.to_string()),
+                    optional: types.is_empty(),
+                    value_type: if types.is_empty() {
+                        PhpType::mixed()
+                    } else {
+                        ResolvedType::types_joined(&types)
+                    },
+                }
+            })
+            .collect();
+        PhpType::array_shape(entries)
+    } else {
+        PhpType::generic_array(PhpType::string(), PhpType::mixed())
+    };
+    Some(vec![ResolvedType::from_type_string(ty)])
+}
+
+/// Collect the variable names `compact()` reads from one argument, in
+/// order and without repeats. `false` when the argument is not made of
+/// string literals.
+fn compact_names<'b>(expr: &'b Expression<'b>, names: &mut Vec<&'b str>) -> bool {
+    match expr {
+        Expression::Parenthesized(inner) => compact_names(inner.expression, names),
+        Expression::Literal(Literal::String(string)) => {
+            let Some(name) = string
+                .value
+                .and_then(|bytes| std::str::from_utf8(bytes).ok())
+            else {
+                return false;
+            };
+            if !names.contains(&name) {
+                names.push(name);
+            }
+            true
+        }
+        Expression::Array(Array { elements, .. })
+        | Expression::LegacyArray(LegacyArray { elements, .. }) => {
+            elements.iter().all(|element| match element {
+                ArrayElement::KeyValue(kv) => compact_names(kv.value, names),
+                ArrayElement::Value(v) => compact_names(v.value, names),
+                ArrayElement::Missing(_) => true,
+                ArrayElement::Variadic(_) => false,
+            })
+        }
+        _ => false,
+    }
+}
+
+/// The type `Class::NAME` holds for a fully qualified `class_name`: the
+/// enum case it names, or the class constant's value.
+fn named_class_constant_type(
+    class_name: &str,
+    const_name: &str,
+    ctx: &VarResolutionCtx<'_>,
+) -> Option<PhpType> {
+    let class_loader = ctx.file.class_loader;
+    let class = class_loader(crate::class_lookup::Fqn::new(class_name))?;
+    let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
+        &class,
+        class_loader,
+        ctx.resolved_class_cache,
+    );
+    let constant = merged.constants.iter().find(|c| c.name == const_name)?;
+    if constant.is_enum_case {
+        return Some(PhpType::enum_case(merged.fqn(), constant.name));
+    }
+    crate::type_engine::call_resolution::class_constant_type(
+        &merged,
+        const_name,
+        &ctx.as_resolution_ctx(),
+    )
 }
 
 /// What a call to the function `name` returns: the branch its conditional

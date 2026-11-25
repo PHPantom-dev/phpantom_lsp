@@ -23,19 +23,19 @@ function doFoo(string $constantName): void
 }
 
 assertType("'foo'", FOO);
-assertType("'foo'", constant('FOO')); // SKIP: constant() with a literal name does not read the constant
+assertType("'foo'", constant('FOO'));
 assertType("*ERROR*", constant('\Constant\FOO'));
 
 assertType("'bar'", BAR);
 assertType("*ERROR*", constant('BAR'));
-assertType("'bar'", constant('\Constant\BAR')); // SKIP: constant() with a literal name does not read the constant
+assertType("'bar'", constant('\Constant\BAR'));
 
-assertType("'bar'|'foo'", constant(rand(0, 1) ? 'FOO' : '\Constant\BAR')); // SKIP: constant() with a literal name does not read the constant
+assertType("'bar'|'foo'", constant(rand(0, 1) ? 'FOO' : '\Constant\BAR'));
 
-assertType("'baz'", constant('\Constant\Baz::BAZ')); // SKIP: constant() with a literal name does not read the constant
+assertType("'baz'", constant('\Constant\Baz::BAZ'));
 
 assertType('Constant\Suit::Hearts', Suit::Hearts);
-assertType('Constant\Suit::Hearts', constant('\Constant\Suit::Hearts')); // SKIP: constant() with a literal name does not read the constant
+assertType('Constant\Suit::Hearts', constant('\Constant\Suit::Hearts'));
 
 assertType('*ERROR*', constant('UNDEFINED'));
 assertType('*ERROR*', constant('::aa'));

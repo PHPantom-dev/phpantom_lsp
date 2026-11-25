@@ -22,9 +22,10 @@
 //! shape whose individual entries decide the result. PHPStan ships a dynamic
 //! return type extension for each of these for the same reason.
 //!
-//! `json_decode()` needs nothing here. It is declared `mixed`, so it carries
-//! no failure branch for the flag to remove. What both of them throw under
-//! the flag is decided here too ([`call_site_throws`]).
+//! `json_decode()` has no failure branch for the flag to remove, since it is
+//! declared `mixed`, but a literal JSON argument decides the value it
+//! decodes to. What both of them throw under the flag is decided here too
+//! ([`call_site_throws`]).
 //!
 //! - `gettype()` and `get_debug_type()` are declared `string`, but each name
 //!   their argument's runtime type from a fixed set, so an argument of known
@@ -35,7 +36,7 @@
 
 use crate::atom::atom;
 use crate::class_lookup::{Fqn, ResolvedClassLoader};
-use crate::php_type::{PhpType, TypeKind};
+use crate::php_type::{PhpType, ShapeEntry, TypeKind};
 use crate::types::ParameterInfo;
 
 use super::conditional::ArgTypeResolver;
@@ -132,6 +133,7 @@ const FILTER_CONSTANTS: &[(&str, i64)] = &[
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum CallSiteFunction {
     JsonEncode,
+    JsonDecode,
     FilterVar,
     FilterInput,
     ClassRelation,
@@ -144,6 +146,8 @@ fn classify(func_name: &str) -> Option<CallSiteFunction> {
     let name = func_name.trim_start_matches('\\');
     if name.eq_ignore_ascii_case("json_encode") {
         Some(CallSiteFunction::JsonEncode)
+    } else if name.eq_ignore_ascii_case("json_decode") {
+        Some(CallSiteFunction::JsonDecode)
     } else if name.eq_ignore_ascii_case("filter_var") {
         Some(CallSiteFunction::FilterVar)
     } else if name.eq_ignore_ascii_case("filter_input") {
@@ -204,6 +208,7 @@ pub(crate) fn call_site_return_type(
     };
     match classify(func_name)? {
         CallSiteFunction::JsonEncode => json_encode_return(&args, declared?),
+        CallSiteFunction::JsonDecode => json_decode_return(&args),
         CallSiteFunction::FilterVar => filter_return(&args, "$filter", "$options"),
         CallSiteFunction::FilterInput => {
             // The variable may be missing from the input altogether, which
@@ -261,6 +266,196 @@ fn json_encode_return(args: &CallArgs<'_>, declared: &PhpType) -> Option<PhpType
         return None;
     }
     without_false(declared)
+}
+
+/// `JSON_OBJECT_AS_ARRAY`, as defined by PHP's `ext/json/php_json.h`.
+const JSON_OBJECT_AS_ARRAY: i64 = 1;
+
+/// `json_decode()` of a literal JSON string (or a union of them): the value
+/// it decodes to, with objects as `stdClass` or, when `$associative` is
+/// `true` or left `null` under `JSON_OBJECT_AS_ARRAY`, as array shapes.
+/// Text that is not valid JSON decodes to `null`.
+///
+/// `None` when the JSON or the decoding mode cannot be read.
+fn json_decode_return(args: &CallArgs<'_>) -> Option<PhpType> {
+    let json = args.resolve(&args.text("$json")?)?;
+    let texts: Vec<String> = json
+        .union_members()
+        .into_iter()
+        .map(|member| Some(member.as_literal()?.string_content()?.into_owned()))
+        .collect::<Option<_>>()?;
+    let object_as_array = || {
+        args.text("$flags").is_some_and(|flags| {
+            bitmask_sets_flag(
+                &flags,
+                "JSON_OBJECT_AS_ARRAY",
+                JSON_OBJECT_AS_ARRAY,
+                args.resolver,
+            )
+        })
+    };
+    let associative = args.text("$associative");
+    let modes: &[bool] = match associative.as_deref().map(str::trim) {
+        None => &[false],
+        Some(text) if text.eq_ignore_ascii_case("null") => {
+            if object_as_array() {
+                &[true]
+            } else {
+                &[false]
+            }
+        }
+        Some(text) if text.eq_ignore_ascii_case("true") => &[true],
+        Some(text) if text.eq_ignore_ascii_case("false") => &[false],
+        Some(text) => {
+            let ty = args.resolve(text)?;
+            if ty.is_true() {
+                &[true]
+            } else if ty.is_false() {
+                &[false]
+            } else if ty.is_subtype_of(&PhpType::parse("bool|null")) {
+                &[false, true]
+            } else {
+                return None;
+            }
+        }
+    };
+    let mut results: Vec<PhpType> = Vec::new();
+    for text in &texts {
+        let decoded = serde_json::from_str::<JsonValue>(text).ok();
+        for &assoc in modes {
+            let ty = match &decoded {
+                Some(value) => json_value_type(value, assoc, &mut 0)?,
+                None => PhpType::null(),
+            };
+            if !results.contains(&ty) {
+                results.push(ty);
+            }
+        }
+    }
+    Some(PhpType::union(results))
+}
+
+/// How many values a decoded document may hold before it is left typed as
+/// the declared `mixed`: a literal that large is a data blob, not a value a
+/// caller tells apart.
+const MAX_JSON_VALUES: usize = 64;
+
+/// A decoded JSON value, keeping an object's keys in the order they were
+/// written (PHP does too) rather than sorted.
+enum JsonValue {
+    Null,
+    Bool(bool),
+    Int(i64),
+    Float(f64),
+    String(String),
+    Array(Vec<JsonValue>),
+    Object(Vec<(String, JsonValue)>),
+}
+
+impl<'de> serde::Deserialize<'de> for JsonValue {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct Visitor;
+        impl<'de> serde::de::Visitor<'de> for Visitor {
+            type Value = JsonValue;
+            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                f.write_str("a JSON value")
+            }
+            fn visit_unit<E>(self) -> Result<JsonValue, E> {
+                Ok(JsonValue::Null)
+            }
+            fn visit_bool<E>(self, v: bool) -> Result<JsonValue, E> {
+                Ok(JsonValue::Bool(v))
+            }
+            fn visit_i64<E>(self, v: i64) -> Result<JsonValue, E> {
+                Ok(JsonValue::Int(v))
+            }
+            fn visit_u64<E>(self, v: u64) -> Result<JsonValue, E> {
+                // PHP decodes an integer past `PHP_INT_MAX` as a float.
+                Ok(i64::try_from(v).map_or(JsonValue::Float(v as f64), JsonValue::Int))
+            }
+            fn visit_f64<E>(self, v: f64) -> Result<JsonValue, E> {
+                Ok(JsonValue::Float(v))
+            }
+            fn visit_str<E>(self, v: &str) -> Result<JsonValue, E> {
+                Ok(JsonValue::String(v.to_string()))
+            }
+            fn visit_string<E>(self, v: String) -> Result<JsonValue, E> {
+                Ok(JsonValue::String(v))
+            }
+            fn visit_seq<A: serde::de::SeqAccess<'de>>(
+                self,
+                mut seq: A,
+            ) -> Result<JsonValue, A::Error> {
+                let mut items = Vec::new();
+                while let Some(item) = seq.next_element()? {
+                    items.push(item);
+                }
+                Ok(JsonValue::Array(items))
+            }
+            fn visit_map<A: serde::de::MapAccess<'de>>(
+                self,
+                mut map: A,
+            ) -> Result<JsonValue, A::Error> {
+                let mut entries: Vec<(String, JsonValue)> = Vec::new();
+                while let Some((key, value)) = map.next_entry::<String, JsonValue>()? {
+                    // A repeated key keeps its first position and its last value.
+                    match entries.iter_mut().find(|(k, _)| *k == key) {
+                        Some(entry) => entry.1 = value,
+                        None => entries.push((key, value)),
+                    }
+                }
+                Ok(JsonValue::Object(entries))
+            }
+        }
+        deserializer.deserialize_any(Visitor)
+    }
+}
+
+/// The PHP type `json_decode()` gives `value`, objects decoded as arrays
+/// when `assoc`. `None` once `count` passes [`MAX_JSON_VALUES`].
+fn json_value_type(value: &JsonValue, assoc: bool, count: &mut usize) -> Option<PhpType> {
+    *count += 1;
+    if *count > MAX_JSON_VALUES {
+        return None;
+    }
+    Some(match value {
+        JsonValue::Null => PhpType::null(),
+        JsonValue::Bool(true) => PhpType::true_(),
+        JsonValue::Bool(false) => PhpType::false_(),
+        JsonValue::Int(v) => PhpType::literal_int(v.to_string()),
+        JsonValue::Float(v) if v.is_finite() => PhpType::literal_float(format!("{v:?}")),
+        JsonValue::Float(_) => PhpType::float(),
+        JsonValue::String(v) => PhpType::literal_string_value(v),
+        JsonValue::Array(items) => PhpType::array_shape(
+            items
+                .iter()
+                .map(|item| {
+                    Some(ShapeEntry {
+                        key: None,
+                        value_type: json_value_type(item, assoc, count)?,
+                        optional: false,
+                    })
+                })
+                .collect::<Option<_>>()?,
+        ),
+        JsonValue::Object(_) if !assoc => PhpType::named(atom("stdClass")),
+        JsonValue::Object(entries) => PhpType::array_shape(
+            entries
+                .iter()
+                .map(|(key, item)| {
+                    let plain = crate::php_type::canonical_int_key(key).is_some()
+                        || (key.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_')
+                            && key.chars().all(|c| c.is_ascii_alphanumeric() || c == '_'));
+                    plain.then_some(())?;
+                    Some(ShapeEntry {
+                        key: Some(key.clone()),
+                        value_type: json_value_type(item, assoc, count)?,
+                        optional: false,
+                    })
+                })
+                .collect::<Option<_>>()?,
+        ),
+    })
 }
 
 /// Whether the arguments of a call to `function` can decide what it throws
@@ -531,12 +726,29 @@ fn filter_return(args: &CallArgs<'_>, filter_param: &str, options_param: &str) -
         None => FILTER_DEFAULT,
     };
     let (flags, options) = filter_flags(args, options_param)?;
-    // Array input recurses through the filter element by element; the
-    // result's shape follows the input's, which is not modelled here.
-    if flags & (FILTER_REQUIRE_ARRAY | FILTER_FORCE_ARRAY) != 0 {
-        return None;
+    let element = filter_scalar_return(filter, flags, options.as_ref())?;
+    // Array input runs through the filter entry by entry, each failure
+    // reported in its place. `FILTER_FORCE_ARRAY` wraps a scalar input in an
+    // array, where `FILTER_REQUIRE_ARRAY` fails on one.
+    if flags & FILTER_FORCE_ARRAY != 0 {
+        return Some(PhpType::generic_array_val(element));
     }
+    if flags & FILTER_REQUIRE_ARRAY != 0 {
+        let array = PhpType::generic_array_val(element);
+        if flags & FILTER_THROW_ON_FAILURE != 0 {
+            return Some(array);
+        }
+        return Some(PhpType::union(vec![
+            array,
+            filter_failure(flags, options.as_ref()),
+        ]));
+    }
+    Some(element)
+}
 
+/// What a filter produces for one scalar: the filtered value, or the
+/// failure value [`filter_failure`] names.
+fn filter_scalar_return(filter: i64, flags: i64, options: Option<&PhpType>) -> Option<PhpType> {
     let mut filtered = match filter {
         FILTER_VALIDATE_INT => PhpType::int(),
         FILTER_VALIDATE_BOOL => PhpType::bool(),
@@ -552,13 +764,7 @@ fn filter_return(args: &CallArgs<'_>, filter_param: &str, options_param: &str) -
         _ => return None,
     };
 
-    let option = |key: &str| {
-        options
-            .as_ref()
-            .and_then(|o| o.shape_entry(key))
-            .filter(|entry| !entry.optional)
-            .map(|entry| entry.value_type.clone())
-    };
+    let option = |key: &str| filter_option(options, key);
     if filter == FILTER_VALIDATE_INT {
         let min = option("min_range").as_ref().and_then(literal_int);
         let max = option("max_range").as_ref().and_then(literal_int);
@@ -573,18 +779,32 @@ fn filter_return(args: &CallArgs<'_>, filter_param: &str, options_param: &str) -
     if flags & FILTER_THROW_ON_FAILURE != 0 {
         return Some(filtered);
     }
-    let failure = option("default").unwrap_or_else(|| {
+    let failure = filter_failure(flags, options);
+    // `bool|false` is just `bool`, and a `string` default is a string.
+    if failure.is_subtype_of(&filtered) {
+        return Some(filtered);
+    }
+    Some(PhpType::union(vec![filtered, failure]))
+}
+
+/// A required entry of the filter's `options` array.
+fn filter_option(options: Option<&PhpType>, key: &str) -> Option<PhpType> {
+    options
+        .and_then(|o| o.shape_entry(key))
+        .filter(|entry| !entry.optional)
+        .map(|entry| entry.value_type.clone())
+}
+
+/// What a filter returns when the value fails it: the `default` option,
+/// else `null` under `FILTER_NULL_ON_FAILURE` and `false` otherwise.
+fn filter_failure(flags: i64, options: Option<&PhpType>) -> PhpType {
+    filter_option(options, "default").unwrap_or_else(|| {
         if flags & FILTER_NULL_ON_FAILURE != 0 {
             PhpType::null()
         } else {
             PhpType::false_()
         }
-    });
-    // `bool|false` is just `bool`.
-    if filtered.is_bool() && failure.is_false() {
-        return Some(filtered);
-    }
-    Some(PhpType::union(vec![filtered, failure]))
+    })
 }
 
 /// The integer value of a bitmask expression, or `None` when any of its

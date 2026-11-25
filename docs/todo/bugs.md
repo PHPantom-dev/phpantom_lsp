@@ -33,75 +33,36 @@ No outstanding items.
 
 ## Standard-library return types
 
-### B773. `constant()` with a literal name returns `mixed`
+### B774. `filter_var()` does not read a known input value
 
 **Impact: Low · Complexity: Low**
 
 ```php
-define('FOO', 'foo');
-constant('FOO');                        // mixed, should be 'foo'
-constant('\Constant\Baz::BAZ');         // mixed, should be 'baz'
-constant('\Constant\Suit::Hearts');     // mixed, should be Suit::Hearts
+filter_var(12, FILTER_VALIDATE_INT);        // int|false, should be 12
+filter_var(3.27, FILTER_VALIDATE_FLOAT);    // float|false, should be 3.27
+filter_var(rand(), FILTER_VALIDATE_INT);    // int|false, should be int<0, max>
 ```
 
-**Fix:** resolve a literal (or literal-union) argument as the constant or
-class constant it names, the way the bare name resolves. `// SKIP` lines in
-`tests/phpstan_nsrt/constant.php`.
+The result is typed from the filter and flags alone. An input whose type the
+filter accepts unchanged could pass through as itself, without the failure
+branch. `// SKIP` lines in `tests/phpstan_nsrt/filterVar.php`.
 
-### B774. `filter_input()` and `filter_var()` with `FILTER_FORCE_ARRAY` return `mixed`
+**Upstream cases** (PHPStan `nsrt/`): `filter-var.php` (87), `filter-var-array.php` (48), `filter-var-returns-non-empty-string.php` (18), `filter-input-array.php` (13), `filter-var-php85.php` (2), `discussion-9134.php`.
+### B775. A variable assigned on only some paths is not known to be maybe-undefined
 
-**Impact: Low · Complexity: Low**
+**Impact: Low · Complexity: Medium**
 
 ```php
-filter_input(INPUT_GET, 'foo', FILTER_VALIDATE_INT, ['flags' => FILTER_FORCE_ARRAY]);
-// mixed, should be array<int|false>|null
+$foo = 'bar';
+if (rand(0, 1)) {
+    $lorem = 'ipsum';
+}
+compact('foo', 'lorem');   // array{foo: 'bar', lorem: 'ipsum'}, should be array{foo: 'bar', lorem?: 'ipsum'}
 ```
 
-**Fix:** teach the filter return-type rule the array flags, alone and
-combined with `FILTER_NULL_ON_FAILURE`. `// SKIP` lines in
-`tests/phpstan_nsrt/filter-input.php`.
-
-**Upstream cases** (PHPStan `nsrt/`, 328 assertions): `filterVar.php` (159), `filter-var.php` (87), `filter-var-array.php` (48), `filter-var-returns-non-empty-string.php` (18), `filter-input-array.php` (13), `filter-var-php85.php` (2), `discussion-9134.php`.
-
-### B775. `compact()` returns `array` rather than a shape
-
-**Impact: Low · Complexity: Low**
-
-```php
-$v = 1; $k = 'a';
-compact('v', 'k');   // array, should be array{v: 1, k: 'a'}
-```
-
-**Fix:** build the shape from the literal names and the variables' types in
-scope. `// SKIP` line in `tests/phpstan_nsrt/array-find.php`.
-
-**Upstream cases** (PHPStan `nsrt/`, 9 assertions): `compact.php` (6), `bug-10187.php`, `array-find-key.php`, `pipe-operator.php`.
-
-### B776. `array_merge()` with a spread argument returns `array`
-
-**Impact: Low · Complexity: Low**
-
-```php
-/** @param string[][] $foo */
-array_merge([], ...$foo);   // array, should be array<string>
-```
-
-**Fix:** merge the spread iterable's element type like any other argument.
-`// SKIP` lines in `tests/phpstan_nsrt/array-merge.php`.
-
-### B777. `array_find()` does not narrow by a type-checking callback
-
-**Impact: Low · Complexity: Low**
-
-```php
-/** @param array{1, 'foo', \DateTime} $array */
-array_find($array, 'is_int');   // 1|'foo'|DateTime|null, should be 1
-```
-
-**Fix:** narrow the found value by a callback named as a type check
-(`'is_int'`, `'is_string'`, …), as `array_filter()` does. `// SKIP` lines in
-`tests/phpstan_nsrt/array-find.php`.
-
+The forward walker keeps a variable's type after a branch that assigned it
+but not whether every path did, so `compact()` (and anything else asking)
+treats it as always defined. `// SKIP` line in `tests/phpstan_nsrt/compact.php`.
 ### B778. String functions and `++` on literals are not folded
 
 **Impact: Low · Complexity: Low-Medium**
@@ -115,18 +76,20 @@ mb_convert_case('Česká', MB_CASE_UPPER); // string, should be 'ČESKÁ'
 ucwords('hello|world', '|');             // string, should be 'Hello|World'
 mb_substr('déjà_vu', 0, 3);              // string, should be 'déj'
 $a = 'a'; $a++;                          // string, should be 'b'
+sprintf('%s%s', 'ba', 'r');              // not folded, should be 'bar'
 ```
 
 `strtolower()`, `trim()` with a literal character list, `str_repeat()` with a
 literal count and others already fold a literal argument. The multibyte
 variants, a union of literals in the second argument, a zero count, the
-delimiter form of `ucwords()`, and PHP's alphanumeric string increment do not.
+delimiter form of `ucwords()`, `sprintf()` of literal arguments, and PHP's
+alphanumeric string increment do not.
 
 **Fix:** fold these the way their single-byte, single-literal forms are
 folded, over each member of a literal union. `// SKIP` lines in
 `tests/phpstan_nsrt/str-casing.php`, `trim.php`, `literal-string.php`,
-`non-empty-string.php`, `non-empty-string-substr.php` and
-`mixed-to-number.php`.
+`non-empty-string.php`, `non-empty-string-substr.php`, `mixed-to-number.php`
+and `enum-from.php`.
 
 **Upstream cases** (PHPStan `nsrt/`, 267 assertions): `strval.php` (39), `abs.php` (35), `pow.php` (27), `str_increment.php` (20), `str_decrement.php` (17), `mb-strlen-php83.php` (15), `implode.php` (13), `date.php` (13), `array-sum.php` (13), `range-function.php` (11), `constantTypes.php` (8), `string-offsets.php` (8), 19 more.
 
@@ -159,24 +122,6 @@ from the named column of each row (and the index column's values as keys,
 when given). `// SKIP` line in `tests/phpstan_nsrt/bug-12954.php`.
 
 **Upstream cases** (PHPStan `nsrt/`, 117 assertions): `array-column-php82.php` (111), `bug-8917.php` (2), `array-column-php8.php` (2), `bug-9204.php`, `bug-6497.php`.
-
-### B818. `settype()` does not change its argument's type
-
-**Impact: Medium · Complexity: Low**
-
-```php
-function f(string $s) {
-    settype($s, 'int');
-    $s;   // string, should be int
-    $x = null;
-    settype($x, 'array');
-    $x;   // null, should be array{}
-}
-```
-
-The by-reference effect of settype() is not modelled at all: the variable keeps its old type. Needs a rule mapping the (literal or unknown) type name to the cast result, folding literal inputs.
-
-**Cases** (PHPStan `nsrt/`, 115 assertions): `set-type-type-specifying.php` (115).
 
 ### B819. Built-ins whose result their arguments decide return the declared type
 
@@ -324,40 +269,18 @@ Under PREG_UNMATCHED_AS_NULL only optional groups get |null; PHPStan (matching P
 
 **Cases** (PHPStan `nsrt/`, 5 assertions): `preg_match_all_shapes.php` (3), `preg_match_shapes_php80.php`, `preg_replace_callback_shapes.php`.
 
-### B826. `Enum::from()` and `tryFrom()` with a known value do not return the matching case
-
-**Impact: Medium · Complexity: Low**
-
-```php
-enum E: int { case A = 1; case B = 2; }
-E::tryFrom(2);         // ?E, should be E::B
-E::tryFrom(0);         // ?E, should be null
-E::from(E::B->value);  // E, should be E::B
-```
-
-The backing-value lookup is not done for literal (or constant-folded, or narrowed) arguments; the native `static`/`?static` return is used as is.
-
-**Cases** (PHPStan `nsrt/`, 22 assertions): `enum-from.php` (22).
-
-### B829. `json_decode()` of a literal JSON string is not evaluated
+### B829. `json_decode()` into arrays does not rule out objects
 
 **Impact: Low · Complexity: Low**
 
 ```php
-json_decode('[1, 2, 3]');   // mixed, should be array{1, 2, 3}
-json_decode('{}');          // mixed, should be stdClass
-/** @var '{}'|'null' $j */ json_decode($j, true);   // mixed, should be array{}|null
+json_decode($mixed, true);                          // mixed, should be mixed~object
+json_decode($mixed, null, 512, JSON_OBJECT_AS_ARRAY); // mixed, should be mixed~object
 ```
 
-No folding of a literal (or literal-union) JSON argument, with the associative flag or `JSON_OBJECT_AS_ARRAY`.
-
-It also shows as:
-
-- `json_decode()` of a literal JSON string is not folded
-- `json_decode()` of an invalid literal JSON string is not evaluated
-
-**Cases** (PHPStan `nsrt/`, 21 assertions): `json-decode-narrow_type.php` (10), `json-decode-narrow_type_with_force_array.php` (6), `json-decode-invalid_type.php` (4), `json-decode-json_object_as_array.php`.
-
+With objects decoded as arrays the result of an unknown string can never be
+an object. `// SKIP` lines in `tests/phpstan_nsrt/json-decode-json_object_as_array.php`
+and `json-decode-narrow_type_with_force_array.php`.
 ### B830. `DOMDocument::createElement()` with a valid literal name keeps `|false`
 
 **Impact: Low · Complexity: Low**
@@ -460,6 +383,7 @@ It also shows as:
 - `array_filter()` with a callback that can never return true does not give `array{}`
 - `array_filter()` with a callback on an array shape returns a generic array instead of filtering each entry
 - UNCLEAR: a closure passed to `array_filter()` gets no parameter types
+- An inline `array_find()` callback's key parameter is `string`, not the array's literal keys (`// SKIP` line in `tests/phpstan_nsrt/array-find.php`)
 
 **Cases** (PHPStan `nsrt/`, 31 assertions): `bug-11730.php` (15), `bug-3132.php` (4), `array-filter-constant.php` (3), `array-filter-arrow-functions.php` (3), `array-functions.php` (2), `bug-7993.php`, `bug-11570.php`, `bug-6006.php`, `bug-7909.php`.
 

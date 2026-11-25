@@ -910,9 +910,9 @@ function probe(array $users, array $byName, array $ordersByName, array $loose, a
 
 /// An argument the rule cannot read could contribute anything, so it declines
 /// and leaves the stub's bare `array` standing rather than claim a union that
-/// is missing a member. A bare `array` names no element type, and a spread
-/// holds the arrays to merge rather than one of them. Two empty literals are
-/// shapes it can read, and merge to the empty shape.
+/// is missing a member. A bare `array` names no element type. A spread holds
+/// the arrays to merge, so it contributes what one of its elements would. Two
+/// empty literals are shapes it can read, and merge to the empty shape.
 #[test]
 fn array_merge_declines_on_arguments_it_cannot_read() {
     let content = r#"<?php
@@ -931,7 +931,7 @@ function probe(array $users, array $groups, array $bare): void {
         content,
         &[
             ("$withBare", "array"),
-            ("$spread", "array"),
+            ("$spread", "list<User>"),
             ("$empty", "array{}"),
         ],
     );

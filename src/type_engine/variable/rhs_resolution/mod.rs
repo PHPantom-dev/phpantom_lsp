@@ -113,7 +113,9 @@ pub(crate) use literal_text::{
     infer_type_from_constant_value_resolved,
 };
 pub(in crate::type_engine) use scope_reads::resolve_var_types;
-pub(crate) use unary_prefix::{object_cast_type, unary_prefix_result_type};
+pub(crate) use unary_prefix::{
+    CastKind, cast_result_type, object_cast_type, unary_prefix_result_type,
+};
 
 pub(crate) use array_access::{class_string_inner_binding, insert_or_union, offset_read_type};
 pub(crate) use assignment_value::{

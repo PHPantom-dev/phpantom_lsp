@@ -38,7 +38,8 @@ pub(crate) fn unary_prefix_result_type(
 ) -> Option<PhpType> {
     use unary::UnaryPrefixOperator;
 
-    let base = match operator {
+    match operator {
+        UnaryPrefixOperator::Not(_) => return Some(PhpType::bool()),
         UnaryPrefixOperator::Negation(_) | UnaryPrefixOperator::Plus(_) => {
             let negated = matches!(operator, UnaryPrefixOperator::Negation(_));
             let resolved = resolve_operand();
@@ -48,12 +49,6 @@ pub(crate) fn unary_prefix_result_type(
                 return Some(class.to_type());
             }
             return Some(signed_numeric_type(&resolved, negated));
-        }
-        UnaryPrefixOperator::ObjectCast(..) => {
-            let resolved = resolve_operand();
-            return Some(object_cast_type(
-                (!resolved.is_empty()).then(|| ResolvedType::types_joined(&resolved)),
-            ));
         }
         UnaryPrefixOperator::BitwiseNot(_) => {
             let resolved = resolve_operand();
@@ -65,37 +60,112 @@ pub(crate) fn unary_prefix_result_type(
             }
             return Some(bitwise_not_type(&resolved));
         }
-        UnaryPrefixOperator::IntCast(..) | UnaryPrefixOperator::IntegerCast(..) => {
-            if !scalar_fold::is_cheap_scalar_operand(operand) {
-                return Some(PhpType::int());
-            }
-            let resolved = resolve_operand();
-            if let Some(folded) = scalar_fold::single_scalar(&resolved)
-                .and_then(|scalar| scalar_fold::fold_cast(operator, &scalar))
-            {
-                return Some(folded);
-            }
-            return Some(int_cast_type(&resolved));
-        }
-        UnaryPrefixOperator::StringCast(..) | UnaryPrefixOperator::BinaryCast(..) => {
-            return Some(string_cast_type(&resolve_operand(), class_loader, cache));
-        }
-        UnaryPrefixOperator::FloatCast(..)
-        | UnaryPrefixOperator::DoubleCast(..)
-        | UnaryPrefixOperator::RealCast(..) => PhpType::float(),
-        UnaryPrefixOperator::BoolCast(..) | UnaryPrefixOperator::BooleanCast(..) => PhpType::bool(),
-        UnaryPrefixOperator::ArrayCast(..) => return Some(array_cast_type(resolve_operand())),
-        UnaryPrefixOperator::UnsetCast(..) => return Some(PhpType::named(atom("null"))),
-        UnaryPrefixOperator::Not(_) => return Some(PhpType::bool()),
-        _ => return None,
-    };
-    if scalar_fold::is_cheap_scalar_operand(operand)
-        && let Some(folded) = scalar_fold::single_scalar(&resolve_operand())
-            .and_then(|scalar| scalar_fold::fold_cast(operator, &scalar))
-    {
-        return Some(folded);
+        _ => {}
     }
-    Some(base)
+    let kind = CastKind::of(operator)?;
+    // `(int)`, `(float)` and `(bool)` of anything but a cheap operand are
+    // decided without it, so an `(int)` cast of a call pays nothing for
+    // resolving the call.
+    if matches!(kind, CastKind::Int | CastKind::Float | CastKind::Bool)
+        && !scalar_fold::is_cheap_scalar_operand(operand)
+    {
+        return Some(match kind {
+            CastKind::Int => PhpType::int(),
+            CastKind::Float => PhpType::float(),
+            _ => PhpType::bool(),
+        });
+    }
+    Some(cast_result_type(
+        kind,
+        resolve_operand(),
+        class_loader,
+        cache,
+    ))
+}
+
+/// The scalar, array, object and `null` conversions a cast or `settype()`
+/// performs.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum CastKind {
+    Int,
+    Float,
+    String,
+    Bool,
+    Array,
+    Object,
+    Null,
+}
+
+impl CastKind {
+    fn of(operator: &unary::UnaryPrefixOperator<'_>) -> Option<Self> {
+        use unary::UnaryPrefixOperator;
+        Some(match operator {
+            UnaryPrefixOperator::IntCast(..) | UnaryPrefixOperator::IntegerCast(..) => Self::Int,
+            UnaryPrefixOperator::FloatCast(..)
+            | UnaryPrefixOperator::DoubleCast(..)
+            | UnaryPrefixOperator::RealCast(..) => Self::Float,
+            UnaryPrefixOperator::StringCast(..) | UnaryPrefixOperator::BinaryCast(..) => {
+                Self::String
+            }
+            UnaryPrefixOperator::BoolCast(..) | UnaryPrefixOperator::BooleanCast(..) => Self::Bool,
+            UnaryPrefixOperator::ArrayCast(..) => Self::Array,
+            UnaryPrefixOperator::ObjectCast(..) => Self::Object,
+            UnaryPrefixOperator::UnsetCast(..) => Self::Null,
+            _ => return None,
+        })
+    }
+
+    /// The conversion `settype()` performs for a type name it accepts.
+    pub(crate) fn of_settype_name(name: &str) -> Option<Self> {
+        Some(match name.to_ascii_lowercase().as_str() {
+            "int" | "integer" => Self::Int,
+            "float" | "double" => Self::Float,
+            "string" => Self::String,
+            "bool" | "boolean" => Self::Bool,
+            "array" => Self::Array,
+            "object" => Self::Object,
+            "null" => Self::Null,
+            _ => return None,
+        })
+    }
+
+    /// Every conversion `settype()` can perform.
+    pub(crate) const ALL: [Self; 7] = [
+        Self::Int,
+        Self::Float,
+        Self::String,
+        Self::Bool,
+        Self::Array,
+        Self::Object,
+        Self::Null,
+    ];
+}
+
+/// The type converting a value of the resolved `operand` type with `kind`
+/// produces. An operand holding one known scalar folds to the value PHP
+/// computes (`(int) '1'` is `1`).
+pub(crate) fn cast_result_type(
+    kind: CastKind,
+    operand: Vec<ResolvedType>,
+    class_loader: &ResolvedClassLoader<'_>,
+    cache: Option<&ResolvedClassCache>,
+) -> PhpType {
+    if let Some(folded) = scalar_fold::single_scalar(&operand)
+        .and_then(|scalar| scalar_fold::fold_cast(kind, &scalar))
+    {
+        return folded;
+    }
+    match kind {
+        CastKind::Int => int_cast_type(&operand),
+        CastKind::Float => float_cast_type(&operand),
+        CastKind::String => string_cast_type(&operand, class_loader, cache),
+        CastKind::Bool => bool_cast_type(&operand),
+        CastKind::Array => array_cast_type(operand),
+        CastKind::Object => {
+            object_cast_type((!operand.is_empty()).then(|| ResolvedType::types_joined(&operand)))
+        }
+        CastKind::Null => PhpType::named(atom("null")),
+    }
 }
 
 /// The type `(int)` gives an operand of the resolved type: an integer
@@ -129,9 +199,74 @@ fn int_cast_type(operand: &[ResolvedType]) -> PhpType {
                     .map(|value| PhpType::literal_int(value.to_string())),
             );
         } else if member.is_array_like() {
-            cast.extend([PhpType::literal_int("0"), PhpType::literal_int("1")]);
+            cast.extend(truthiness_numbers(member, |n| {
+                PhpType::literal_int(n.to_string())
+            }));
         } else {
             return PhpType::int();
+        }
+    }
+    PhpType::union(cast)
+}
+
+/// `0` and `1` (through `number`) for the values of `member` that are
+/// falsy and truthy: an array casts to a number by whether it is empty.
+fn truthiness_numbers(member: &PhpType, number: impl Fn(u8) -> PhpType) -> Vec<PhpType> {
+    match member.truthiness() {
+        Some(truthy) => vec![number(u8::from(truthy))],
+        None => vec![number(0), number(1)],
+    }
+}
+
+/// The members of a resolved operand, with a nullable's `null` spelled out.
+fn operand_members(operand: &[ResolvedType]) -> Vec<PhpType> {
+    let joined = ResolvedType::types_joined(operand);
+    match joined.kind() {
+        TypeKind::Nullable(inner) => {
+            let mut members: Vec<PhpType> = inner.union_members().into_iter().cloned().collect();
+            members.push(PhpType::null());
+            members
+        }
+        _ => joined.union_members().into_iter().cloned().collect(),
+    }
+}
+
+/// The type `(float)` gives an operand of the resolved type: `null`,
+/// `bool` and arrays become the `0.0` or `1.0` PHP converts them to, and
+/// anything else gives a plain `float`.
+fn float_cast_type(operand: &[ResolvedType]) -> PhpType {
+    if operand.is_empty() {
+        return PhpType::float();
+    }
+    let float = |n: u8| PhpType::literal_float(format!("{n}.0"));
+    let mut cast: Vec<PhpType> = Vec::new();
+    for member in operand_members(operand) {
+        let converts_by_truthiness = member.is_null()
+            || member.is_bool()
+            || member.is_true()
+            || member.is_false()
+            || (member.is_array_like() && !member.is_iterable());
+        if converts_by_truthiness {
+            cast.extend(truthiness_numbers(&member, float));
+        } else {
+            return PhpType::float();
+        }
+    }
+    PhpType::union(cast)
+}
+
+/// The type `(bool)` gives an operand of the resolved type: `true` or
+/// `false` for each member whose truthiness is known, else `bool`.
+fn bool_cast_type(operand: &[ResolvedType]) -> PhpType {
+    if operand.is_empty() {
+        return PhpType::bool();
+    }
+    let mut cast: Vec<PhpType> = Vec::new();
+    for member in operand_members(operand) {
+        match member.truthiness() {
+            Some(true) => cast.push(PhpType::true_()),
+            Some(false) => cast.push(PhpType::false_()),
+            None => return PhpType::bool(),
         }
     }
     PhpType::union(cast)

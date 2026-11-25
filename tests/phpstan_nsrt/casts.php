@@ -99,7 +99,7 @@ class Foo extends Bar
 		$boolToFloat = (float) $boolParam;
 		$boolToString = (string) $boolParam;
 		assertType('0|1', $boolToInt); // upstream expected int, current PHPStan gives 0|1 too
-		assertType('float', $boolToFloat);
+		assertType('0.0|1.0', $boolToFloat); // upstream expects float; PHPantom keeps the two values a bool converts to
 		assertType("''|'1'", $boolToString);
 	}
 

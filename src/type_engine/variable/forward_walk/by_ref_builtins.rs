@@ -593,6 +593,71 @@ pub(super) fn seed_by_ref_parameters<'b>(
     }
 }
 
+/// `settype($var, 'int')` converts `$var` in place the way the matching
+/// cast would, so `$var` holds what `(int) $var` gives. A type name that is
+/// not one literal may be any of the names `settype()` accepts, and the
+/// variable holds one of their conversions.
+///
+/// `false` when `expr` is not a `settype()` call on a plain variable.
+pub(super) fn apply_settype<'b>(
+    expr: &'b Expression<'b>,
+    scope: &mut ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) -> bool {
+    use crate::type_engine::variable::rhs_resolution::{CastKind, cast_result_type};
+    let Expression::Call(Call::Function(call)) = expr else {
+        return false;
+    };
+    let Expression::Identifier(ident) = call.function else {
+        return false;
+    };
+    if !bytes_to_str(ident.value())
+        .trim_start_matches('\\')
+        .eq_ignore_ascii_case("settype")
+    {
+        return false;
+    }
+    let mut args = call.argument_list.arguments.iter();
+    let (Some(Argument::Positional(var_arg)), Some(Argument::Positional(type_arg)), None) =
+        (args.next(), args.next(), args.next())
+    else {
+        return false;
+    };
+    let Expression::Variable(Variable::Direct(dv)) = var_arg.value else {
+        return false;
+    };
+    let var_name = bytes_to_str(dv.name);
+    let type_name = super::assignment::resolve_rhs_with_scope(type_arg.value, scope, ctx);
+    let type_name = (!type_name.is_empty()).then(|| ResolvedType::types_joined(&type_name));
+    let kinds: Vec<CastKind> = type_name
+        .as_ref()
+        .and_then(|ty| {
+            ty.union_members()
+                .into_iter()
+                .map(|member| CastKind::of_settype_name(&member.as_literal()?.string_content()?))
+                .collect::<Option<Vec<_>>>()
+        })
+        .unwrap_or_else(|| CastKind::ALL.to_vec());
+    let current = scope.get(var_name).to_vec();
+    let mut results: Vec<PhpType> = Vec::new();
+    for kind in kinds {
+        let ty = cast_result_type(
+            kind,
+            current.clone(),
+            ctx.file.class_loader,
+            ctx.resolved_class_cache,
+        );
+        if !results.contains(&ty) {
+            results.push(ty);
+        }
+    }
+    scope.set(
+        var_name,
+        vec![ResolvedType::from_type_string(PhpType::union(results))],
+    );
+    true
+}
+
 /// Type `$matches` from the capture groups of the pattern a
 /// `preg_match`/`preg_match_all` call passes.
 ///

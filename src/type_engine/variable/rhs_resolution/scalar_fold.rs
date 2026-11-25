@@ -99,9 +99,55 @@ impl Scalar {
         }
     }
 
+    /// The number a cast reads: a string's leading numeric prefix, or `0`
+    /// when it has none (`(int) '12abc'` is `12`, `(int) 'abc'` is `0`),
+    /// where arithmetic would reject the string.
+    fn to_cast_number(&self) -> Option<Scalar> {
+        let Scalar::String(content) = self else {
+            return self.to_number();
+        };
+        let text = content.trim_start_matches([' ', '\t', '\n', '\r', '\x0b', '\x0c']);
+        let bytes = text.as_bytes();
+        let digits_from = |mut i: usize| {
+            while bytes.get(i).is_some_and(u8::is_ascii_digit) {
+                i += 1;
+            }
+            i
+        };
+        let mut end = usize::from(matches!(bytes.first(), Some(b'+' | b'-')));
+        let int_start = end;
+        end = digits_from(end);
+        let mut has_digits = end > int_start;
+        let mut fractional = false;
+        if bytes.get(end) == Some(&b'.') {
+            let frac_end = digits_from(end + 1);
+            if has_digits || frac_end > end + 1 {
+                has_digits = true;
+                fractional = true;
+                end = frac_end;
+            }
+        }
+        if !has_digits {
+            return Some(Scalar::Int(0));
+        }
+        if matches!(bytes.get(end), Some(b'e' | b'E')) {
+            let sign = usize::from(matches!(bytes.get(end + 1), Some(b'+' | b'-')));
+            let exp_end = digits_from(end + 1 + sign);
+            if exp_end > end + 1 + sign {
+                fractional = true;
+                end = exp_end;
+            }
+        }
+        let prefix = &text[..end];
+        if !fractional && let Ok(value) = prefix.parse::<i64>() {
+            return Some(Scalar::Int(value));
+        }
+        prefix.parse::<f64>().ok().map(Scalar::Float)
+    }
+
     /// The value of `(int)`.
     fn to_int(&self) -> Option<i64> {
-        match self.to_number()? {
+        match self.to_cast_number()? {
             Scalar::Int(value) => Some(value),
             // Out of range (or non-finite) is platform-dependent in PHP, so
             // it is not folded.
@@ -114,7 +160,7 @@ impl Scalar {
 
     /// The value of `(float)`.
     fn to_float(&self) -> Option<f64> {
-        match self.to_number()? {
+        match self.to_cast_number()? {
             Scalar::Int(value) => Some(value as f64),
             Scalar::Float(value) => Some(value),
             _ => None,
@@ -517,20 +563,13 @@ pub(super) fn fold_interpolated<'b>(
 
 /// The value a cast of a known scalar produces, for the casts that have
 /// one. `(object)`, `(array)` and `(unset)` are left to the caller.
-pub(super) fn fold_cast(operator: &UnaryPrefixOperator<'_>, operand: &Scalar) -> Option<PhpType> {
-    Some(match operator {
-        UnaryPrefixOperator::IntCast(..) | UnaryPrefixOperator::IntegerCast(..) => {
-            PhpType::literal_int(operand.to_int()?.to_string())
-        }
-        UnaryPrefixOperator::FloatCast(..)
-        | UnaryPrefixOperator::DoubleCast(..)
-        | UnaryPrefixOperator::RealCast(..) => Scalar::Float(operand.to_float()?).into_type(),
-        UnaryPrefixOperator::StringCast(..) | UnaryPrefixOperator::BinaryCast(..) => {
-            PhpType::literal_string_value(operand.to_php_string()?)
-        }
-        UnaryPrefixOperator::BoolCast(..) | UnaryPrefixOperator::BooleanCast(..) => {
-            Scalar::Bool(operand.truthiness()).into_type()
-        }
+pub(super) fn fold_cast(kind: super::unary_prefix::CastKind, operand: &Scalar) -> Option<PhpType> {
+    use super::unary_prefix::CastKind;
+    Some(match kind {
+        CastKind::Int => PhpType::literal_int(operand.to_int()?.to_string()),
+        CastKind::Float => Scalar::Float(operand.to_float()?).into_type(),
+        CastKind::String => PhpType::literal_string_value(operand.to_php_string()?),
+        CastKind::Bool => Scalar::Bool(operand.truthiness()).into_type(),
         _ => return None,
     })
 }
@@ -666,6 +705,18 @@ mod tests {
         assert_eq!(s("abc").to_number(), None);
         assert_eq!(Scalar::Float(1.9).to_int(), Some(1));
         assert_eq!(Scalar::Float(-1.9).to_int(), Some(-1));
+    }
+
+    #[test]
+    fn casts_read_a_leading_numeric_prefix() {
+        let s = |text: &str| Scalar::String(text.to_string());
+        assert_eq!(s("12abc").to_int(), Some(12));
+        assert_eq!(s("abc").to_int(), Some(0));
+        assert_eq!(s("").to_float(), Some(0.0));
+        assert_eq!(s(" -1.5e2x").to_float(), Some(-150.0));
+        assert_eq!(s("1e").to_int(), Some(1));
+        assert_eq!(s(".5").to_float(), Some(0.5));
+        assert_eq!(s("-").to_int(), Some(0));
     }
 
     #[test]

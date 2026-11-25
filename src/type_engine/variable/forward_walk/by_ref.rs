@@ -677,7 +677,9 @@ fn apply_by_ref_parameter_types<'b>(
     // `preg_match`'s `$matches` is typed from the pattern, which needs no
     // callee, and it has no other by-reference parameter beside it, so
     // nothing below is left to do once the pattern has typed it.
-    if seed_preg_matches(expr, scope, ctx) {
+    if seed_preg_matches(expr, scope, ctx)
+        || super::by_ref_builtins::apply_settype(expr, scope, ctx)
+    {
         return;
     }
     if let Some(call) = by_ref_call(expr, scope, ctx) {

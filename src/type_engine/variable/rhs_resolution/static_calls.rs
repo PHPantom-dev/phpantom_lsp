@@ -168,6 +168,9 @@ fn static_call_on_class(
                 ctx,
             );
         }
+        if let Some(case) = enum_from_type(owner, method_name, argument_list, ctx) {
+            return vec![ResolvedType::from_type_string(case)];
+        }
         if let Some(result) = super::key_path_calls::try_resolve_array_helper_type(
             &owner.fqn(),
             method_name,
@@ -279,6 +282,68 @@ fn static_call_on_class(
         &rctx,
     );
     results
+}
+
+/// `BackedEnum::from($value)` and `tryFrom($value)` with a value of known
+/// literals: the cases whose backing value they are. `tryFrom()` adds
+/// `null` when a literal matches no case; `from()` throws for one, so it
+/// only contributes the cases found (and, finding none, leaves the declared
+/// type).
+///
+/// `None` unless every alternative is a literal of the enum's backing type:
+/// another scalar is coerced or rejected depending on `strict_types`.
+fn enum_from_type(
+    owner: &ClassInfo,
+    method_name: &str,
+    argument_list: &ArgumentList<'_>,
+    ctx: &VarResolutionCtx<'_>,
+) -> Option<PhpType> {
+    if owner.kind != crate::types::ClassLikeKind::Enum {
+        return None;
+    }
+    let try_from = method_name.eq_ignore_ascii_case("tryFrom");
+    if !try_from && !method_name.eq_ignore_ascii_case("from") {
+        return None;
+    }
+    let cases: Vec<(crate::atom::Atom, PhpType)> = owner
+        .constants
+        .iter()
+        .filter(|c| c.is_enum_case)
+        .map(|c| {
+            crate::type_engine::call_resolution::enum_case_property_literal(owner, &c.name, "value")
+                .map(|value| (c.name, value))
+        })
+        .collect::<Option<_>>()?;
+    let backing = std::mem::discriminant(cases.first()?.1.as_literal()?);
+    let arg = crate::call_args::first_param_arg(argument_list, "value")?;
+    let arg_ty = crate::type_engine::variable::resolution::resolve_arg_raw_type(arg.value(), ctx)?;
+    let mut found: Vec<PhpType> = Vec::new();
+    let mut missed = false;
+    for member in arg_ty.union_members() {
+        let literal = member.as_literal()?;
+        if std::mem::discriminant(literal) != backing {
+            return None;
+        }
+        let mut matched = false;
+        for (case, value) in &cases {
+            if literal.identical_to(value.as_literal()?)? {
+                let case_ty = PhpType::enum_case(owner.fqn(), *case);
+                if !found.contains(&case_ty) {
+                    found.push(case_ty);
+                }
+                matched = true;
+            }
+        }
+        missed |= !matched;
+    }
+    if try_from {
+        if missed {
+            found.push(PhpType::null());
+        }
+    } else if found.is_empty() {
+        return None;
+    }
+    Some(PhpType::union(found))
 }
 
 /// Re-point results typed `static(lsb)` / `$this(lsb)` (optionally

@@ -318,6 +318,12 @@ pub(in crate::type_engine) fn array_func_element_type(
     // reaches here spelled with its leading separator.
     let func_name = func_name.trim_start_matches('\\');
 
+    if func_name.eq_ignore_ascii_case("array_find")
+        && let Some(found) = array_find_type(args)
+    {
+        return Some(found);
+    }
+
     if ARRAY_ELEMENT_FUNCS
         .iter()
         .any(|f| f.eq_ignore_ascii_case(func_name))
@@ -462,6 +468,48 @@ fn element_or_sentinel(func_name: &str, raw: &PhpType) -> Option<PhpType> {
     Some(PhpType::union(members))
 }
 
+/// What `array_find()` returns when its callback narrows the value it is
+/// handed: the accepted part of each element, or `null` when nothing
+/// matches. `None` when the callback says nothing about the value.
+///
+/// Over a shape whose entries a type-check callback (`'is_int'`) decides one
+/// by one, the search stops at the first entry certainly accepted, so later
+/// entries cannot be found and the result is not `null`.
+fn array_find_type(args: &dyn ArrayFuncArgs) -> Option<PhpType> {
+    let raw = args.arg_raw_type(0)?;
+    if let Some(entries) = explicit_key_shape_entries(&raw)
+        && let Some(guards) = callback_guard_names(args, 1)
+    {
+        let mut values: Vec<PhpType> = Vec::new();
+        let mut found = false;
+        for entry in &entries {
+            let mut certain = !entry.optional;
+            for guard in &guards {
+                let (accepted, may_reject) = args.guard_split(guard, &entry.value_type)?;
+                certain &= accepted.is_some() && !may_reject;
+                if let Some(accepted) = accepted
+                    && !values.contains(&accepted)
+                {
+                    values.push(accepted);
+                }
+            }
+            if certain {
+                found = true;
+                break;
+            }
+        }
+        if !found {
+            values.push(PhpType::null());
+        }
+        return Some(PhpType::join_runtime_value_types(values));
+    }
+    let element = raw.iterable_element_type()?;
+    let narrowed = filter_callback_narrowing(args, 0, &element)?;
+    let mut members: Vec<PhpType> = narrowed.union_members().into_iter().cloned().collect();
+    members.push(PhpType::null());
+    Some(PhpType::union(members))
+}
+
 /// The values of `entries` up to and including the first one that is
 /// certainly present, and whether there was one.
 fn leading_entry_values<'a>(entries: impl Iterator<Item = &'a ShapeEntry>) -> (Vec<PhpType>, bool) {
@@ -570,10 +618,12 @@ fn array_merge_type(args: &dyn ArrayFuncArgs) -> Option<PhpType> {
     let mut open_keys = false;
     let mut index = 0;
     while args.has_arg(index) {
+        let mut raw = args.arg_raw_type(index)?;
+        // A spread passes each of its elements as an array to merge, and
+        // any number of them, so it contributes what one element would.
         if args.is_spread(index) {
-            return None;
+            raw = raw.iterable_element_type()?;
         }
-        let raw = args.arg_raw_type(index)?;
         if raw.is_empty_array_shape() {
             index += 1;
             continue;

@@ -230,16 +230,25 @@ fn undecidable_filter_calls_keep_the_declared_type() {
     assert_eq!(filter_var("$v, $filter").as_deref(), None);
     assert_eq!(filter_var("$v, FILTER_CALLBACK").as_deref(), None);
     assert_eq!(
-        filter_var("$v, FILTER_VALIDATE_INT, FILTER_REQUIRE_ARRAY").as_deref(),
-        None
-    );
-    assert_eq!(
-        filter_var("$v, FILTER_VALIDATE_INT, FILTER_FORCE_ARRAY").as_deref(),
-        None
-    );
-    assert_eq!(
         filter_var("$v, FILTER_VALIDATE_INT, $opaque").as_deref(),
         None
+    );
+}
+
+#[test]
+fn array_flags_filter_each_entry() {
+    assert_eq!(
+        filter_var("$v, FILTER_VALIDATE_INT, FILTER_FORCE_ARRAY").as_deref(),
+        Some("array<int|false>")
+    );
+    assert_eq!(
+        filter_var("$v, FILTER_VALIDATE_INT, FILTER_REQUIRE_ARRAY").as_deref(),
+        Some("array<int|false>|false")
+    );
+    assert_eq!(
+        filter_var("$v, FILTER_VALIDATE_INT, FILTER_REQUIRE_ARRAY | FILTER_NULL_ON_FAILURE")
+            .as_deref(),
+        Some("array<int|null>|null")
     );
 }
 

@@ -35,9 +35,9 @@ namespace ArrayFind
 	function testMixed(array $array, array $non_empty_array, callable $callback): void
 	{
 		assertType('mixed', array_find($array, $callback));
-		assertType('int|null', array_find($array, 'is_int')); // SKIP: array_find() does not narrow by a type-checking callback such as 'is_int'
+		assertType('int|null', array_find($array, 'is_int'));
 		assertType('mixed', array_find($non_empty_array, $callback));
-		assertType('int|null', array_find($non_empty_array, 'is_int')); // SKIP: array_find() does not narrow by a type-checking callback such as 'is_int'
+		assertType('int|null', array_find($non_empty_array, 'is_int'));
 	}
 
 	/**
@@ -47,7 +47,7 @@ namespace ArrayFind
 	function testConstant(array $array, callable $callback): void
 	{
 		assertType("1|'foo'|DateTime|null", array_find($array, $callback));
-		assertType('1', array_find($array, 'is_int')); // SKIP: array_find() does not narrow by a type-checking callback such as 'is_int'
+		assertType('1', array_find($array, 'is_int'));
 	}
 
 	/**
@@ -68,7 +68,7 @@ namespace ArrayFind
 	{
 		$subject = ['foo' => 1, 'bar' => null, 'buz' => ''];
 		$result = array_find($subject, function ($value, $key) {
-			assertType("array{value: 1|''|null, key: 'bar'|'buz'|'foo'}", compact('value', 'key')); // SKIP: compact() gives `array` rather than a shape of the named variables
+			assertType("array{value: 1|''|null, key: 'bar'|'buz'|'foo'}", compact('value', 'key')); // SKIP: an inline callback's key parameter is not typed from the array's keys
 
 			return is_int($value);
 		});
