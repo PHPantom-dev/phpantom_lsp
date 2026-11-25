@@ -1,0 +1,22 @@
+// test: a class imported under a constant's name is the class, not the constant
+// feature: hover
+// expect: TOKEN
+// expect_absent: 'constant'
+---
+=== src/TOKEN.php ===
+<?php
+namespace Lib;
+
+class TOKEN {}
+=== src/App.php ===
+<?php
+namespace App;
+
+use Lib\TOKEN;
+
+const TOKEN = 'constant';
+
+/** @param TOKEN $token */
+function demo($token): void {
+    echo $tok<>en;
+}

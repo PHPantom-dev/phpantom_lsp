@@ -111,7 +111,7 @@ pub(crate) use reflection::{
 };
 pub(crate) use return_types::{
     MethodReturnCtx, answers_with_merged_method, class_constant_type, enum_case_property_literal,
-    folded_global_constant_type, global_constant_class_reference_type, literal_arg_type,
+    global_constant_class_reference_type, global_constant_value_type, literal_arg_type,
     resolve_static_access_type,
 };
 #[cfg(test)]

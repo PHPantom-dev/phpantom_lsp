@@ -36,8 +36,8 @@ use super::arg_type_resolution::TextArrayFuncArgs;
 use super::target_cache::try_infer_body_return_type;
 
 pub(crate) use class_constants::{
-    class_constant_type, enum_case_property_literal, folded_global_constant_type,
-    global_constant_class_reference_type, resolve_static_access_type,
+    class_constant_type, enum_case_property_literal, global_constant_class_reference_type,
+    global_constant_value_type, resolve_static_access_type,
 };
 use laravel::{
     replace_support_carbon_return, resolve_auth_user_at_call, resolve_request_accessor_at_call,

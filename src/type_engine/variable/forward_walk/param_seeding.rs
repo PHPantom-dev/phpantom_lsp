@@ -416,7 +416,7 @@ fn seed_implicit_set_value(
 /// it too, or the operator widens to whatever a key could be in general and
 /// the parameter constrains nothing.
 fn finish_constant_operands(ty: &PhpType, ctx: &ForwardWalkCtx<'_>) -> Option<PhpType> {
-    if !ty.contains_unevaluated_operator() {
+    if !ty.needs_constant_evaluation() {
         return None;
     }
     crate::type_engine::call_resolution::evaluate_constant_operands(ty, &ctx.as_resolution_ctx())

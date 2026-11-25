@@ -190,7 +190,7 @@ fn evaluate_declared_return(
     loaders: CtxLoaders<'_>,
     backend: &Backend,
 ) -> PhpType {
-    if !declared.contains_unevaluated_operator() {
+    if !declared.needs_constant_evaluation() {
         return declared;
     }
     let ctx = backend.resolution_ctx_at(file, Some(current_class), 0, loaders);

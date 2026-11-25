@@ -1,0 +1,25 @@
+// test: a constant a declaration's docblock names is read in the declaration's namespace, not the caller's
+// feature: hover
+// expect: 'from-lib'
+// expect_absent: 'from-global'
+// expect_absent: LIMIT
+---
+=== src/lib.php ===
+<?php
+namespace Lib;
+
+const LIMIT = 'from-lib';
+
+/** @return LIMIT */
+function limit() { return LIMIT; }
+=== src/global.php ===
+<?php
+const LIMIT = 'from-global';
+=== src/App.php ===
+<?php
+namespace App;
+
+function demo(): void {
+    $limit = \Lib\limit();
+    echo $lim<>it;
+}

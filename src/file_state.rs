@@ -69,4 +69,25 @@ impl FileState {
             ..self.clone()
         }
     }
+
+    /// The class imports in force at `offset`.
+    pub(crate) fn use_map_at(&self, offset: u32) -> &HashMap<String, String> {
+        self.import_block_at(offset)
+            .map_or(&self.use_map, |span| &span.use_map)
+    }
+
+    /// The `use function` and `use const` imports in force at `offset`.
+    pub(crate) fn symbol_imports_at(&self, offset: u32) -> &SymbolImports {
+        self.import_block_at(offset)
+            .map_or(&self.symbol_imports, |span| &span.symbol_imports)
+    }
+
+    /// The block whose imports apply at `offset`, or `None` when the
+    /// file-wide tables do. A file with a single namespace keeps its imports
+    /// there, and its one span is synthesized without any.
+    fn import_block_at(&self, offset: u32) -> Option<&NamespaceSpan> {
+        (self.namespaces.len() > 1)
+            .then(|| NamespaceSpan::containing(&self.namespaces, offset))
+            .flatten()
+    }
 }

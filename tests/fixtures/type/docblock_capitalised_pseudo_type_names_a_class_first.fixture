@@ -1,0 +1,14 @@
+// test: a capitalised pseudo-type spelling is the class of that name when one exists
+// feature: hover
+// expect: Number
+// expect_absent: float
+---
+<?php
+namespace App;
+
+class Number {}
+
+/** @param Number $n */
+function demo($n): void {
+    echo $<>n;
+}

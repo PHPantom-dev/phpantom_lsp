@@ -283,6 +283,27 @@ pub(crate) fn folded_global_constant_type(
     crate::type_engine::type_ops::const_fold::folded_constant_type(name, value, &resolve)
 }
 
+/// The type the global constant `name` holds, read from `value`, the
+/// initializer the constant lookup returned.
+pub(crate) fn global_constant_value_type(
+    name: &str,
+    value: &str,
+    ctx: &ResolutionCtx<'_>,
+) -> Option<PhpType> {
+    crate::type_engine::variable::rhs_resolution::infer_type_from_constant_value(value)
+        .or_else(|| {
+            // The initializer was written where the constant is declared, so
+            // the reader's namespace and imports must not resolve the names
+            // it uses.  The lookup spelled out the constants it names already.
+            let declared = ResolutionCtx {
+                file: ctx.file.with_uri(None).with_namespace(None),
+                ..*ctx
+            };
+            folded_global_constant_type(name, value, &declared)
+        })
+        .or_else(|| global_constant_class_reference_type(value, ctx))
+}
+
 /// The type a global constant holds when its initialiser is `Foo::class` or
 /// an enum case (`Suit::Hearts`), which the literal fold does not read.
 ///

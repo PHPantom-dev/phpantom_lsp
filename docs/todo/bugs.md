@@ -2150,33 +2150,19 @@ No outstanding items.
 
 ## Name resolution
 
-### B883. Several PHPStan pseudo-types are kept as unresolved names
+### B883. Several PHPDoc pseudo-types are shown under their own spelling instead of the type they stand for
 
 **Impact: Low · Complexity: Low**
 
 ```php
-/** @param enum-string $e @param non-empty-scalar $s @param callable-array $c */
-$e; // got enum-string, should be class-string<UnitEnum>
-/** @var Number $n */ $n; // got Number, should be float|int
+/** @param enum-string $e */ $e;      // enum-string, should be class-string<UnitEnum>
+/** @param empty-scalar $s */ $s;     // empty-scalar, should be 0|0.0|''|'0'|false
+/** @var number $n */ $n;             // number, should be float|int
 ```
 
-`callable-array`, `closed-resource`, `open-resource`, `enum-string`, `non-empty-scalar`, `empty-scalar`, and the capitalised global aliases `Number`, `Numeric`, `Boolean`, `Resource`, `Double` come out unchanged, so they are probably read as class names.
+The engine models these as keywords, but hover and the assertion runner print the keyword where PHPStan prints its expansion: `callable-array`, `closed-resource`, `open-resource`, `enum-string`, `non-empty-scalar`, `empty-scalar`, `non-empty-mixed`, the `non-empty-*-string` refinements, `pure-callable`, `number` and `numeric` (also when spelled `Number` or `Numeric` with no class of that name). Expanding them changes what other code matches on, so each needs checking against its uses rather than a blanket rewrite.
 
-**Cases** (PHPStan `nsrt/`, 11 assertions): `more-types.php` (6), `phpdoc-pseudotype-global.php` (5).
-
-### B884. A constant name used as a PHPDoc type is not resolved to its value
-
-**Impact: Low · Complexity: Low**
-
-```php
-const MY_CONST = 100;
-/** @param MY_CONST|ANOTHER_CONST $two @param PREG_SPLIT_NO_EMPTY $three */
-function foo($two, $three) { $two; $three; } // got MY_CONST|ANOTHER_CONST, should be 100|200; got PREG_SPLIT_NO_EMPTY, should be 1
-```
-
-Global and namespaced constants, `use const` aliases, constants defined from other constants and built-in constants are all read as class names. A class of the same name should still take precedence.
-
-**Cases** (PHPStan `nsrt/`, 9 assertions): `constant-phpdoc-type.php` (9).
+**Cases** (PHPStan `nsrt/`, 13 assertions): the `// SKIP` lines in `tests/phpstan_nsrt/more-types.php` (11) and `phpdoc-pseudotype-global.php` (2).
 
 ### B885. `@phpstan-require-extends` on an interface does not give its instances the required class's members
 
@@ -2190,20 +2176,6 @@ function t(SampleInterface $t) { $t->doFoo(); } // got nothing, should be int (S
 Members of the required class (and through an interface extending it) are not found on a value typed by the interface.
 
 **Cases** (PHPStan `nsrt/`, 8 assertions): `bug-10302-interface-extends.php` (8).
-
-### B886. A class constant used as a shape key in a docblock is kept as text
-
-**Impact: Medium · Complexity: Low**
-
-```php
-const MY_KEY = 'key';
-/** @param array{self::MY_KEY: string} $a */
-$a;   // array{self::MY_KEY: string}, should be array{key: string}
-```
-
-Shape keys written as self::/static::/parent::/Foo:: constants are not resolved to the constant value (static:: and parent:: relative to the declaring/using class).
-
-**Cases** (PHPStan `nsrt/`, 8 assertions): `bug-6989.php` (8).
 
 ### B887. A `@phpstan-type` alias leaks out of the class or trait that declares it
 
@@ -2242,6 +2214,21 @@ It also shows as:
 - `@phpstan-property` and `@phpstan-property-read` do not override `@property`
 
 **Cases** (PHPStan `nsrt/`, 7 assertions): `bug-3142.php` (3), `classPhpDocs-phpstanPropertyPrefix.php` (2), `bug-6001.php`, `override-property-union-type-with-tag-subtype.php`.
+
+### B903. `self::CONST` in an inherited member's docblock reads the subclass's constant
+
+**Impact: Low · Complexity: Medium**
+
+```php
+class Base {
+    public const KEY = 'a';
+    /** @return self::KEY */ public function get(): string { return self::KEY; }
+}
+class Child extends Base { public const KEY = 'b'; }
+(new Child())->get();   // 'b', should be 'a'
+```
+
+`self` is lexical, so it names the class that declares the member, but a method call's return type binds it to the receiver's class. The same goes for a shape key written `self::KEY`. `static::KEY` is the one spelling that should follow the receiver.
 
 ## Code actions
 

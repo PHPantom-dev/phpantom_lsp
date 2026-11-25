@@ -433,7 +433,7 @@ pub(super) fn finish_return_constant_operands(
 ) {
     if !resolved
         .iter()
-        .any(|rt| rt.type_string.contains_unevaluated_operator())
+        .any(|rt| rt.type_string.needs_constant_evaluation())
     {
         return;
     }

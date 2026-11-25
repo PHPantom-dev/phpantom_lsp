@@ -178,32 +178,14 @@ impl Backend {
                             trimmed,
                             None,
                             0,
-                            span.map_or(&state.use_map, |span| &span.use_map),
-                            span.map_or(&state.symbol_imports.constants, |span| {
-                                &span.symbol_imports.constants
-                            }),
+                            state.use_map_at(ctx.cursor_offset),
+                            &state.symbol_imports_at(ctx.cursor_offset).constants,
                             span.map_or(&None, |span| &span.namespace),
                         )
                     },
                 ) {
                 None => None,
-                Some(Some(value)) => {
-                    crate::type_engine::variable::rhs_resolution::infer_type_from_constant_value(
-                        &value,
-                    )
-                    .or_else(|| {
-                        // The initializer was written where the constant is
-                        // declared, so this file's namespace and imports
-                        // must not resolve the names it uses.  The lookup
-                        // spelled out the constants it names already.
-                        let declared = ResolutionCtx {
-                            file: ctx.file.with_uri(None).with_namespace(None),
-                            ..*ctx
-                        };
-                        super::folded_global_constant_type(trimmed, &value, &declared)
-                    })
-                    .or_else(|| super::global_constant_class_reference_type(&value, ctx))
-                }
+                Some(Some(value)) => super::global_constant_value_type(trimmed, &value, ctx),
                 Some(None) => crate::resolution::unversioned_php_version_constant_type(
                     trimmed,
                     Some(backend.php_version()),

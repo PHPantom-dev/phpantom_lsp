@@ -1154,21 +1154,33 @@ fn evaluate_constant_operands_in_target(
     if !target.parameters.iter().any(|p| {
         p.type_hint
             .as_ref()
-            .is_some_and(PhpType::contains_unevaluated_operator)
+            .is_some_and(PhpType::needs_constant_evaluation)
     }) {
+        return;
+    }
+
+    // Most names that might be a constant are a class or a template, which
+    // evaluate to themselves, so the list is only rebuilt once one changes.
+    let evaluated: Vec<Option<PhpType>> = target
+        .parameters
+        .iter()
+        .map(|p| {
+            p.type_hint
+                .as_ref()
+                .and_then(|hint| evaluate_constant_operands(hint, ctx))
+        })
+        .collect();
+    if evaluated.iter().all(Option::is_none) {
         return;
     }
 
     let parameters: Vec<ParameterInfo> = target
         .parameters
         .iter()
-        .map(|p| {
+        .zip(evaluated)
+        .map(|(p, evaluated)| {
             let mut param = p.clone();
-            if let Some(evaluated) = param
-                .type_hint
-                .as_ref()
-                .and_then(|hint| evaluate_constant_operands(hint, ctx))
-            {
+            if let Some(evaluated) = evaluated {
                 param.type_hint = Some(evaluated);
             }
             param

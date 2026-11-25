@@ -13134,7 +13134,7 @@ takeList(labelled());
     let messages = messages_with_code(&collect(php), "type_mismatch_argument");
     assert_eq!(messages.len(), 1, "got {messages:?}");
     assert!(
-        messages[0].contains("got array{Slots::LABEL: string}"),
+        messages[0].contains("got array{label: string}"),
         "got {messages:?}"
     );
 }

@@ -181,7 +181,20 @@ impl PhpType {
     /// same spirit as [`PhpType::contains_conditional`]: cheap enough to run on
     /// every type, so the (cloning) rewrite only runs on the few that need it.
     pub fn contains_unevaluated_operator(&self) -> bool {
-        self.contains_unevaluated(true)
+        self.contains_unevaluated(Unevaluated::References)
+    }
+
+    /// Whether [`PhpType::contains_unevaluated_operator`] holds, or a name
+    /// in this type tree may be one only the index can tell from a class:
+    /// a constant named as a type (`MY_CONST`, `PREG_SPLIT_NO_EMPTY`), a
+    /// capitalised spelling of a PHPDoc pseudo-type (`Number`, `Boolean`),
+    /// or a shape key written as a class constant (`array{self::KEY: int}`).
+    ///
+    /// Kept apart from `contains_unevaluated_operator` because a candidate
+    /// is usually just a class: `PDO` is spelled like a constant, and
+    /// nothing comparing types should treat it as unevaluated.
+    pub fn needs_constant_evaluation(&self) -> bool {
+        self.contains_unevaluated(Unevaluated::Names)
     }
 
     /// Whether a type operator that never got evaluated — `key-of<T>`,
@@ -190,7 +203,7 @@ impl PhpType {
     /// a type does not count: what it reads is one fixed value, where an
     /// operator may yet evaluate to something that takes `null`.
     pub fn contains_type_operator(&self) -> bool {
-        self.contains_unevaluated(false)
+        self.contains_unevaluated(Unevaluated::Operators)
     }
 
     /// Whether this type is a class constant named as a type (`Foo::BAR`,
@@ -203,11 +216,26 @@ impl PhpType {
         }
     }
 
-    fn contains_unevaluated(&self, references: bool) -> bool {
-        let recurse = |inner: &PhpType| inner.contains_unevaluated(references);
+    fn contains_unevaluated(&self, mode: Unevaluated) -> bool {
+        let recurse = |inner: &PhpType| inner.contains_unevaluated(mode);
         match self.kind() {
             TypeKind::KeyOf(_) | TypeKind::ValueOf(_) | TypeKind::IndexAccess(..) => true,
-            TypeKind::Raw(_) | TypeKind::Named(_) => references && self.is_class_member_reference(),
+            TypeKind::Raw(_) => mode != Unevaluated::Operators && self.is_class_member_reference(),
+            TypeKind::Named(name) => {
+                mode != Unevaluated::Operators
+                    && (self.is_class_member_reference()
+                        || (mode == Unevaluated::Names && may_name_non_class(name)))
+            }
+            TypeKind::ArrayShape(entries) | TypeKind::ObjectShape(entries)
+                if mode == Unevaluated::Names
+                    && entries.iter().any(|e| {
+                        e.key.as_deref().is_some_and(|key| {
+                            class_name_key(key).is_none() && class_constant_key(key).is_some()
+                        })
+                    }) =>
+            {
+                true
+            }
             TypeKind::Nullable(inner)
             | TypeKind::Array(inner)
             | TypeKind::ClassString(Some(inner))
@@ -1331,4 +1359,23 @@ impl PhpType {
             _ => false,
         }
     }
+}
+
+/// Which leftovers [`PhpType::contains_unevaluated`] looks for.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Unevaluated {
+    /// Type operators only (`key-of<T>`, `value-of<T>`, `T[K]`).
+    Operators,
+    /// Operators and class constants named as a type (`Foo::BAR`).
+    References,
+    /// All of the above, and every name that may turn out not to be a
+    /// class (see [`PhpType::needs_constant_evaluation`]).
+    Names,
+}
+
+/// Whether a resolved name may name something other than a class: a
+/// constant, or the capitalised spelling of a PHPDoc pseudo-type.
+fn may_name_non_class(name: &str) -> bool {
+    let short = crate::util::short_name(name);
+    is_constant_name_spelling(short) || capitalised_pseudo_type(short).is_some()
 }

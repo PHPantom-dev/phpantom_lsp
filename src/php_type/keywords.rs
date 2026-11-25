@@ -52,6 +52,44 @@ pub(crate) fn is_lowercase_only_pseudo_type(lower: &str) -> bool {
     )
 }
 
+/// The pseudo-type a capitalised spelling of an
+/// [`is_lowercase_only_pseudo_type`] name (`Number`, `BOOLEAN`) stands for,
+/// in lowercase, or `None` for any other name.
+///
+/// Such a spelling is a class reference first. Only when no class answers
+/// to it does PHPStan read it as the pseudo-type, and so do we.
+pub(crate) fn capitalised_pseudo_type(name: &str) -> Option<&'static str> {
+    if !name.bytes().any(|b| b.is_ascii_uppercase()) {
+        return None;
+    }
+    with_ascii_lowercase(name, |lower| {
+        Some(match lower {
+            "number" => "number",
+            "real" => "real",
+            "integer" => "integer",
+            "boolean" => "boolean",
+            "double" => "double",
+            "resource" => "resource",
+            "scalar" => "scalar",
+            "numeric" => "numeric",
+            _ => return None,
+        })
+    })
+}
+
+/// Whether `name` (unqualified) is spelled the way PHPStan reads a
+/// constant in a type position, `[A-Z_][A-Z0-9_]*`. A class may be spelled
+/// so too (`PDO`), and a class of that name takes precedence.
+pub(crate) fn is_constant_name_spelling(name: &str) -> bool {
+    name.bytes()
+        .next()
+        .is_some_and(|b| b.is_ascii_uppercase() || b == b'_')
+        && name
+            .bytes()
+            .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit() || b == b'_')
+        && !is_keyword_type(name)
+}
+
 /// Lowercase `name` for keyword matching, leaving the casing of a
 /// [`is_lowercase_only_pseudo_type`] name intact so a class of that name falls
 /// through to the caller's class handling instead of matching the pseudo-type.

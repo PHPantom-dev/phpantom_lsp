@@ -160,6 +160,16 @@ impl Backend {
         &self,
         candidates: &[&str],
     ) -> Option<Option<String>> {
+        self.lookup_constant_candidates(candidates, DefineSearch::Exhaustive)
+    }
+
+    /// [`Self::lookup_global_constant_candidates`], with project and vendor
+    /// code searched as `search` says.
+    fn lookup_constant_candidates(
+        &self,
+        candidates: &[&str],
+        search: DefineSearch,
+    ) -> Option<Option<String>> {
         // The stubs record the version of the PHP build they were generated
         // on (`PHP_VERSION_ID` 50306); the one the project runs on is the
         // configured version, down to the minor.
@@ -169,11 +179,9 @@ impl Backend {
             }
         }
 
-        if let Some((value, namespace)) =
-            self.find_or_load_define(candidates, DefineSearch::Exhaustive, |info| {
-                (info.value.clone(), info.namespace)
-            })
-        {
+        if let Some((value, namespace)) = self.find_or_load_define(candidates, search, |info| {
+            (info.value.clone(), info.namespace)
+        }) {
             return Some(match (value, namespace) {
                 (Some(value), Some(namespace)) => {
                     Some(self.qualify_value_constants(value, &namespace))
@@ -275,19 +283,12 @@ impl Backend {
     /// autoload file, to catch a `define()` the byte-level scanner skipped
     /// inside an `if (!defined(…))` guard. That is worth paying when the user
     /// hovered one specific name, but not for a speculative lookup: the type
-    /// engine asks about names taken out of a docblock type operator
-    /// (`key-of<X>`, `X[K]`), where `X` is usually a template parameter and
-    /// every miss would charge the whole autoload set.
+    /// engine asks about names taken out of a docblock type (`key-of<X>`,
+    /// `X[K]`, a bare `X`), where `X` is usually a class or a template
+    /// parameter and every miss would charge the whole autoload set.
     pub(crate) fn lookup_indexed_global_constant(&self, name: &str) -> Option<String> {
-        let (value, namespace) =
-            self.find_or_load_define(&[name], DefineSearch::Indexed, |info| {
-                (info.value.clone(), info.namespace)
-            })?;
-        let value = value?;
-        Some(match namespace {
-            Some(namespace) => self.qualify_value_constants(value, &namespace),
-            None => value,
-        })
+        self.lookup_constant_candidates(&[name], DefineSearch::Indexed)
+            .flatten()
     }
 }
 

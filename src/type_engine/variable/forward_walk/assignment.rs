@@ -185,8 +185,17 @@ pub(crate) fn resolve_var_docblock_type(php_type: &PhpType, ctx: &ForwardWalkCtx
         .template_markers
         .as_ref()
         .map(|m| php_type.substitute(m));
-    ctx.written_names()
-        .resolve_type(marked.as_ref().unwrap_or(php_type))
+    let resolved = ctx
+        .written_names()
+        .resolve_type(marked.as_ref().unwrap_or(php_type));
+    if !resolved.needs_constant_evaluation() {
+        return resolved;
+    }
+    crate::type_engine::call_resolution::evaluate_constant_operands(
+        &resolved,
+        &ctx.as_resolution_ctx(),
+    )
+    .unwrap_or(resolved)
 }
 
 /// Process assignment expressions, updating the scope.

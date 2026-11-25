@@ -1,0 +1,23 @@
+// test: a `self::` shape key in a method's return type is read against the declaring class by a caller outside it
+// feature: hover
+// expect: array{a: int}
+// expect_absent: self::
+---
+=== src/Base.php ===
+<?php
+namespace Lib;
+
+class Base {
+    public const KEY = 'a';
+
+    /** @return array{self::KEY: int} */
+    public function get(): array { return [self::KEY => 1]; }
+}
+=== src/App.php ===
+<?php
+namespace App;
+
+function demo(\Lib\Base $base): void {
+    $row = $base->get();
+    echo $r<>ow;
+}

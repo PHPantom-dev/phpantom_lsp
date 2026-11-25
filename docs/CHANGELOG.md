@@ -35,6 +35,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`$i++` forgets what was known about `$items[$i]`.** Incrementing a variable, or updating it with `+=` and the like, drops a narrowing recorded for an expression that reads it, as a plain assignment already did.
 - **An enum's `$this->value` follows narrowing.** After `if ($this === self::None) { return; }`, `$this->value` and `$this->name` only hold the remaining cases' values and names.
 - **Omitted arguments bind templates to their defaults.** Calling `@param T $test = 0` without the argument types `T` as `0`, the value PHP passes in its place.
+- **Constants in docblock types.** `@param MY_CONST $x` types `$x` as the constant's value, for constants declared in the project, imported with `use const`, or built into PHP. A class of the same name still wins. A shape key written as a class constant, as in `array{self::KEY: string}`, is the key the constant holds.
+- **`Boolean`, `Double` and the like in docblocks.** A capitalised spelling of a PHPDoc pseudo-type, such as `@var Boolean`, means the pseudo-type when no class of that name exists, instead of an unknown class.
 - **Wildcard class constants open at both ends.** `@param self::*OTHER* $x` covers every constant whose name contains `OTHER`.
 - **`(string)` on a generic object.** Casting an object whose `__toString()` returns a template type, such as `class-string<T>`, gives the type for that object's generic arguments.
 - **Arithmetic with a float is a float.** `$string * 1e-6`, or any other arithmetic between a float and a string, bool, or null, is typed `float` instead of `int|float`.

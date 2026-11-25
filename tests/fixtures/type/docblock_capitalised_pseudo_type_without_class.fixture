@@ -1,0 +1,12 @@
+// test: a capitalised pseudo-type spelling with no class of that name is the pseudo-type
+// feature: hover
+// expect: bool
+// expect_absent: Boolean
+---
+<?php
+namespace App;
+
+/** @param Boolean $flag */
+function demo($flag): void {
+    echo $fl<>ag;
+}

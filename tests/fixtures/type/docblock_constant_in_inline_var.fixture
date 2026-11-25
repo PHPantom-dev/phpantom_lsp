@@ -1,0 +1,15 @@
+// test: a constant named in an inline `@var` is its value
+// feature: hover
+// expect: 'blue'
+// expect_absent: COLOUR
+---
+<?php
+namespace App;
+
+const COLOUR = 'blue';
+
+function demo(): void {
+    /** @var COLOUR $colour */
+    $colour = pick();
+    echo $col<>our;
+}

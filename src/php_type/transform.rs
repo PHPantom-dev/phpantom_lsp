@@ -562,9 +562,14 @@ impl PhpType {
             TypeKind::IndexAccess(target, index) => {
                 target.contains_self_constant() || index.contains_self_constant()
             }
-            TypeKind::ArrayShape(entries) | TypeKind::ObjectShape(entries) => entries
-                .iter()
-                .any(|e| e.value_type.contains_self_constant()),
+            TypeKind::ArrayShape(entries) | TypeKind::ObjectShape(entries) => {
+                entries.iter().any(|e| {
+                    e.key
+                        .as_deref()
+                        .is_some_and(|key| self_constant_name(key).is_some())
+                        || e.value_type.contains_self_constant()
+                })
+            }
             _ => false,
         }
     }
@@ -834,6 +839,31 @@ impl PhpType {
                 qualify_self_constant(replacement, constant)
                     .map(PhpType::raw)
                     .unwrap_or_else(|| self.clone())
+            }
+            // A shape key written `self::KEY` reads the same constant.
+            TypeKind::ArrayShape(entries)
+                if entries.iter().any(|e| {
+                    e.key
+                        .as_deref()
+                        .is_some_and(|key| self_constant_name(key).is_some())
+                }) =>
+            {
+                PhpType::array_shape(
+                    entries
+                        .iter()
+                        .map(|e| ShapeEntry {
+                            key: e.key.as_deref().map(|key| {
+                                self_constant_name(key)
+                                    .and_then(|constant| {
+                                        qualify_self_constant(replacement, constant)
+                                    })
+                                    .unwrap_or_else(|| key.to_string())
+                            }),
+                            value_type: e.value_type.replace_self_inner(replacement, lsb),
+                            optional: e.optional,
+                        })
+                        .collect(),
+                )
             }
 
             // A bound already applied by an earlier hop still answers to a

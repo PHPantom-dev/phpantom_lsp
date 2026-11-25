@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 use crate::atom::Atom;
 use crate::class_lookup::Fqn;
-use crate::php_type::{PhpType, TypeKind};
+use crate::php_type::{LiteralValue, PhpType, ShapeEntry, TypeKind};
 use crate::type_engine::resolver::ResolutionCtx;
 use crate::types::ClassInfo;
 
@@ -68,40 +68,39 @@ pub(crate) fn constant_operand_shape(name: &str, ctx: &ResolutionCtx<'_>) -> Opt
             );
             merged.get_constant(const_name)?.value.clone()?
         }
-        // The name may arrive in either spelling: some paths hand over what
-        // `resolve_names` already qualified against the file's namespace,
-        // since almost every bare name in a type position is a class, while
-        // the ones that resolve names through the class loader alone leave a
-        // constant bare.
-        None => resolve_operand_constant_value(name, ctx)?,
+        None => resolve_docblock_constant_value(name, ctx)?,
     };
     array_literal_shape_type(&value, ctx)
 }
 
-/// The initializer text of the constant a type operand names, or `None`
-/// when no spelling of it is indexed.
+/// The initializer text of the constant a name in a type stands for, or
+/// `None` when no spelling of it is indexed.
 ///
+/// The name may arrive in either spelling: some paths hand over what
+/// `resolve_names` already qualified against the file's namespace, since
+/// almost every bare name in a type position is a class, while the ones
+/// that resolve names through the class loader alone leave a constant bare.
 /// A constant is indexed under its fully-qualified name, so the enclosing
-/// namespace is tried first for a bare operand, then the name as written,
-/// then the global constant of that short name the way PHP itself falls
-/// back, and finally the file's `use const` imports.
+/// namespace is tried first for a bare name, then the name as given, then
+/// the global constant of that short name the way PHP itself falls back,
+/// and finally the file's `use const` imports.
 ///
 /// Only the indexed lookup is used, never the one that ends by parsing
-/// every autoload file: an operand is as often a template parameter as a
-/// constant, and a miss must not charge the whole autoload set.
-fn resolve_operand_constant_value(name: &str, ctx: &ResolutionCtx<'_>) -> Option<String> {
+/// every autoload file: a name in a type is far more often a class or a
+/// template parameter than a constant, and a miss must not charge the whole
+/// autoload set.
+fn resolve_docblock_constant_value(name: &str, ctx: &ResolutionCtx<'_>) -> Option<String> {
     let backend = ctx.file.backend?;
     // An absolute name names exactly one constant, with no namespace or
     // import in play.
     if let Some(absolute) = name.strip_prefix('\\') {
         return backend.lookup_indexed_global_constant(absolute);
     }
+    let ns = docblock_namespace(ctx);
     let short = crate::util::short_name(name);
     if short == name
-        && let Some(value) = ctx
-            .current_class
-            .and_then(|c| c.file_namespace.as_ref())
-            .and_then(|ns| backend.lookup_indexed_global_constant(&format!("{ns}\\{name}")))
+        && let Some(value) =
+            ns.and_then(|ns| backend.lookup_indexed_global_constant(&format!("{ns}\\{name}")))
     {
         return Some(value);
     }
@@ -114,30 +113,48 @@ fn resolve_operand_constant_value(name: &str, ctx: &ResolutionCtx<'_>) -> Option
         return Some(value);
     }
     // Last: an import, which is the one spelling neither the enclosing
-    // namespace nor the global scope accounts for.  The file's import
-    // tables are read from the source here because a type operand carries
-    // no offset to resolve against, and they are read only once every
-    // cheaper candidate has missed — a docblock naming an imported
-    // constant is rare, and the walk runs over the already-parsed AST.
-    //
-    // A `use const` alias may arrive qualified with the enclosing
-    // namespace, the way a bare name in a type is read as a class.
-    let ns = ctx.current_class.and_then(|c| c.file_namespace.as_deref());
+    // namespace nor the global scope accounts for.  A `use const` alias may
+    // arrive qualified with the enclosing namespace, the way a bare name in
+    // a type is read as a class.
     let alias = match ns.and_then(|ns| name.strip_prefix(ns)?.strip_prefix('\\')) {
         Some(alias) if !alias.contains('\\') => alias,
         _ => name,
     };
-    let imported = match backend
-        .parse_symbol_imports(ctx.file.content)
-        .constants
-        .remove(alias)
-    {
-        Some(fqn) => fqn,
+    let imported = match ctx.file.uri.and_then(|uri| backend.file_state(uri)) {
+        // The open file's import tables are already built.
+        Some(state) => match state
+            .symbol_imports_at(ctx.cursor_offset)
+            .constants
+            .get(alias)
+        {
+            Some(fqn) => fqn.clone(),
+            None => {
+                let (first, rest) = name.split_once('\\')?;
+                let prefix =
+                    crate::names::lookup_import(state.use_map_at(ctx.cursor_offset), first)?;
+                format!("{prefix}\\{rest}")
+            }
+        },
+        // Otherwise they are read from the source, and only once every
+        // cheaper candidate has missed: a docblock naming an imported
+        // constant is rare, and the walk runs over the already-parsed AST.
         None => {
-            let (first, rest) = name.split_once('\\')?;
-            let use_map = backend.parse_use_statements(ctx.file.content);
-            let prefix = crate::names::lookup_import(&use_map, first)?;
-            format!("{prefix}\\{rest}")
+            if !ctx.file.content.contains("const") {
+                return None;
+            }
+            match backend
+                .parse_symbol_imports(ctx.file.content)
+                .constants
+                .remove(alias)
+            {
+                Some(fqn) => fqn,
+                None => {
+                    let (first, rest) = name.split_once('\\')?;
+                    let use_map = backend.parse_use_statements(ctx.file.content);
+                    let prefix = crate::names::lookup_import(&use_map, first)?;
+                    format!("{prefix}\\{rest}")
+                }
+            }
         }
     };
     backend.lookup_indexed_global_constant(&imported)
@@ -189,8 +206,12 @@ pub(super) fn constant_operand_subs<'t>(
 /// is a constant we can read, or when reading it changed nothing — in each
 /// case the caller keeps the type it already has.
 pub(crate) fn evaluate_constant_operands(ty: &PhpType, ctx: &ResolutionCtx<'_>) -> Option<PhpType> {
-    if !ty.contains_unevaluated_operator() {
+    if !ty.needs_constant_evaluation() {
         return None;
+    }
+    if !ty.contains_unevaluated_operator() {
+        let evaluated = read_class_member_references(ty, ctx);
+        return (evaluated != *ty).then_some(evaluated);
     }
     let subs = constant_operand_subs(std::iter::once(ty), &[], ctx);
     let evaluated = if subs.is_empty() {
@@ -203,7 +224,7 @@ pub(crate) fn evaluate_constant_operands(ty: &PhpType, ctx: &ResolutionCtx<'_>) 
     } else {
         evaluated
     };
-    let evaluated = if evaluated.contains_unevaluated_operator() {
+    let evaluated = if evaluated.needs_constant_evaluation() {
         read_class_member_references(&evaluated, ctx)
     } else {
         evaluated
@@ -211,10 +232,14 @@ pub(crate) fn evaluate_constant_operands(ty: &PhpType, ctx: &ResolutionCtx<'_>) 
     (evaluated != *ty).then_some(evaluated)
 }
 
-/// Replace every class constant `ty` names as a type with the value it
-/// holds: `Foo::BAR` with the constant's type, `Foo::BAR_*` with the union
-/// of every constant whose name matches, `Foo::class` with the class's name,
-/// and an enum's `Suit::Hearts` with that case.
+/// Replace every constant `ty` names as a type with the value it holds:
+/// `Foo::BAR` with the constant's type, `Foo::BAR_*` with the union of every
+/// constant whose name matches, `Foo::class` with the class's name, an
+/// enum's `Suit::Hearts` with that case, and a global constant (`MY_CONST`)
+/// that no class of the same name shadows with its value. A shape key
+/// written as a class constant becomes the key the constant holds, and a
+/// capitalised pseudo-type name no class answers to (`Number`) becomes the
+/// pseudo-type.
 ///
 /// The operand of a type operator is left alone: the operator reads the
 /// constant through [`constant_operand_shape`], or through the enum it
@@ -224,8 +249,25 @@ fn read_class_member_references(ty: &PhpType, ctx: &ResolutionCtx<'_>) -> PhpTyp
     match ty.raw_kind() {
         TypeKind::KeyOf(_) | TypeKind::ValueOf(_) | TypeKind::IndexAccess(..) => ty.clone(),
         TypeKind::Raw(text) => read_class_member_reference(text, ty, ctx),
-        TypeKind::Named(name) => read_class_member_reference(name, ty, ctx),
-        _ if !ty.contains_unevaluated_operator() => ty.clone(),
+        TypeKind::Named(name) => match crate::php_type::class_member_reference(name) {
+            Some(_) => read_class_member_reference(name, ty, ctx),
+            None => read_non_class_name(name, ctx).unwrap_or_else(|| ty.clone()),
+        },
+        _ if !ty.needs_constant_evaluation() => ty.clone(),
+        TypeKind::ArrayShape(entries) => {
+            let entries = entries
+                .iter()
+                .map(|entry| ShapeEntry {
+                    key: entry
+                        .key
+                        .as_deref()
+                        .map(|key| read_class_constant_shape_key(key, ctx)),
+                    value_type: read_class_member_references(&entry.value_type, ctx),
+                    optional: entry.optional,
+                })
+                .collect();
+            PhpType::array_shape(entries)
+        }
         _ => ty.map_children(&|child| read_class_member_references(child, ctx)),
     }
 }
@@ -234,6 +276,65 @@ fn read_class_member_reference(text: &str, ty: &PhpType, ctx: &ResolutionCtx<'_>
     crate::php_type::class_member_reference(text)
         .and_then(|(class_part, member)| class_member_type(class_part, member, ctx))
         .unwrap_or_else(|| ty.clone())
+}
+
+/// The key a shape entry written under a class constant (`self::KEY`,
+/// `Foo::KEY`) is stored under: the string or integer the constant holds.
+/// Any other key, and a constant that holds no literal key, stays as written.
+fn read_class_constant_shape_key(key: &str, ctx: &ResolutionCtx<'_>) -> String {
+    let value = crate::php_type::class_constant_key(key)
+        .filter(|(_, constant)| !constant.eq_ignore_ascii_case("class"))
+        .and_then(|(class_part, constant)| class_member_type(class_part, constant, ctx));
+    let literal_key = value.as_ref().and_then(|value| match value.as_literal()? {
+        LiteralValue::Int(_) => Some(value.as_literal()?.parse_i64()?.to_string()),
+        literal @ LiteralValue::String(_) => Some(literal.string_content()?.into_owned()),
+        LiteralValue::Float(_) => None,
+    });
+    literal_key.unwrap_or_else(|| key.to_string())
+}
+
+/// The type a name the docblock reader qualified as a class stands for when
+/// no class answers to it: the value of the constant of that name, or the
+/// pseudo-type a capitalised `Number` or `Boolean` spells.
+///
+/// `None` when the name is a class, or is neither of the two. A constant is
+/// looked up first, since that lookup is a map read and a class lookup that
+/// misses is not; a class only has to be ruled out once a constant exists.
+fn read_non_class_name(name: &str, ctx: &ResolutionCtx<'_>) -> Option<PhpType> {
+    let short = crate::util::short_name(name);
+    if crate::php_type::is_constant_name_spelling(short)
+        && let Some(value) = resolve_docblock_constant_value(name, ctx)
+        && !names_class(name, ctx)
+    {
+        return super::global_constant_value_type(short, &value, ctx);
+    }
+    // A pseudo-type spelling is only read as one where it was written bare:
+    // an imported `Number` names the class it was imported as.
+    let pseudo = crate::php_type::capitalised_pseudo_type(short)?;
+    let written_bare = short == name
+        || docblock_namespace(ctx).is_some_and(|ns| {
+            name.strip_suffix(short)
+                .and_then(|prefix| prefix.strip_suffix('\\'))
+                == Some(ns)
+        });
+    (written_bare && !names_class(name, ctx)).then(|| PhpType::parse(pseudo))
+}
+
+fn names_class(name: &str, ctx: &ResolutionCtx<'_>) -> bool {
+    let name = name.strip_prefix('\\').unwrap_or(name);
+    crate::class_lookup::find_class_by_fqn(ctx.file.all_classes, name).is_some()
+        || (ctx.file.class_loader)(Fqn::new(name)).is_some()
+}
+
+/// The namespace a docblock read in `ctx` was written in: the current
+/// class's, or outside a class the one in force at the cursor.
+fn docblock_namespace<'a>(ctx: &'a ResolutionCtx<'_>) -> Option<&'a str> {
+    match ctx.current_class.filter(|class| !class.name.is_empty()) {
+        Some(class) => class.file_namespace.as_deref(),
+        None => ctx.file.namespace.or_else(|| {
+            crate::parser::namespace_at_offset(ctx.file.content, ctx.cursor_offset as usize)
+        }),
+    }
 }
 
 /// The type `Class::member` names in a type position.
