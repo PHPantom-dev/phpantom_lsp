@@ -1096,7 +1096,7 @@ fn split_top_level_union(ty: &str) -> Vec<&str> {
 
 /// Canonicalize spellings of the same type that PHPStan and PHPantom
 /// print differently: `callable(): mixed` is `callable`, `array-key` is
-/// `int|string`, `mixed[]` and
+/// `int|string`, `array&callable` is `callable-array`, `mixed[]` and
 /// `array<int|string, V>` are `array` and `array<V>`, `(A|B)` is `A|B`,
 /// a union with `mixed` in it is `mixed`, and `array{}` beside a wider
 /// `array` member adds nothing.
@@ -1116,6 +1116,7 @@ fn canonicalize_union_spelling(ty: &str) -> String {
             "callable():mixed" => "callable".to_string(),
             "Closure():mixed" => "Closure".to_string(),
             "array-key" => "int|string".to_string(),
+            "array&callable():mixed" | "array&callable" => "callable-array".to_string(),
             "mixed[]" | "array<mixed>" | "array<mixed, mixed>" => "array".to_string(),
             _ => {
                 for prefix in ["array<int|string, ", "array<array-key, "] {
@@ -1134,12 +1135,16 @@ fn canonicalize_union_spelling(ty: &str) -> String {
     if members.len() > 1 && members.iter().any(|m| m == "mixed") {
         return "mixed".to_string();
     }
-    // `scalar` and `true|false` are other spellings of a union PHPStan
-    // prints member by member.
+    // `scalar`, `number`, `numeric` and `true|false` are other spellings of
+    // a union PHPStan prints member by member.
     let mut members: Vec<String> = members
         .into_iter()
         .flat_map(|m| match m.as_str() {
             "scalar" => ["bool", "float", "int", "string"]
+                .map(String::from)
+                .to_vec(),
+            "number" => ["float", "int"].map(String::from).to_vec(),
+            "numeric" => ["float", "int", "numeric-string"]
                 .map(String::from)
                 .to_vec(),
             _ => vec![m],

@@ -207,11 +207,18 @@ impl PhpType {
     }
 
     /// Whether this type is a class constant named as a type (`Foo::BAR`,
-    /// `Foo::BAR_*`, `Foo::class`), still as the text the parser kept.
+    /// `Foo::BAR_*`, `Foo::class`), still as the text the parser kept, or a
+    /// `static::BAR` bound over the receiver's class (`static(Foo)::BAR`).
     pub fn is_class_member_reference(&self) -> bool {
         match self.kind() {
-            TypeKind::Raw(text) => class_member_reference(text).is_some(),
-            TypeKind::Named(name) => class_member_reference(name).is_some(),
+            TypeKind::Raw(text) => {
+                class_member_reference(text).is_some()
+                    || late_static_member_reference(text).is_some()
+            }
+            TypeKind::Named(name) => {
+                class_member_reference(name).is_some()
+                    || late_static_member_reference(name).is_some()
+            }
             _ => false,
         }
     }

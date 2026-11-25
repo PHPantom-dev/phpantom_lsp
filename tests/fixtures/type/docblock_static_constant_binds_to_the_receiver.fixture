@@ -1,0 +1,63 @@
+// test: a docblock `static::CONST` reads the constant on the class the call lands on
+// feature: hover
+// expect_hover: $onBase => $onBase = string
+// expect_hover: $onChild => $onChild = string
+// expect_hover: $onFinal => $onFinal = 'c'
+// expect_hover: $onNew => $onNew = 'b'
+// expect_hover: $onStaticCall => $onStaticCall = 'b'
+// expect_hover: $onSelf => $onSelf = 'a'
+// expect_hover: $onTyped => $onTyped = int
+// expect_hover: $onThis => $onThis = string
+// expect_hover: $fromParam => $fromParam = string
+---
+<?php
+
+namespace App;
+
+class Base
+{
+    public const KEY = 'a';
+    public const int COUNT = 1;
+
+    /** @return static::KEY */
+    public function get(): string { return static::KEY; }
+
+    /** @return self::KEY */
+    public function getSelf(): string { return self::KEY; }
+
+    /** @return static::COUNT */
+    public function count(): int { return static::COUNT; }
+
+    /** @return static::KEY */
+    public static function make(): string { return static::KEY; }
+
+    /** @param static::KEY $param */
+    public function take(string $param): void
+    {
+        $onThis = $this->get();
+        $fromParam = $param;
+        echo $onThis, $fromPara<>m;
+    }
+}
+
+class Child extends Base
+{
+    public const KEY = 'b';
+}
+
+final class FinalChild extends Base
+{
+    public const KEY = 'c';
+}
+
+function test(Base $base, Child $child, FinalChild $final): void
+{
+    $onBase = $base->get();
+    $onChild = $child->get();
+    $onFinal = $final->get();
+    $onNew = (new Child())->get();
+    $onStaticCall = Child::make();
+    $onSelf = $child->getSelf();
+    $onTyped = $child->count();
+    echo $onBase, $onChild, $onFinal, $onNew, $onStaticCall, $onSelf, $<>onTyped;
+}

@@ -23,6 +23,12 @@ enum LsbBinding<'a> {
     /// Collapse them: the called class is statically fixed, so late static
     /// binding has nothing left to resolve.
     Fixed,
+    /// Collapse them to the receiver's declared class, which the runtime
+    /// object is an instance of, as for [`Fixed`](Self::Fixed).  That is
+    /// sound for the object `static` names, but not for a `static::NAME`
+    /// constant: the object may be a subclass that redeclares it, so the
+    /// constant stays bound over the class instead.
+    Declared,
     /// Collapse them to `ty`: the call forwards late static binding from a
     /// class nothing can extend, so `static` can only ever be that class.
     Exact(&'a PhpType),
@@ -46,7 +52,7 @@ impl<'a> LsbBinding<'a> {
                 TypeKind::Named(name) => Some(*name),
                 _ => None,
             },
-            LsbBinding::Fixed | LsbBinding::Exact(_) => None,
+            LsbBinding::Fixed | LsbBinding::Declared | LsbBinding::Exact(_) => None,
         }
     }
 
@@ -562,7 +568,10 @@ impl PhpType {
     /// `$this` references that [`replace_self`] / [`replace_self_with_type`]
     /// would replace.
     pub fn contains_self_ref(&self) -> bool {
-        self.contains_name_matching(&is_self_ref_name) || self.contains_self_constant()
+        self.contains_name_matching(&is_self_ref_name)
+            || self.contains_keyword_constant(&|name| {
+                self_constant_name(name).or_else(|| static_constant_name(name))
+            })
     }
 
     /// Whether a `self::NAME` constant reference appears anywhere in this
@@ -570,9 +579,16 @@ impl PhpType {
     /// so it is not a name [`contains_name_matching`](Self::contains_name_matching)
     /// would see.
     fn contains_self_constant(&self) -> bool {
+        self.contains_keyword_constant(&self_constant_name)
+    }
+
+    /// Whether a constant reference `constant_of` recognises appears
+    /// anywhere in this type tree, as a type or as a shape key.
+    fn contains_keyword_constant(&self, constant_of: &dyn Fn(&str) -> Option<&str>) -> bool {
+        let recurse = |t: &PhpType| t.contains_keyword_constant(constant_of);
         match self.raw_kind() {
-            TypeKind::Named(s) => self_constant_name(s).is_some(),
-            TypeKind::Raw(s) => self_constant_name(s).is_some(),
+            TypeKind::Named(s) => constant_of(s).is_some(),
+            TypeKind::Raw(s) => constant_of(s).is_some(),
             TypeKind::Benevolent(inner)
             | TypeKind::ListShape(inner)
             | TypeKind::TemplateParam(_, inner)
@@ -584,21 +600,17 @@ impl PhpType {
             | TypeKind::KeyOf(inner)
             | TypeKind::ValueOf(inner)
             | TypeKind::ClassString(Some(inner))
-            | TypeKind::InterfaceString(Some(inner)) => inner.contains_self_constant(),
-            TypeKind::UnsealedShape(unsealed) => unsealed.widened.contains_self_constant(),
-            TypeKind::Union(types) | TypeKind::Intersection(types) => {
-                types.iter().any(PhpType::contains_self_constant)
-            }
-            TypeKind::Generic(g) => g.args.iter().any(PhpType::contains_self_constant),
-            TypeKind::IndexAccess(target, index) => {
-                target.contains_self_constant() || index.contains_self_constant()
-            }
+            | TypeKind::InterfaceString(Some(inner)) => recurse(inner),
+            TypeKind::UnsealedShape(unsealed) => recurse(&unsealed.widened),
+            TypeKind::Union(types) | TypeKind::Intersection(types) => types.iter().any(recurse),
+            TypeKind::Generic(g) => g.args.iter().any(recurse),
+            TypeKind::IndexAccess(target, index) => recurse(target) || recurse(index),
             TypeKind::ArrayShape(entries) | TypeKind::ObjectShape(entries) => {
                 entries.iter().any(|e| {
                     e.key
                         .as_deref()
-                        .is_some_and(|key| self_constant_name(key).is_some())
-                        || e.value_type.contains_self_constant()
+                        .is_some_and(|key| constant_of(key).is_some())
+                        || recurse(&e.value_type)
                 })
             }
             _ => false,
@@ -793,6 +805,14 @@ impl PhpType {
         self.replace_self_inner(&PhpType::named(atom(self_class)), lsb)
     }
 
+    /// Like [`replace_self_bound`](Self::replace_self_bound) with no
+    /// `lsb_class`, for a call on a receiver typed `self_class`: `static`
+    /// collapses to that class, but a `static::NAME` constant is read as one
+    /// a subclass of it may redeclare.
+    pub fn replace_self_declared(&self, self_class: &str) -> PhpType {
+        self.replace_self_inner(&PhpType::named(atom(self_class)), LsbBinding::Declared)
+    }
+
     /// Like [`replace_self_bound`](Self::replace_self_bound), but for a call
     /// forwarded from `called_class`, a class nothing can extend (a `final`
     /// class or an enum), so `static` / `$this` are exactly that class.
@@ -856,11 +876,26 @@ impl PhpType {
                 )
             }
 
+            // `static::FOO` reads the constant on the class late static
+            // binding lands on: exactly that class when the call pins it,
+            // and otherwise the bound class or any subclass of it, which
+            // `static(Foo)::FOO` spells until the constant can be read.
+            TypeKind::Named(s)
+                if let Some(constant) = static_constant_name(s)
+                    && let Some(reference) = bind_static_constant(replacement, lsb, constant) =>
+            {
+                PhpType::named(atom(&reference))
+            }
+            TypeKind::Raw(s)
+                if let Some(constant) = static_constant_name(s)
+                    && let Some(reference) = bind_static_constant(replacement, lsb, constant) =>
+            {
+                PhpType::raw(reference)
+            }
+
             // `self::FOO` names a constant of the class the annotation was
             // read from, so it stays readable once the type leaves that
             // class (`key-of<self::TABLE>` returned to a caller elsewhere).
-            // `static::FOO` is left alone: which class it reads is only
-            // known at the call.
             TypeKind::Named(s) if let Some(constant) = self_constant_name(s) => {
                 qualify_self_constant(replacement, constant)
                     .map(|reference| PhpType::named(atom(&reference)))
@@ -900,7 +935,9 @@ impl PhpType {
             // A bound already applied by an earlier hop still answers to a
             // fixed call target: `A::create()` pins whatever `create()` left
             // open.
-            TypeKind::StaticType(n) | TypeKind::ThisType(n) if matches!(lsb, LsbBinding::Fixed) => {
+            TypeKind::StaticType(n) | TypeKind::ThisType(n)
+                if matches!(lsb, LsbBinding::Fixed | LsbBinding::Declared) =>
+            {
                 PhpType::named(*n)
             }
             TypeKind::StaticType(_) | TypeKind::ThisType(_)
@@ -1251,6 +1288,43 @@ fn self_constant_name(name: &str) -> Option<&str> {
         .eq_ignore_ascii_case("self::")
         .then(|| &name[6..])
         .filter(|constant| !constant.is_empty())
+}
+
+/// The constant half of a `static::NAME` reference, or `None` for any other
+/// name.
+fn static_constant_name(name: &str) -> Option<&str> {
+    let prefix = name.get(..8)?;
+    prefix
+        .eq_ignore_ascii_case("static::")
+        .then(|| &name[8..])
+        .filter(|constant| !constant.is_empty())
+}
+
+/// The reference a `static::NAME` constant becomes once late static binding
+/// is resolved by `lsb`: `Foo::NAME` when it lands on exactly `Foo`, and
+/// `static(Foo)::NAME` when it lands on `Foo` or a subclass.  `None` when
+/// it lands on something that is not one class (an intersection receiver).
+fn bind_static_constant(
+    replacement: &PhpType,
+    lsb: LsbBinding<'_>,
+    constant: &str,
+) -> Option<String> {
+    if let Some(whole) = lsb.whole_type() {
+        return match whole.kind() {
+            TypeKind::Named(class) if matches!(lsb, LsbBinding::Exact(_)) => {
+                Some(format!("{class}::{constant}"))
+            }
+            _ => None,
+        };
+    }
+    if let LsbBinding::Fixed = lsb {
+        return qualify_self_constant(replacement, constant);
+    }
+    let text = match lsb.bound_over(replacement) {
+        Some(bound) => super::late_static_member_text(&bound, constant),
+        None => super::late_static_member_text(replacement.base_name()?, constant),
+    };
+    Some(text)
 }
 
 /// `Class::NAME` for the class a `self` replacement names, or `None` when

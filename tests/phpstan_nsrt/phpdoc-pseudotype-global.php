@@ -21,8 +21,8 @@ function () {
 	/** @var Double $double */
 	$double = doFoo();
 
-	assertType('float|int', $number); // SKIP
-	assertType('float|int|numeric-string', $numeric); // SKIP
+	assertType('float|int', $number);
+	assertType('float|int|numeric-string', $numeric);
 	assertType('bool', $boolean);
 	assertType('resource', $resource);
 	assertType('never', $never);

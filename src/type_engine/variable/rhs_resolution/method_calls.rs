@@ -433,6 +433,14 @@ pub(super) fn resolve_member_call_on_receiver<'b>(
         Expression::Variable(Variable::Direct(dv)) if dv.name == b"$this"
     );
     let lsb_class = lsb_class_for_call(receiver_is_this, &receiver_resolved, ctx);
+    let mut receiver = object;
+    while let Expression::Parenthesized(p) = receiver {
+        receiver = p.expression;
+    }
+    let receiver_is_new = matches!(
+        receiver,
+        Expression::Instantiation(new) if matches!(new.class, Expression::Identifier(_))
+    );
     // `$this->` inside a final class or an enum forwards from a class
     // nothing extends, so `static` there is that class and nothing else.
     let exact_called_class = (receiver_is_this
@@ -497,7 +505,13 @@ pub(super) fn resolve_member_call_on_receiver<'b>(
                         Some(ref inter) => ty.replace_self_over_type(&owner_key, inter),
                         None => match exact_called_class {
                             Some(ref called) => ty.replace_self_exact(&owner_key, called),
-                            None => ty.replace_self_bound(&owner_key, lsb_class.as_deref()),
+                            None => match lsb_class {
+                                Some(ref class) => ty.replace_self_bound(&owner_key, Some(class)),
+                                // A receiver built right here is exactly its
+                                // class; any other is one of its subclasses.
+                                None if receiver_is_new => ty.replace_self_bound(&owner_key, None),
+                                None => ty.replace_self_declared(&owner_key),
+                            },
                         },
                     },
                 };

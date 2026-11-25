@@ -73,12 +73,30 @@ pub(crate) fn class_constant_key(key: &str) -> Option<(&str, &str)> {
 /// key never does.
 pub(crate) fn class_member_reference(text: &str) -> Option<(&str, &str)> {
     let (class, member) = text.rsplit_once("::")?;
+    class_member_reference_parts(class, member)
+}
+
+/// The bound class and the member of a `static::NAME` reference bound over
+/// a class, `static(Foo)::NAME`: the constant read on whichever class the
+/// receiver is at runtime, `Foo` or one of its subclasses.
+pub(crate) fn late_static_member_reference(text: &str) -> Option<(&str, &str)> {
+    let (bound, member) = text.strip_prefix("static(")?.split_once(")::")?;
+    class_member_reference_parts(bound, member)
+}
+
+fn class_member_reference_parts<'a>(class: &'a str, member: &'a str) -> Option<(&'a str, &'a str)> {
     let is_member_spelling = !member.is_empty()
         && member
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '*' || !c.is_ascii())
         && !member.starts_with(|c: char| c.is_ascii_digit());
     (is_class_name_spelling(class) && is_member_spelling).then_some((class, member))
+}
+
+/// The spelling of a `static::NAME` reference bound over `class`, read back
+/// by [`late_static_member_reference`].
+pub(crate) fn late_static_member_text(class: &str, member: &str) -> String {
+    format!("static({class})::{member}")
 }
 
 /// The runtime array key each shape entry occupies, in order.

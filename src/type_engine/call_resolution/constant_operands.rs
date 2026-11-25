@@ -249,9 +249,9 @@ fn read_class_member_references(ty: &PhpType, ctx: &ResolutionCtx<'_>) -> PhpTyp
     match ty.raw_kind() {
         TypeKind::KeyOf(_) | TypeKind::ValueOf(_) | TypeKind::IndexAccess(..) => ty.clone(),
         TypeKind::Raw(text) => read_class_member_reference(text, ty, ctx),
-        TypeKind::Named(name) => match crate::php_type::class_member_reference(name) {
-            Some(_) => read_class_member_reference(name, ty, ctx),
-            None => read_non_class_name(name, ctx).unwrap_or_else(|| ty.clone()),
+        TypeKind::Named(name) => match ty.is_class_member_reference() {
+            true => read_class_member_reference(name, ty, ctx),
+            false => read_non_class_name(name, ctx).unwrap_or_else(|| ty.clone()),
         },
         _ if !ty.needs_constant_evaluation() => ty.clone(),
         TypeKind::ArrayShape(entries) => {
@@ -273,18 +273,27 @@ fn read_class_member_references(ty: &PhpType, ctx: &ResolutionCtx<'_>) -> PhpTyp
 }
 
 fn read_class_member_reference(text: &str, ty: &PhpType, ctx: &ResolutionCtx<'_>) -> PhpType {
-    crate::php_type::class_member_reference(text)
-        .and_then(|(class_part, member)| class_member_type(class_part, member, ctx))
-        .unwrap_or_else(|| ty.clone())
+    let value = match crate::php_type::late_static_member_reference(text) {
+        Some((bound, member)) => late_class_member_type(bound, member, ctx),
+        None => crate::php_type::class_member_reference(text)
+            .and_then(|(class_part, member)| class_member_type(class_part, member, ctx)),
+    };
+    value.unwrap_or_else(|| ty.clone())
 }
 
 /// The key a shape entry written under a class constant (`self::KEY`,
 /// `Foo::KEY`) is stored under: the string or integer the constant holds.
 /// Any other key, and a constant that holds no literal key, stays as written.
+///
+/// A key has to be one literal, so `static::KEY` reads the constant of the
+/// class the docblock is in, as PHPStan does, rather than the widened type a
+/// subclass's redeclaration leaves.
 fn read_class_constant_shape_key(key: &str, ctx: &ResolutionCtx<'_>) -> String {
     let value = crate::php_type::class_constant_key(key)
         .filter(|(_, constant)| !constant.eq_ignore_ascii_case("class"))
-        .and_then(|(class_part, constant)| class_member_type(class_part, constant, ctx));
+        .and_then(|(class_part, constant)| {
+            class_member_type_bound(class_part, constant, false, ctx)
+        });
     let literal_key = value.as_ref().and_then(|value| match value.as_literal()? {
         LiteralValue::Int(_) => Some(value.as_literal()?.parse_i64()?.to_string()),
         literal @ LiteralValue::String(_) => Some(literal.string_content()?.into_owned()),
@@ -338,7 +347,37 @@ fn docblock_namespace<'a>(ctx: &'a ResolutionCtx<'_>) -> Option<&'a str> {
 }
 
 /// The type `Class::member` names in a type position.
+///
+/// `static::member` read where nothing has bound `static` reads the current
+/// class's constant as one a subclass may redeclare.
 fn class_member_type(class_part: &str, member: &str, ctx: &ResolutionCtx<'_>) -> Option<PhpType> {
+    let late = class_part.eq_ignore_ascii_case("static");
+    class_member_type_bound(class_part, member, late, ctx)
+}
+
+/// The type `static::member` names once `static` is bound over `class`: the
+/// constant on `class` or on whichever subclass the receiver turns out to be.
+fn late_class_member_type(class: &str, member: &str, ctx: &ResolutionCtx<'_>) -> Option<PhpType> {
+    if member.eq_ignore_ascii_case("class") {
+        return Some(PhpType::class_string(Some(PhpType::named(
+            crate::atom::atom(class.strip_prefix('\\').unwrap_or(class)),
+        ))));
+    }
+    class_member_type_bound(class, member, true, ctx)
+}
+
+/// The type `Class::member` names, where `late` says the class may be any
+/// subclass of the one named.
+///
+/// A subclass may redeclare a constant with another value, so a late read
+/// of a class that can be extended gets the constant's declared type, or
+/// failing that its value's type with the literal widened away.
+fn class_member_type_bound(
+    class_part: &str,
+    member: &str,
+    late: bool,
+    ctx: &ResolutionCtx<'_>,
+) -> Option<PhpType> {
     if member.eq_ignore_ascii_case("class") {
         // `static::class` is only known at the call.
         if class_part.eq_ignore_ascii_case("static") {
@@ -356,12 +395,20 @@ fn class_member_type(class_part: &str, member: &str, ctx: &ResolutionCtx<'_>) ->
         ctx.file.class_loader,
         ctx.resolved_class_cache,
     );
+    let exact = !late || merged.is_final || merged.kind == crate::types::ClassLikeKind::Enum;
     let constant_type = |name: &str| -> Option<PhpType> {
         let constant = merged.constants.iter().find(|c| c.name == name)?;
         if constant.is_enum_case {
             return Some(PhpType::enum_case(merged.fqn(), constant.name));
         }
-        super::return_types::class_constant_type(&merged, name, ctx)
+        if !exact && let Some(declared) = &constant.type_hint {
+            return Some(declared.clone());
+        }
+        let value = super::return_types::class_constant_type(&merged, name, ctx)?;
+        Some(match exact {
+            true => value,
+            false => value.generalized_array().widen_scalar_literals(),
+        })
     };
     if !member.contains('*') {
         return constant_type(member);

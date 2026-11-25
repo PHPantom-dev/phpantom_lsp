@@ -38,15 +38,15 @@ class Foo
 		$nonEmptyUppercaseString,
 	): void
 	{
-		assertType('pure-callable(): mixed', $pureCallable); // SKIP
-		assertType('array&callable(): mixed', $callableArray); // SKIP
-		assertType('resource', $closedResource); // SKIP
-		assertType('resource', $openResource); // SKIP
+		assertType('pure-callable(): mixed', $pureCallable); // SKIP: a callable's purity is not modelled
+		assertType('array&callable(): mixed', $callableArray);
+		assertType('closed-resource', $closedResource); // PHPStan widens to `resource`; PHPantom keeps the refinement
+		assertType('open-resource', $openResource); // PHPStan widens to `resource`; PHPantom keeps the refinement
 		assertType('class-string<UnitEnum>', $enumString);
 		assertType('literal-string&non-empty-string', $nonEmptyLiteralString);
 		assertType('float|int<min, -1>|int<1, max>|non-falsy-string|true', $nonEmptyScalar);
 		assertType("0|0.0|''|'0'|false", $emptyScalar);
-		assertType("mixed~(0|0.0|''|'0'|array{}|false|null)", $nonEmptyMixed); // SKIP
+		assertType("mixed~(0|0.0|''|'0'|array{}|false|null)", $nonEmptyMixed);
 		assertType('lowercase-string', $lowercaseString);
 		assertType('lowercase-string&non-empty-string', $nonEmptyLowercaseString);
 		assertType('uppercase-string', $uppercaseString);

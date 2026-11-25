@@ -2058,19 +2058,6 @@ No outstanding items.
 
 ## Name resolution
 
-### B883. Several PHPDoc pseudo-types are shown under their own spelling instead of the type they stand for
-
-**Impact: Low · Complexity: Low**
-
-```php
-/** @var number $n */ $n;             // number, should be float|int
-/** @param closed-resource $r */ $r;  // closed-resource, should be resource
-```
-
-The engine models these as keywords, but hover and the assertion runner print the keyword where PHPStan prints its expansion: `callable-array`, `closed-resource`, `open-resource`, `non-empty-mixed`, `pure-callable`, `number` and `numeric` (also when spelled `Number` or `Numeric` with no class of that name). Each of these is also built or matched by name inside the engine (`numeric` and `number` by arithmetic and narrowing, `non-empty-mixed` by truthiness, the resource refinements by `is_resource()`), so expanding one at parse time means moving those producers and matchers over to the expansion too. The resource refinements are a distinction PHPStan drops; keeping them may be the more correct reading.
-
-**Cases** (PHPStan `nsrt/`, 7 assertions): the `// SKIP` lines in `tests/phpstan_nsrt/more-types.php` (5) and `phpdoc-pseudotype-global.php` (2).
-
 ### B888. A class-level `@method` or `@property` tag does not override a real member
 
 **Impact: Low · Complexity: Low (needs a decision first)**
@@ -2096,21 +2083,6 @@ Either keep the current rule and drop these cases, or follow PHPStan and
 rewrite those tests.
 
 **Cases** (PHPStan `nsrt/`, 5 assertions): `bug-3142.php` (3), `bug-6001.php`, `override-property-union-type-with-tag-subtype.php`.
-
-### B906. `static::CONST` in a docblock type is never resolved
-
-**Impact: Low · Complexity: Medium**
-
-```php
-class Base {
-    public const KEY = 'a';
-    /** @return static::KEY */ public function get(): string { return static::KEY; }
-}
-class Child extends Base { public const KEY = 'b'; }
-(new Child())->get();   // static::KEY, should be 'b' (or string, for a receiver that may be a subclass)
-```
-
-The reference stays as raw text through the call, so hover shows `static::KEY` and nothing downstream can use the type. It should bind to the receiver's class, like `@return static` does, reading the constant's declared type when the receiver may be a subclass that redeclares it.
 
 ## Code actions
 
