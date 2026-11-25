@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795614702622,
+  "lastUpdate": 1795620529774,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -15885,6 +15885,65 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_yii_action",
             "value": 98.6,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "6e164bbc63754dccbb3c3f80c492d79e4644840a",
+          "message": "Fix some conditional return types issues",
+          "timestamp": "2026-11-25T16:22:55+01:00",
+          "tree_id": "d950ab91cddc1e585d1c76f3381f30ba0a94f063",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/6e164bbc63754dccbb3c3f80c492d79e4644840a"
+        },
+        "date": 1795620519733,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_drupal_module",
+            "value": 275.1,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_hello_world",
+            "value": 44.4,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 78.9,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_symfony_controller",
+            "value": 80.4,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_tempest_view",
+            "value": 77.7,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_wordpress_plugin",
+            "value": 79.3,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_yii_action",
+            "value": 104,
             "unit": "MiB"
           }
         ]
