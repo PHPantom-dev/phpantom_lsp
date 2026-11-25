@@ -2164,56 +2164,31 @@ The engine models these as keywords, but hover and the assertion runner print th
 
 **Cases** (PHPStan `nsrt/`, 13 assertions): the `// SKIP` lines in `tests/phpstan_nsrt/more-types.php` (11) and `phpdoc-pseudotype-global.php` (2).
 
-### B885. `@phpstan-require-extends` on an interface does not give its instances the required class's members
+### B888. A class-level `@method` or `@property` tag does not override a real member
 
-**Impact: Medium · Complexity: Low-Medium**
-
-```php
-/** @phpstan-require-extends SomeClass */ interface SampleInterface {}
-function t(SampleInterface $t) { $t->doFoo(); } // got nothing, should be int (SomeClass::doFoo)
-```
-
-Members of the required class (and through an interface extending it) are not found on a value typed by the interface.
-
-**Cases** (PHPStan `nsrt/`, 8 assertions): `bug-10302-interface-extends.php` (8).
-
-### B887. A `@phpstan-type` alias leaks out of the class or trait that declares it
-
-**Impact: Medium · Complexity: Low-Medium**
-
-```php
-/** @phpstan-type Test array{string, int} */ class A {}
-/** @phpstan-type Test \stdClass */ class B { /** @param Test $a */ function f($a) { $a; } }  // array{...}, should be stdClass
-class C { /** @param Test $a */ function f($a) { $a; } }   // array{...}, should be class Test
-```
-
-Local type aliases seem to be collected per file rather than per declaring class: a trait, a class without the alias, and a class with its own alias of the same name all see the first class's alias.
-
-It also shows as:
-
-- A type alias of the class using a trait is applied to the trait's own docblocks
-- A `@phpstan-type` alias named after a built-in type replaces the built-in
-
-**Cases** (PHPStan `nsrt/`, 8 assertions): `type-aliases.php` (7), `trait-type-alias.php`.
-
-### B888. A class-level `@method` or `@property` tag does not override an inherited or own member
-
-**Impact: Low · Complexity: Low-Medium**
+**Impact: Low · Complexity: Low (needs a decision first)**
 
 ```php
 /** @method string sayHi() */
 class HelloWorld extends ParentClass {} // ParentClass::sayHi(): int
-(new HelloWorld())->sayHi(); // got int, should be string
+(new HelloWorld())->sayHi(); // got int, PHPStan says string
 ```
 
-PHPStan lets a class-level `@method` tag win over a method from the parent or a used trait, and over the class's own `@return`. Worth checking against the feature-precedence rule before changing.
+PHPStan lets a class's `@method` tag win over a method from the class itself,
+its parent or a used trait, and lets a `@property` tag narrow an inherited
+public property when the native type accepts the tag's type (`?int`
+re-declared `@property int` reads as `int`).
 
-It also shows as:
+This deliberately conflicts with an earlier decision: PHP only reaches
+`__call()` / `__get()` when no accessible member exists, so PHPantom lets the
+real member win. Laravel test bases that carry an imprecise
+`@method MockInterface mock(...)` next to the framework's real `mock()` are the
+motivating case. `mock_helpers_survive_an_imprecise_method_tag_on_the_test_base`
+and `test_property_tag_overrides_inherited_non_public_property` encode it.
+Either keep the current rule and drop these cases, or follow PHPStan and
+rewrite those tests.
 
-- A class-level `@method` or `@property` tag does not override an inherited real member's type
-- `@phpstan-property` and `@phpstan-property-read` do not override `@property`
-
-**Cases** (PHPStan `nsrt/`, 7 assertions): `bug-3142.php` (3), `classPhpDocs-phpstanPropertyPrefix.php` (2), `bug-6001.php`, `override-property-union-type-with-tag-subtype.php`.
+**Cases** (PHPStan `nsrt/`, 5 assertions): `bug-3142.php` (3), `bug-6001.php`, `override-property-union-type-with-tag-subtype.php`.
 
 ### B903. `self::CONST` in an inherited member's docblock reads the subclass's constant
 
@@ -2641,3 +2616,42 @@ side. Wrapping every expression in `tests/assert_type_runner.rs` in
 parentheses reproduces the cases (`array-pop.php`, `array-shift.php`,
 `bug-10122.php`, `bug-4499.php`, the `functionPhpDocs*`/`methodPhpDocs*`
 `void` assertions, and the WordPress `output-constants.php`).
+
+### B904. A recursive or circular `@phpstan-type` alias resolves to a type
+
+**Impact: Low · Complexity: Low**
+
+```php
+/**
+ * @phpstan-type RecursiveTypeAlias RecursiveTypeAlias[]
+ * @phpstan-type CircularTypeAlias1 CircularTypeAlias2
+ * @phpstan-type CircularTypeAlias2 CircularTypeAlias1
+ * @property RecursiveTypeAlias $recursive
+ * @property CircularTypeAlias1 $circular
+ */
+class Foo {}
+(new Foo)->recursive;   // array<RecursiveTypeAlias>, should be an error type
+(new Foo)->circular;    // CircularTypeAlias1, should be an error type
+```
+
+A local alias that names itself, directly or through another local alias, is
+left as the unexpanded name where the cycle recurs, which then reads as a
+class. PHPStan reports the alias as invalid and types its uses as an error.
+Imported aliases that form a cycle already resolve to `mixed`.
+
+**Cases** (PHPStan `nsrt/`, 2 assertions): `type-aliases.php` (2).
+
+### B905. Reading a `@property-write` property gives its type
+
+**Impact: Low · Complexity: Low**
+
+```php
+/** @property-write int $baz */
+#[AllowDynamicProperties]
+class Foo { function f() { $this->baz; } }   // int, should be never
+```
+
+A write-only magic property cannot be read, so PHPStan types a read of it as
+`*NEVER*`. PHPantom reads `@property-write` like `@property`.
+
+**Cases** (PHPStan `nsrt/`, 1 assertion): `classPhpDocs-phpstanPropertyPrefix.php`.

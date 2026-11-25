@@ -348,21 +348,17 @@ impl Backend {
             constant_imports,
             namespace,
         };
-        // Collect type alias names from ALL classes in the file up-front.
-        // A type alias defined on one class can be referenced from methods
-        // in a different class in the same file, so we must skip all of
-        // them to avoid mangling alias names into FQN form.
-        let all_alias_names: Vec<Atom> = classes
-            .iter()
-            .flat_map(|c| c.type_aliases.keys().copied())
-            .collect();
+        let any_aliases = classes.iter().any(|c| !c.type_aliases.is_empty());
 
         for class in classes.iter_mut() {
+            // A type alias is scoped to the class that declares it, so only
+            // its own alias names are kept from being qualified as classes.
+            let alias_names: Vec<Atom> = class.type_aliases.keys().copied().collect();
             Self::qualify_class_references(class, scope);
             if class.laravel.is_some() {
                 Self::qualify_laravel_names(class, scope);
             }
-            Self::qualify_generic_args_and_bounds(class, scope, &all_alias_names);
+            Self::qualify_generic_args_and_bounds(class, scope, &alias_names);
 
             // Resolve class-like names in method return types and property
             // type hints so that cross-file resolution works correctly.
@@ -372,14 +368,11 @@ impl Backend {
             //
             // Template params and type alias names are excluded to avoid
             // mangling generic types and locally-defined type aliases.
-            // We collect alias names from ALL classes in the file because
-            // a type alias defined on one class may be referenced from a
-            // method in a different class in the same file.
             let skip_names: Vec<String> = class
                 .template_params
                 .iter()
+                .chain(&alias_names)
                 .map(|a| a.to_string())
-                .chain(all_alias_names.iter().map(|a| a.to_string()))
                 .collect();
             let resolver = scope.type_resolver(&skip_names);
 
@@ -472,7 +465,7 @@ impl Backend {
 
         // A member signature is read from every file that uses the class,
         // where the alias names it would no longer be in scope.
-        if !all_alias_names.is_empty() {
+        if any_aliases {
             crate::type_engine::type_ops::aliases::expand_local_type_aliases(classes);
         }
     }

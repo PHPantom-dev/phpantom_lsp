@@ -30,15 +30,17 @@ use crate::types::*;
 /// its definition.
 ///
 /// Called on the classes of one file (one namespace block) after their names
-/// have been qualified.  A class's own alias wins over another class's of the
-/// same name, and a class-level `@template` or an import of the same name
-/// hides it.  An alias body that names another alias is expanded first; a
-/// cycle is left unexpanded where it recurs rather than unrolled.
+/// have been qualified.  An alias is visible only in the class (or trait)
+/// that declares it, and a class-level `@template` of the same name hides
+/// it.  An alias named after a built-in type (`@phpstan-type int Foo`) is
+/// invalid and never replaces the built-in.  An alias body that names
+/// another alias is expanded first; a cycle is left unexpanded where it
+/// recurs rather than unrolled.
 pub(crate) fn expand_local_type_aliases(classes: &mut [ClassInfo]) {
     let mut names: Vec<String> = Vec::new();
     for class in classes.iter() {
         for name in class.type_aliases.keys() {
-            if !names.iter().any(|n| n == name.as_str()) {
+            if !is_builtin_non_class_type(name) && !names.iter().any(|n| n == name.as_str()) {
                 names.push(name.to_string());
             }
         }
@@ -99,15 +101,8 @@ impl LocalAliasExpander<'_> {
     /// when it is not a local alias in that scope (or recurs in a cycle).
     fn lookup(&mut self, from: usize, name: &str) -> Option<PhpType> {
         let name = crate::atom::atom(name);
-        let owner = if self.classes[from].type_aliases.contains_key(&name) {
-            from
-        } else {
-            self.classes
-                .iter()
-                .position(|c| c.type_aliases.contains_key(&name))?
-        };
-        // An import is linked during class resolution instead, and hides
-        // any other class's local alias of the same name.
+        let owner = from;
+        // An import is linked during class resolution instead.
         let Some(TypeAliasDef::Local(body)) = self.classes[owner].type_aliases.get(&name) else {
             return None;
         };
@@ -540,30 +535,25 @@ fn resolve_type_alias_once(
         _ => return None,
     };
 
-    let owning_class = find_class_by_fqn(all_classes, owning_class_name);
+    if is_builtin_non_class_type(name) {
+        return None;
+    }
+    let name = atom(name);
 
-    if let Some(cls) = owning_class
-        && let Some(def) = cls.type_aliases.get(&atom(name))
-    {
+    // An alias is scoped to the class that declares it.
+    if !owning_class_name.is_empty() {
+        let def = find_class_by_fqn(all_classes, owning_class_name)?
+            .type_aliases
+            .get(&name)?;
         return expand_type_alias_def(def, all_classes, class_loader);
     }
 
-    // Also check all classes in the file — the type alias might be
-    // referenced from a method inside a different class that uses the
-    // owning class's return type.  This is rare but handles the case
-    // where the owning class name is empty (top-level code) or when
-    // the type is used in a context where the owning class is not the
-    // declaring class.
-    for cls in all_classes {
-        if owning_class.is_some_and(|owner| Arc::ptr_eq(owner, cls)) {
-            continue; // Already checked above.
-        }
-        if let Some(def) = cls.type_aliases.get(&atom(name)) {
-            return expand_type_alias_def(def, all_classes, class_loader);
-        }
-    }
-
-    None
+    // Without an owning class (the array-key completion path), any class
+    // of the file may hold it.
+    all_classes
+        .iter()
+        .find_map(|cls| cls.type_aliases.get(&name))
+        .and_then(|def| expand_type_alias_def(def, all_classes, class_loader))
 }
 
 /// Expand a [`TypeAliasDef`] into a resolved [`PhpType`].

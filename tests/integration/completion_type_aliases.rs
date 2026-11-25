@@ -1111,10 +1111,10 @@ async fn test_phpstan_type_object_shape_alias() {
 
 // ─── @phpstan-type on a different class in the same file ────────────────────
 
-/// Type aliases should be found even when defined on a different class in the
-/// same file (not the owning class of the method).
+/// An alias declared on another class of the same file reaches a class that
+/// imports it.
 #[tokio::test]
-async fn test_phpstan_type_from_different_class_same_file() {
+async fn test_phpstan_type_imported_from_class_in_same_file() {
     let backend = create_test_backend();
 
     let uri = Uri::parse("file:///alias_other_class.php").unwrap();
@@ -1128,6 +1128,7 @@ async fn test_phpstan_type_from_different_class_same_file() {
         " */\n",
         "class WidgetFactory {\n",
         "}\n",
+        "/** @phpstan-import-type Renderable from WidgetFactory */\n",
         "class Dashboard {\n",
         "    /** @return Renderable */\n",
         "    public function getWidget(): object { return new Widget(); }\n",
@@ -1140,11 +1141,11 @@ async fn test_phpstan_type_from_different_class_same_file() {
 
     open_php(&backend, &uri, text).await;
 
-    let result = completion_response(&backend, &uri, 14, 12, None).await;
+    let result = completion_response(&backend, &uri, 15, 12, None).await;
 
     assert!(
         result.is_some(),
-        "Should return completions from alias on different class in same file"
+        "Should return completions from alias imported from a class in the same file"
     );
     match result.unwrap() {
         CompletionResponse::CompletionItemList(items) => {

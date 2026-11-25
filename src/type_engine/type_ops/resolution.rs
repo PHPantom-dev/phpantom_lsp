@@ -365,20 +365,22 @@ fn type_hint_to_classes_typed_depth(
     }
 }
 
-/// `classes`, followed by what a trait among them requires of its users.
+/// `classes`, followed by what a trait or interface among them requires of
+/// the classes using or implementing it.
 ///
 /// A type naming a trait (`self` in the trait's own body, or the trait's
 /// name that `self` was replaced with) describes an instance of a class
 /// using it, so it is the trait and its `@phpstan-require-*` classes at
-/// once.  [`ResolvedType::from_classes_with_hint`] reads the result back as
-/// that intersection.
+/// once.  The same holds for an interface carrying
+/// `@phpstan-require-extends`.  [`ResolvedType::from_classes_with_hint`]
+/// reads the result back as that intersection.
 pub(crate) fn with_trait_requirements(
     mut classes: Vec<Arc<ClassInfo>>,
     all_classes: &[Arc<ClassInfo>],
     class_loader: &ResolvedClassLoader<'_>,
 ) -> Vec<Arc<ClassInfo>> {
     if let [only] = classes.as_slice()
-        && only.kind == ClassLikeKind::Trait
+        && matches!(only.kind, ClassLikeKind::Trait | ClassLikeKind::Interface)
     {
         let required = crate::type_engine::trait_context::trait_required_classes(
             only,

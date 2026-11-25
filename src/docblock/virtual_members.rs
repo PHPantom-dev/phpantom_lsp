@@ -11,7 +11,7 @@ use crate::atom::{Atom, AtomMap, atom};
 
 use super::tag_kind::TagKind;
 
-use super::parser::{DocblockInfo, parse_docblock_for_tags, vendor_rank};
+use super::parser::{DocblockInfo, TagInfo, parse_docblock_for_tags, vendor_rank};
 use super::tags::sanitise_and_parse_docblock_type;
 use super::type_strings::split_type_token;
 use crate::php_type::PhpType;
@@ -50,22 +50,42 @@ pub fn extract_property_tags_from_info(info: &DocblockInfo) -> Vec<(Atom, Option
         TagKind::PropertyWrite,
     ];
 
+    let property_name = |tag: &TagInfo| -> Option<Atom> {
+        // `@property $name` declares an untyped magic property; `@property`
+        // with no variable at all declares nothing.
+        let variable = tag.variable()?;
+        let name = variable.strip_prefix('$')?;
+        (!name.is_empty()).then(|| atom(name))
+    };
+
+    // A vendor-prefixed tag (`@phpstan-property`, then `@psalm-property`,
+    // …) overrides a less authoritative one declaring the same property,
+    // as it does for `@method`.
+    let mut best_rank: AtomMap<u8> = AtomMap::default();
+    for tag in info.tags_by_kinds(PROPERTY_KINDS) {
+        if let Some(name) = property_name(tag) {
+            let rank = best_rank.entry(name).or_insert(u8::MAX);
+            *rank = (*rank).min(vendor_rank(tag));
+        }
+    }
+
     let mut results = Vec::new();
 
     for tag in info.tags_by_kinds(PROPERTY_KINDS) {
-        // `@property $name` declares an untyped magic property; `@property`
-        // with no variable at all declares nothing.
-        let Some(variable) = tag.variable() else {
+        let Some(name) = property_name(tag) else {
             continue;
         };
-        let Some(name) = variable.strip_prefix('$').filter(|n| !n.is_empty()) else {
+        if best_rank
+            .get(&name)
+            .is_some_and(|&best| vendor_rank(tag) > best)
+        {
             continue;
-        };
+        }
 
         let parsed = tag
             .type_text()
             .and_then(|type_text| sanitise_and_parse_docblock_type(&type_text));
-        results.push((atom(name), parsed));
+        results.push((name, parsed));
     }
 
     results

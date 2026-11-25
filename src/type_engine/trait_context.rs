@@ -80,26 +80,54 @@ pub(crate) fn trait_this_bounds(
 /// the project's using classes, so it is cheap enough to consult wherever
 /// a type naming a trait is resolved.
 ///
-/// Returns an empty vector for a non-trait and for a trait without tags.
+/// An interface's `@phpstan-require-extends` works the same way: only a
+/// subclass of the named class may implement it, so an instance of the
+/// interface is one of that class too.  The tag carries over to the
+/// interfaces extending it, since their implementors implement it as well.
+///
+/// Returns an empty vector for a class or enum, and for a trait or
+/// interface without tags.
 pub(crate) fn trait_required_classes(
     trait_cls: &ClassInfo,
     all_classes: &[Arc<ClassInfo>],
     class_loader: &ResolvedClassLoader<'_>,
 ) -> Vec<Arc<ClassInfo>> {
-    if trait_cls.kind != ClassLikeKind::Trait
-        || (trait_cls.require_extends.is_none() && trait_cls.require_implements.is_empty())
-    {
-        return Vec::new();
-    }
     let mut bounds: Vec<Arc<ClassInfo>> = Vec::new();
-    for required in trait_cls
-        .require_extends
-        .iter()
-        .chain(&trait_cls.require_implements)
-    {
-        if let Some(cls) = load_class(required, all_classes, class_loader) {
-            ClassInfo::push_unique_arc(&mut bounds, cls);
+    match trait_cls.kind {
+        ClassLikeKind::Trait => {
+            for required in trait_cls
+                .require_extends
+                .iter()
+                .chain(&trait_cls.require_implements)
+            {
+                if let Some(cls) = load_class(required, all_classes, class_loader) {
+                    ClassInfo::push_unique_arc(&mut bounds, cls);
+                }
+            }
         }
+        ClassLikeKind::Interface => {
+            let add = |iface: &ClassInfo, bounds: &mut Vec<Arc<ClassInfo>>| {
+                if let Some(required) = &iface.require_extends
+                    && let Some(cls) = load_class(required, all_classes, class_loader)
+                {
+                    ClassInfo::push_unique_arc(bounds, cls);
+                }
+            };
+            add(trait_cls, &mut bounds);
+            let mut seen: Vec<Atom> = Vec::new();
+            let mut pending: Vec<Atom> = trait_cls.interfaces.to_vec();
+            while let Some(name) = pending.pop() {
+                if seen.iter().any(|s| s.eq_ignore_ascii_case(&name)) {
+                    continue;
+                }
+                seen.push(name);
+                if let Some(parent) = load_class(&name, all_classes, class_loader) {
+                    add(&parent, &mut bounds);
+                    pending.extend(parent.interfaces.iter().copied());
+                }
+            }
+        }
+        _ => {}
     }
     bounds
 }

@@ -1129,15 +1129,17 @@ fn object_covers(cover: &PhpType, covered: &PhpType) -> bool {
 ///
 /// Resolving a type that names a trait yields the trait followed by its
 /// `@phpstan-require-*` classes, because only a class using the trait can
-/// be an instance of it.  The hint still names the trait alone, and read
-/// as written the extra classes would become alternatives of a union.
+/// be an instance of it (likewise an interface and the class its
+/// `@phpstan-require-extends` names).  The hint still names the trait
+/// alone, and read as written the extra classes would become alternatives
+/// of a union.
 ///
-/// Returns `None` when no alternative names such a trait.
+/// Returns `None` when no alternative names such a trait or interface.
 fn intersect_trait_requirements(hint: &PhpType, classes: &[Arc<ClassInfo>]) -> Option<PhpType> {
     let present = |name: &str| classes.iter().any(|c| c.fqn().eq_ignore_ascii_case(name));
     let traits: Vec<(&ClassInfo, Vec<PhpType>)> = classes
         .iter()
-        .filter(|c| c.kind == ClassLikeKind::Trait)
+        .filter(|c| matches!(c.kind, ClassLikeKind::Trait | ClassLikeKind::Interface))
         .filter_map(|c| {
             let required: Vec<PhpType> = c
                 .require_extends

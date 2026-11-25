@@ -58,6 +58,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Comparing with `null` by order narrows.** `$x <= null` narrows the way `$x == null` does, and `$x > null` rules out `null`.
 - **Overriding a method a parent gets from a trait inherits its docblock.** When a parent class takes a method from a trait, an override without its own `@param` or `@return` types uses the trait method's.
 - **`preg_replace_callback()` callbacks know their matches.** The callback's `$matches` parameter holds the groups the pattern captures, typed the way `preg_match()` types them.
+- **`@phpstan-require-extends` on an interface.** A value typed by an interface that requires a base class, or by an interface extending it, has that class's members.
+- **Type aliases stay in the class that declares them.** A `@phpstan-type` alias no longer applies inside the other classes and traits of the same file, and an alias named after a built-in type such as `int` no longer replaces that type.
+- **`@phpstan-property` wins over `@property`.** When both describe the same property, the vendor-prefixed tag's type is used, as it already was for `@method`.
 - **`?parent` return types keep `null`.** A method declared `: ?parent` or `: parent|null` returns the parent class or `null`, instead of always the parent class.
 - **Closure parameters with a `null` default are nullable.** In `function (string $x = null)`, `$x` is `?string` in the closure's signature and in what calling it returns.
 - **`clone` never gives `null`.** `clone $x` on a `?Foo` is a `Foo`, cloning a value of unknown type gives an `object`, and `clone new $this` keeps the class.
