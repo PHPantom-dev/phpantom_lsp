@@ -562,6 +562,25 @@ fn is_null_literal(expr: &Expression<'_>) -> bool {
     }
 }
 
+/// `$x` for `$x ?? null`, and `expr` itself otherwise.
+///
+/// A check that `null` cannot pass reads the same through the fallback, so
+/// the subject it proves something about is the left side.
+pub(crate) fn strip_null_fallback<'a>(expr: &'a Expression<'a>) -> &'a Expression<'a> {
+    match expr.unparenthesized() {
+        Expression::Binary(bin)
+            if matches!(bin.operator, BinaryOperator::NullCoalesce(_))
+                && matches!(
+                    bin.rhs.unparenthesized(),
+                    Expression::Literal(Literal::Null(_))
+                ) =>
+        {
+            bin.lhs
+        }
+        _ => expr,
+    }
+}
+
 /// Try to extract a type-guard function call on a variable.
 ///
 /// Matches `is_array($var)`, `is_string($var)`, etc. (with optional
@@ -594,6 +613,13 @@ pub(crate) fn try_extract_type_guard(
                 Some(Argument::Positional(pos)) => pos.value,
                 Some(Argument::Named(named)) => named.value,
                 _ => return None,
+            };
+            // `is_int($x['k'] ?? null)` holds exactly where `is_int($x['k'])`
+            // does: the `null` fallback never passes a guard for another type.
+            let arg_expr = if kind == TypeGuardKind::Null {
+                arg_expr
+            } else {
+                strip_null_fallback(arg_expr)
             };
             let arg_name = expr_to_subject_key(arg_expr)?;
             if arg_name != var_name {

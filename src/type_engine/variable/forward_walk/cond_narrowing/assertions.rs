@@ -200,24 +200,28 @@ pub(crate) fn write_offset_key_into_shapes(key: &str, scope: &mut ScopeState) {
     let is_refinement = |entry: &ShapeEntry| {
         entry.value_type != narrowed && narrowed.is_subtype_of(&entry.value_type)
     };
+    // Reading a missing key gives `null`, so a proof that rules `null` out
+    // (`is_int($x['k'])`) also proves the key is there.
+    let proves_present = |entry: &ShapeEntry| {
+        entry.optional && !narrowed.accepts_null() && narrowed.is_subtype_of(&entry.value_type)
+    };
     let refines_an_entry = scope.get(base).iter().any(|rt| {
-        rt.type_string
-            .union_members()
-            .into_iter()
-            .any(|shape| shape_entry_at(shape, literal).is_some_and(is_refinement))
+        rt.type_string.union_members().into_iter().any(|shape| {
+            shape_entry_at(shape, literal).is_some_and(|e| is_refinement(e) || proves_present(e))
+        })
     });
     if !refines_an_entry {
         return;
     }
     rewrite_shape_key(base, literal, scope, |entry| {
-        Some(if is_refinement(entry) {
-            ShapeEntry {
-                value_type: narrowed.clone(),
-                ..entry.clone()
-            }
-        } else {
-            entry.clone()
-        })
+        let mut entry = entry.clone();
+        if proves_present(&entry) {
+            entry.optional = false;
+        }
+        if is_refinement(&entry) {
+            entry.value_type = narrowed.clone();
+        }
+        Some(entry)
     });
 }
 

@@ -410,6 +410,7 @@ pub(crate) fn collect_condition_property_keys_inner(expr: &Expression<'_>, keys:
                         Argument::Positional(pos) => pos.value,
                         Argument::Named(named) => named.value,
                     };
+                    let arg_expr = condition_facts::strip_null_fallback(arg_expr);
                     if let Some(key) = condition_facts::expr_to_subject_key(arg_expr)
                         && condition_facts::is_member_path_key(&key)
                         && !keys.contains(&key)

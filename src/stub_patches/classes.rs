@@ -30,6 +30,8 @@ pub fn apply_class_stub_patches(class: &mut ClassInfo) {
         "DOMNode" => patch_dom_node(class),
         "DOMElement" => patch_dom_element(class),
         "Number" if class.fqn() == "BcMath\\Number" => patch_numeric_to_string(class),
+        "PDOStatement" => patch_fetch_object(class, "fetchObject", "T|false"),
+        "mysqli_result" => patch_fetch_object(class, "fetch_object", "T|false|null"),
         _ => {}
     }
     mark_benevolent_methods(class);
@@ -616,6 +618,23 @@ fn patch_reflection_object(class: &mut ClassInfo) {
     }
 
     patch_constructor_template_binding(class, "T", "$object");
+}
+
+/// Drop the `stdClass` alternative from a `fetchObject()`-style method.
+///
+/// The stubs return `T|stdClass`, where `stdClass` stands for the call that
+/// names no class. That call binds `T` from the `'stdClass'` default
+/// anyway, so the extra alternative only leaks `stdClass` into a call that
+/// asked for a class of its own.
+fn patch_fetch_object(class: &mut ClassInfo, method_name: &str, return_type: &str) {
+    if method_index(class, method_name).is_some_and(|idx| {
+        class.methods[idx]
+            .template_params()
+            .iter()
+            .any(|t| t.as_str() == "T")
+    }) {
+        patch_method_return_type(class, method_name, PhpType::parse(return_type));
+    }
 }
 
 /// Give a method a conditional return type, provided the stub declares the

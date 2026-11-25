@@ -105,7 +105,9 @@ pub(crate) fn coalesce_assign_value(
         .map(|rt| rt.type_string.clone())
         .collect();
     combined.retain(|rt| rt.class_info.is_some() || !class_backed.contains(&rt.type_string));
-    combined
+    // `$name ??= 'unknown'` on a `?string` leaves a `string`: the fallback
+    // literal is one of the values the left side already allows.
+    ResolvedType::collapse_redundant_runtime_literals(combined)
 }
 
 /// The type a compound assignment (`.=`, `+=`, `<<=`, …) leaves in its

@@ -38,6 +38,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`(string)` on a generic object.** Casting an object whose `__toString()` returns a template type, such as `class-string<T>`, gives the type for that object's generic arguments.
 - **Arithmetic with a float is a float.** `$string * 1e-6`, or any other arithmetic between a float and a string, bool, or null, is typed `float` instead of `int|float`.
 - **`in_array()` narrows an untyped needle.** A parameter without a type, checked with `in_array($value, $strings, true)`, is a `string` inside the check.
+- **`trigger_error()` with `E_USER_ERROR` ends the script.** Code after `if ($s === null) { trigger_error('…', E_USER_ERROR); }` sees `$s` as non-null, and the call itself is `never`.
+- **Calls on a union of classes return one flat union.** `$fooOrBar->getParam()`, where the two classes return `?string` and `?int`, is `string|int|null` instead of `?string|?int`.
+- **`??=` with a literal fallback keeps the base type.** `$settings['name'] ??= 'unknown'` on an optional `string` entry leaves a `string`, not `string|'unknown'`.
+- **`if ($x ?? false)` narrows `$x`.** Inside the branch `$x` is set and truthy, as in `if ($x)`.
+- **`static` in a final class is that class.** A method returning `static`, called through `$this` in a `final` class or an enum, returns the class itself instead of `static(Foo)`.
+- **`fetchObject()` returns the class it is given.** `PDOStatement::fetchObject(Foo::class)`, `mysqli_result::fetch_object()` and `mysqli_fetch_object()` no longer add `stdClass` to the class named in the call.
+- **A type check on an array entry proves the key exists.** After `is_int($a['key'])` or `is_int($a['key'] ?? null)`, an optional `key` in `$a`'s shape is required and typed `int`.
 - **Writing under a template key keeps the template.** `$array[$key] = $value` with `$key` typed `TKey of array-key` builds an `array<TKey, …>` instead of `array<int|string, …>`.
 - **`min()` and `max()` on a union of literal arrays.** The result is the smallest or largest value of each array, rather than every value any of them holds.
 - **`ReflectionClass::getName()` returns a class string.** For a `ReflectionClass<Foo>` it is `class-string<Foo>`, so it can be passed where a class name is expected.

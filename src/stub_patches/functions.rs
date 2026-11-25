@@ -30,6 +30,10 @@ pub fn apply_function_stub_patches(func: &mut FunctionInfo) {
         "pathinfo" => patch_pathinfo(func),
         "print_r" => patch_print_r(func),
         "base64_decode" => patch_base64_decode(func),
+        "trigger_error" | "user_error" => patch_trigger_error(func),
+        "mysqli_fetch_object" if func.template_params.iter().any(|t| t.as_str() == "T") => {
+            func.return_type = Some(PhpType::parse("T|false|null"))
+        }
         "hrtime" => patch_hrtime(func),
         "microtime" => patch_microtime(func),
         "getenv" => patch_getenv(func),
@@ -724,6 +728,27 @@ fn patch_base64_decode(func: &mut FunctionInfo) {
         PhpType::string(),
     );
 }
+
+/// Patch `trigger_error()` and its alias `user_error()` to have a conditional
+/// return type keyed on `$error_level`.
+///
+/// `E_USER_ERROR` is fatal: the script halts inside the call, so code after
+/// `if (…) { trigger_error('…', E_USER_ERROR); }` runs only when the condition
+/// was false. Every other accepted level returns `true` (PHP 8 dropped the
+/// `false` the stubs still declare for older versions).
+fn patch_trigger_error(func: &mut FunctionInfo) {
+    conditional_on(
+        func,
+        "$error_level",
+        PhpType::literal_int(E_USER_ERROR.to_string()),
+        PhpType::never(),
+        PhpType::parse("true"),
+    );
+}
+
+/// `E_USER_ERROR`, as defined by PHP's `Zend/zend_errors.h`. Spelled out for
+/// the same reason as [`PATHINFO_ALL`].
+const E_USER_ERROR: i64 = 256;
 
 /// Patch `class_implements()`, `class_parents()` and `class_uses()` to say
 /// what their arrays hold.

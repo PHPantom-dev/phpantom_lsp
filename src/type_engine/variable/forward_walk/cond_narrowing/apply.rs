@@ -100,6 +100,18 @@ pub(crate) fn narrow_leaf_truthy<'b>(
     ctx: &ForwardWalkCtx<'_>,
     conjoined: &[String],
 ) -> Vec<String> {
+    // `$x ?? false` (or `?? null`) is truthy exactly when `$x` is set and
+    // truthy, so it proves what a bare `$x` would.
+    if let Expression::Binary(binary) = unwrap_parens(condition)
+        && matches!(binary.operator, BinaryOperator::NullCoalesce(_))
+        && matches!(
+            unwrap_parens(binary.rhs),
+            Expression::Literal(Literal::False(_) | Literal::Null(_))
+        )
+    {
+        return narrow_leaf_truthy(binary.lhs, scope, ctx, conjoined);
+    }
+
     let entry_locals = scope.locals.clone();
 
     // Seed property access keys from conditions into the scope so that

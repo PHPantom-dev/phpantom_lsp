@@ -867,14 +867,30 @@ impl ResolvedType {
                 // above the union and would be lost by lifting its members
                 // out: an unflattened `__benevolent<string|false>` still
                 // says its failure branch is not worth enforcing.
+                // A `?T` entry is lifted the same way, with its `null` moved
+                // to the end, so `Foo|Bar` whose methods return `?string` and
+                // `?int` joins to `string|int|null` rather than `?string|?int`.
                 let mut members: Vec<PhpType> = Vec::with_capacity(resolved.len());
+                let mut lifted_null = false;
                 for rt in resolved {
                     match rt.type_string.raw_kind() {
                         TypeKind::Union(alternatives) => {
                             members.extend(alternatives.iter().cloned())
                         }
+                        TypeKind::Nullable(inner) => {
+                            match inner.kind() {
+                                TypeKind::Union(alternatives) => {
+                                    members.extend(alternatives.iter().cloned())
+                                }
+                                _ => members.push(inner.clone()),
+                            }
+                            lifted_null = true;
+                        }
                         _ => members.push(rt.type_string.clone()),
                     }
+                }
+                if lifted_null && !members.iter().any(PhpType::is_null) {
+                    members.push(PhpType::null());
                 }
                 // The `[]` a variable was initialised to says nothing
                 // beside the array a later write produced: `array{}` is the

@@ -648,6 +648,9 @@ fn normalize_type(ty: &str) -> String {
     }
 
     let result = expand_array_key(&expand_nested_nullable(&list_shapes_as_array(&result)))
+        // PHPantom may print an `array-key` key as `string|int`, which the
+        // `array<int|string, V>` rewrites below would otherwise miss.
+        .replace("array<string|int, ", "array<int|string, ")
         .replace("array<never, never>", "array{}")
         .replace("list<never>", "array{}")
         .replace("non-negative-int", "int<0, max>")

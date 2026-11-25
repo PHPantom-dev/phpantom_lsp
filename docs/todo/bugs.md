@@ -29,7 +29,80 @@ No outstanding items.
 
 ## Conditional return types
 
-No outstanding items.
+### B807. A conditional comparing a template with a class constant takes the last branch
+
+**Impact: Low · Complexity: Low**
+
+```php
+/**
+ * @template T as int
+ * @param T $i
+ * @return (T is self::TYPE_STRING ? string : (T is self::TYPE_INT ? int : bool))
+ */
+public static function getDifferentType(int $i) {}
+
+A::getDifferentType(0);   // bool, should be string (TYPE_STRING = 0)
+```
+
+The condition's target is a class constant, which is compared as written
+rather than as the literal it holds, so no argument ever matches it.
+
+**Fix:** resolve a `self::`/`Foo::` constant target to its value before
+comparing. The cases are the `// SKIP` lines in
+`tests/psalm_assertions/template_conditional_return_type.php`.
+
+### B808. A conditional on a callable argument's return type keeps both branches
+
+**Impact: Low · Complexity: Medium**
+
+```php
+/**
+ * @template T
+ * @param callable(): T $callback
+ * @return (T is Promise ? Promise<TPromise> : Promise<TReturn>)
+ */
+function call(callable $callback): Promise {}
+
+call(function (): Promise { return new Success(9); });  // Promise<mixed>|Promise<int>, should be Promise<int>
+```
+
+`T` is bound from the closure's return, but the conditional is read as
+undecided and both branches are joined.
+
+**Fix:** decide the conditional once `T` is bound from the callable's
+return type. See `tests/psalm_assertions/template_conditional_return_type.php`.
+
+### B809. `func_num_args()` in a conditional return type is never decided
+
+**Impact: Low · Complexity: Low**
+
+```php
+/** @return (func_num_args() is 0 ? false : string) */
+function f(string $s = "") {}
+
+f("hello");   // false|string, should be string
+```
+
+**Fix:** compare the call site's argument count with the target. See
+`tests/psalm_assertions/template_conditional_return_type.php`.
+
+### B811. A conditional return type on `PHP_VERSION_ID` takes the else branch
+
+**Impact: Low · Complexity: Low**
+
+```php
+/** @return (PHP_VERSION_ID is int<70300, max> ? string : int) */
+function getSomething() {}
+
+getSomething();   // int, should be string on any PHP 8 project
+```
+
+The subject is a constant rather than a parameter, so the condition is
+never evaluated against the project's PHP version.
+
+**Fix:** read `PHP_VERSION_ID` (and other constants with a known value) as
+the condition's subject. See
+`tests/psalm_assertions/template_conditional_return_type.php`.
 
 ## Standard-library return types
 
@@ -450,6 +523,66 @@ required, and in doing so stops treating the shape as a list.
 lower index required as well and keep the shape a list. `// SKIP` lines in
 `tests/phpstan_nsrt/bug-14177.php`.
 
+### B801. A check on a copy of a variable does not narrow the original
+
+**Impact: Low · Complexity: Medium**
+
+```php
+$parent = $my->getParent();   // MyInterface|null
+$case = $parent;
+if (!$case) {
+    return;                   // $parent: MyInterface|null, should be null
+}
+$parent;                      // MyInterface|null, should be MyInterface
+```
+
+A bare boolean standing for a check is followed back to the check, but a
+plain copy of the subject is not, so narrowing the copy leaves the
+original as it was.
+
+**Fix:** treat `$b = $a` as an alias while neither is written again, and
+narrow both. See `tests/phpstan_nsrt/bug-2977.php`.
+
+### B803. An assertion one class of a union receiver makes narrows as if every class made it
+
+**Impact: Medium · Complexity: Low-Medium**
+
+```php
+// Foo::narrowGetParam(): @phpstan-assert-if-true string $this->getParam()
+// Bar::narrowGetParam(): @phpstan-assert int $this->getParam()
+function test(Foo|Bar $fooOrBar): void {
+    if ($fooOrBar->narrowGetParam()) {
+        $fooOrBar->getParam();   // string, should be int|string|null at most
+    } else {
+        $fooOrBar->getParam();   // int|null, should be int|string|null
+    }
+}
+```
+
+Each class's assertion is applied to the whole receiver, so the branch
+loses the alternatives the other class still allows.
+
+**Fix:** narrow each receiver class by its own assertion and join the
+results. See `tests/phpstan_nsrt/bug-14108d.php`.
+
+### B804. `array_search()` does not narrow its haystack to an array
+
+**Impact: Low · Complexity: Low**
+
+```php
+function f($mixed) {
+    if (array_search('x', $mixed) !== false) {
+        $mixed;   // mixed, should be array
+    }
+}
+```
+
+The call throws on anything but an array, so a branch that saw it return
+already knows its haystack is one.
+
+**Fix:** narrow the haystack argument the way `in_array()` narrows its
+needle. See `tests/phpstan_nsrt/array-search-type-specifying.php`.
+
 ## Array types
 
 ### B766. Conditional appends forget which value sits at which offset
@@ -595,6 +728,18 @@ list or overwrites an entry, and either way it stays a list.
 
 **Fix:** keep a list a list when the written index is one past an index a
 condition proved set. `// SKIP` lines in `tests/phpstan_nsrt/list-type.php`.
+
+### B805. `array_values()` on a shape with optional keys gives a generic list
+
+**Impact: Low · Complexity: Low**
+
+```php
+/** @var array{a?: 'a', b?: 'b', c?: 'c'} $numbers */
+array_values($numbers);   // list<'a'|'b'|'c'>, should be list{0?: 'a'|'b'|'c', 1?: 'b'|'c', 2?: 'c'}
+```
+
+**Fix:** renumber the shape's entries, each position taking every value
+that can land there. See `tests/phpstan_nsrt/array_values.php`.
 
 ## Laravel
 
@@ -763,6 +908,40 @@ template is not substituted and the narrowed type is lost entirely.
 inherited `@phpstan-assert` before applying it. `// SKIP` line in
 `tests/phpstan_nsrt/assert-inheritance.php`.
 
+### B806. A generic function passed as a first-class callable to `array_map()` leaves its template unbound
+
+**Impact: Low · Complexity: Medium**
+
+```php
+/** @param array<string, array<int>> $a */
+array_map(array_values(...), $a);   // array<string, list<TValue>>, should be array<string, list<int>>
+```
+
+The callable's signature is read with its templates still open, and the
+callback's parameter is never bound from the array's value type.
+
+**Fix:** bind the first-class callable's templates from the parameter
+types `array_map()` gives it. See `tests/phpstan_nsrt/array_values.php`.
+
+### B810. A bare `class-string` argument leaves `class-string<T>`'s template unbound
+
+**Impact: Low · Complexity: Low**
+
+```php
+/**
+ * @template T
+ * @param literal-string|class-string<T> $name
+ * @return ($name is class-string ? T : mixed)
+ */
+function get(string $name) {}
+
+/** @var class-string $class_string */
+get($class_string);   // mixed, should be object
+```
+
+**Fix:** bind `T` to `object` from an unparameterised `class-string`. See
+`tests/psalm_assertions/template_conditional_return_type.php`.
+
 ## Framework names in strings
 
 No outstanding items.
@@ -890,3 +1069,31 @@ several users, keep the shared-ancestor intersection for `$this` but resolve
 completion goes through the same path. `// SKIP` lines in
 `tests/phpstan_nsrt/methodPhpDocs-trait.php` and
 `methodPhpDocs-recursiveTrait.php`.
+
+### B802. `::class` on a string literal has no type
+
+**Impact: Low · Complexity: Low**
+
+```php
+'Foo'::class;   // no type, should be 'Foo'
+```
+
+PHP returns the string itself.
+
+**Fix:** resolve `::class` on a string literal to that literal. See
+`tests/phpstan_nsrt/class-constant-on-expr.php`.
+
+### B812. A write to a property is not seen through a reference to it
+
+**Impact: Low · Complexity: Medium**
+
+```php
+$bar = &$foo->bar;
+$foo->bar = "bar";
+$bar;   // string, should be 'bar'
+```
+
+References to locals are tracked; a reference to a property is not.
+
+**Fix:** record `&$obj->prop` as a reference the way `&$local` is. See
+`tests/psalm_assertions/reference.php`.

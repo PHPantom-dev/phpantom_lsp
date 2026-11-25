@@ -23,6 +23,9 @@ enum LsbBinding<'a> {
     /// Collapse them: the called class is statically fixed, so late static
     /// binding has nothing left to resolve.
     Fixed,
+    /// Collapse them to `ty`: the call forwards late static binding from a
+    /// class nothing can extend, so `static` can only ever be that class.
+    Exact(&'a PhpType),
 }
 
 impl<'a> LsbBinding<'a> {
@@ -43,7 +46,7 @@ impl<'a> LsbBinding<'a> {
                 TypeKind::Named(name) => Some(*name),
                 _ => None,
             },
-            LsbBinding::Fixed => None,
+            LsbBinding::Fixed | LsbBinding::Exact(_) => None,
         }
     }
 
@@ -52,6 +55,7 @@ impl<'a> LsbBinding<'a> {
     fn whole_type(self) -> Option<&'a PhpType> {
         match self {
             LsbBinding::OverType(ty) if !matches!(ty.kind(), TypeKind::Named(_)) => Some(ty),
+            LsbBinding::Exact(ty) => Some(ty),
             _ => None,
         }
     }
@@ -753,6 +757,16 @@ impl PhpType {
         self.replace_self_inner(&PhpType::named(atom(self_class)), lsb)
     }
 
+    /// Like [`replace_self_bound`](Self::replace_self_bound), but for a call
+    /// forwarded from `called_class`, a class nothing can extend (a `final`
+    /// class or an enum), so `static` / `$this` are exactly that class.
+    pub fn replace_self_exact(&self, self_class: &str, called_class: &PhpType) -> PhpType {
+        self.replace_self_inner(
+            &PhpType::named(atom(self_class)),
+            LsbBinding::Exact(called_class),
+        )
+    }
+
     /// Like [`replace_self_bound`](Self::replace_self_bound), but binds
     /// `static` / `$this` to a whole type rather than a single class name.
     ///
@@ -827,6 +841,11 @@ impl PhpType {
             // open.
             TypeKind::StaticType(n) | TypeKind::ThisType(n) if matches!(lsb, LsbBinding::Fixed) => {
                 PhpType::named(*n)
+            }
+            TypeKind::StaticType(_) | TypeKind::ThisType(_)
+                if let LsbBinding::Exact(called) = lsb =>
+            {
+                called.clone()
             }
 
             _ => self.map_children(&|t| t.replace_self_inner(replacement, lsb)),

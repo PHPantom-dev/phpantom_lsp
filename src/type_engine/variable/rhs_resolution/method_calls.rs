@@ -419,6 +419,13 @@ pub(super) fn resolve_member_call_on_receiver<'b>(
         Expression::Variable(Variable::Direct(dv)) if dv.name == b"$this"
     );
     let lsb_class = lsb_class_for_call(receiver_is_this, &receiver_resolved, ctx);
+    // `$this->` inside a final class or an enum forwards from a class
+    // nothing extends, so `static` there is that class and nothing else.
+    let exact_called_class = (receiver_is_this
+        && !ctx.current_class.name.is_empty()
+        && (ctx.current_class.is_final
+            || ctx.current_class.kind == crate::types::ClassLikeKind::Enum))
+        .then(|| PhpType::named(ctx.current_class.fqn()));
 
     let is_union = owner_classes.len() > 1;
     let mut union_results: Vec<ResolvedType> = Vec::new();
@@ -474,7 +481,10 @@ pub(super) fn resolve_member_call_on_receiver<'b>(
                     // not only the one that declared the method.
                     None => match receiver_intersection {
                         Some(ref inter) => ty.replace_self_over_type(&owner_key, inter),
-                        None => ty.replace_self_bound(&owner_key, lsb_class.as_deref()),
+                        None => match exact_called_class {
+                            Some(ref called) => ty.replace_self_exact(&owner_key, called),
+                            None => ty.replace_self_bound(&owner_key, lsb_class.as_deref()),
+                        },
                     },
                 };
 
