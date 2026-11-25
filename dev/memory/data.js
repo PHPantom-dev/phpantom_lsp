@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795631575816,
+  "lastUpdate": 1795631766899,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -16475,6 +16475,65 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_yii_action",
             "value": 102.6,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "0f21baf5f660a2dd060712e57d3817b4cc8e1e1c",
+          "message": "Fix some standard-library return type issues",
+          "timestamp": "2026-11-25T19:27:17+01:00",
+          "tree_id": "8d4fbddfc94802b147241fde98f384610aebe3cd",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/0f21baf5f660a2dd060712e57d3817b4cc8e1e1c"
+        },
+        "date": 1795631753409,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_drupal_module",
+            "value": 270.8,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_hello_world",
+            "value": 44.2,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 79.8,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_symfony_controller",
+            "value": 81.5,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_tempest_view",
+            "value": 76.4,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_wordpress_plugin",
+            "value": 73.8,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_yii_action",
+            "value": 102.8,
             "unit": "MiB"
           }
         ]
