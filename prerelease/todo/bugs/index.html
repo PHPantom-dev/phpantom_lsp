@@ -2210,10 +2210,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#b903-selfconst-in-an-inherited-members-docblock-reads-the-subclasss-constant" class="md-nav__link">
+  <a href="#b906-staticconst-in-a-docblock-type-is-never-resolved" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B903. <code>self::CONST</code> in an inherited member's docblock reads the subclass's constant
+        B906. <code>static::CONST</code> in a docblock type is never resolved
       </span>
     </span>
   </a>
@@ -4316,10 +4316,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#b903-selfconst-in-an-inherited-members-docblock-reads-the-subclasss-constant" class="md-nav__link">
+  <a href="#b906-staticconst-in-a-docblock-type-is-never-resolved" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B903. <code>self::CONST</code> in an inherited member's docblock reads the subclass's constant
+        B906. <code>static::CONST</code> in a docblock type is never resolved
       </span>
     </span>
   </a>
@@ -6013,12 +6013,11 @@ types <code>array_map()</code> gives it. See <code>tests/phpstan_nsrt/array_valu
 <h2 id="name-resolution">Name resolution<a class="headerlink" href="#name-resolution" title="Permanent link">&para;</a></h2>
 <h3 id="b883-several-phpdoc-pseudo-types-are-shown-under-their-own-spelling-instead-of-the-type-they-stand-for">B883. Several PHPDoc pseudo-types are shown under their own spelling instead of the type they stand for<a class="headerlink" href="#b883-several-phpdoc-pseudo-types-are-shown-under-their-own-spelling-instead-of-the-type-they-stand-for" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-106-1" name="__codelineno-106-1" href="#__codelineno-106-1"></a><span class="x">/** @param enum-string $e */ $e;      // enum-string, should be class-string&lt;UnitEnum&gt;</span>
-<a id="__codelineno-106-2" name="__codelineno-106-2" href="#__codelineno-106-2"></a><span class="x">/** @param empty-scalar $s */ $s;     // empty-scalar, should be 0|0.0|''|'0'|false</span>
-<a id="__codelineno-106-3" name="__codelineno-106-3" href="#__codelineno-106-3"></a><span class="x">/** @var number $n */ $n;             // number, should be float|int</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-106-1" name="__codelineno-106-1" href="#__codelineno-106-1"></a><span class="x">/** @var number $n */ $n;             // number, should be float|int</span>
+<a id="__codelineno-106-2" name="__codelineno-106-2" href="#__codelineno-106-2"></a><span class="x">/** @param closed-resource $r */ $r;  // closed-resource, should be resource</span>
 </code></pre></div>
-<p>The engine models these as keywords, but hover and the assertion runner print the keyword where PHPStan prints its expansion: <code>callable-array</code>, <code>closed-resource</code>, <code>open-resource</code>, <code>enum-string</code>, <code>non-empty-scalar</code>, <code>empty-scalar</code>, <code>non-empty-mixed</code>, the <code>non-empty-*-string</code> refinements, <code>pure-callable</code>, <code>number</code> and <code>numeric</code> (also when spelled <code>Number</code> or <code>Numeric</code> with no class of that name). Expanding them changes what other code matches on, so each needs checking against its uses rather than a blanket rewrite.</p>
-<p><strong>Cases</strong> (PHPStan <code>nsrt/</code>, 13 assertions): the <code>// SKIP</code> lines in <code>tests/phpstan_nsrt/more-types.php</code> (11) and <code>phpdoc-pseudotype-global.php</code> (2).</p>
+<p>The engine models these as keywords, but hover and the assertion runner print the keyword where PHPStan prints its expansion: <code>callable-array</code>, <code>closed-resource</code>, <code>open-resource</code>, <code>non-empty-mixed</code>, <code>pure-callable</code>, <code>number</code> and <code>numeric</code> (also when spelled <code>Number</code> or <code>Numeric</code> with no class of that name). Each of these is also built or matched by name inside the engine (<code>numeric</code> and <code>number</code> by arithmetic and narrowing, <code>non-empty-mixed</code> by truthiness, the resource refinements by <code>is_resource()</code>), so expanding one at parse time means moving those producers and matchers over to the expansion too. The resource refinements are a distinction PHPStan drops; keeping them may be the more correct reading.</p>
+<p><strong>Cases</strong> (PHPStan <code>nsrt/</code>, 7 assertions): the <code>// SKIP</code> lines in <code>tests/phpstan_nsrt/more-types.php</code> (5) and <code>phpdoc-pseudotype-global.php</code> (2).</p>
 <h3 id="b888-a-class-level-method-or-property-tag-does-not-override-a-real-member">B888. A class-level <code>@method</code> or <code>@property</code> tag does not override a real member<a class="headerlink" href="#b888-a-class-level-method-or-property-tag-does-not-override-a-real-member" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Low (needs a decision first)</strong></p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-107-1" name="__codelineno-107-1" href="#__codelineno-107-1"></a><span class="x">/** @method string sayHi() */</span>
@@ -6038,16 +6037,16 @@ and <code>test_property_tag_overrides_inherited_non_public_property</code> encod
 Either keep the current rule and drop these cases, or follow PHPStan and
 rewrite those tests.</p>
 <p><strong>Cases</strong> (PHPStan <code>nsrt/</code>, 5 assertions): <code>bug-3142.php</code> (3), <code>bug-6001.php</code>, <code>override-property-union-type-with-tag-subtype.php</code>.</p>
-<h3 id="b903-selfconst-in-an-inherited-members-docblock-reads-the-subclasss-constant">B903. <code>self::CONST</code> in an inherited member's docblock reads the subclass's constant<a class="headerlink" href="#b903-selfconst-in-an-inherited-members-docblock-reads-the-subclasss-constant" title="Permanent link">&para;</a></h3>
+<h3 id="b906-staticconst-in-a-docblock-type-is-never-resolved">B906. <code>static::CONST</code> in a docblock type is never resolved<a class="headerlink" href="#b906-staticconst-in-a-docblock-type-is-never-resolved" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Medium</strong></p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-108-1" name="__codelineno-108-1" href="#__codelineno-108-1"></a><span class="x">class Base {</span>
 <a id="__codelineno-108-2" name="__codelineno-108-2" href="#__codelineno-108-2"></a><span class="x">    public const KEY = 'a';</span>
-<a id="__codelineno-108-3" name="__codelineno-108-3" href="#__codelineno-108-3"></a><span class="x">    /** @return self::KEY */ public function get(): string { return self::KEY; }</span>
+<a id="__codelineno-108-3" name="__codelineno-108-3" href="#__codelineno-108-3"></a><span class="x">    /** @return static::KEY */ public function get(): string { return static::KEY; }</span>
 <a id="__codelineno-108-4" name="__codelineno-108-4" href="#__codelineno-108-4"></a><span class="x">}</span>
 <a id="__codelineno-108-5" name="__codelineno-108-5" href="#__codelineno-108-5"></a><span class="x">class Child extends Base { public const KEY = 'b'; }</span>
-<a id="__codelineno-108-6" name="__codelineno-108-6" href="#__codelineno-108-6"></a><span class="x">(new Child())-&gt;get();   // 'b', should be 'a'</span>
+<a id="__codelineno-108-6" name="__codelineno-108-6" href="#__codelineno-108-6"></a><span class="x">(new Child())-&gt;get();   // static::KEY, should be 'b' (or string, for a receiver that may be a subclass)</span>
 </code></pre></div>
-<p><code>self</code> is lexical, so it names the class that declares the member, but a method call's return type binds it to the receiver's class. The same goes for a shape key written <code>self::KEY</code>. <code>static::KEY</code> is the one spelling that should follow the receiver.</p>
+<p>The reference stays as raw text through the call, so hover shows <code>static::KEY</code> and nothing downstream can use the type. It should bind to the receiver's class, like <code>@return static</code> does, reading the constant's declared type when the receiver may be a subclass that redeclares it.</p>
 <h2 id="code-actions">Code actions<a class="headerlink" href="#code-actions" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
