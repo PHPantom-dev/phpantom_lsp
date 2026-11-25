@@ -1,0 +1,32 @@
+// test: self::CONST in an inherited method's docblock reads the declaring class's constant
+// feature: hover
+// `self` is lexical, so a subclass redeclaring the constant changes nothing,
+// whether the reference is the return type or a shape key.
+// expect_hover: $value => 'base'
+// expect_hover: $shape => array{base: int}
+// expect_absent: child
+---
+<?php
+
+class Base
+{
+    public const KEY = 'base';
+
+    /** @return self::KEY */
+    public function key(): string { return self::KEY; }
+
+    /** @return array{self::KEY: int} */
+    public function shape(): array { return [self::KEY => 1]; }
+}
+
+class Child extends Base
+{
+    public const KEY = 'child';
+}
+
+function demo(Child $child): void
+{
+    $value = $child->key();
+    $shape = $child->shape();
+    echo $val<>ue;
+}

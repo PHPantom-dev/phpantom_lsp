@@ -221,7 +221,7 @@ fn a_union_with_one_non_literal_member_does_not_fold() {
 fn a_multibyte_subject_does_not_fold_to_a_guessed_unicode_mapping() {
     assert_eq!(
         fold("strtoupper", &[lit("Ä")]).as_deref(),
-        Some("non-empty-uppercase-string&non-falsy-string")
+        Some("non-falsy-string&uppercase-string")
     );
 }
 
@@ -273,15 +273,15 @@ fn named(name: &str) -> Option<PhpType> {
 fn a_case_mapping_keeps_how_far_from_empty_its_subject_was() {
     assert_eq!(
         fold("strtolower", &[named("non-empty-string")]).as_deref(),
-        Some("non-empty-lowercase-string")
+        Some("lowercase-string&non-empty-string")
     );
     assert_eq!(
         fold("mb_strtoupper", &[named("non-falsy-string")]).as_deref(),
-        Some("non-empty-uppercase-string&non-falsy-string")
+        Some("non-falsy-string&uppercase-string")
     );
     assert_eq!(
         fold("strtolower", &[named("numeric-string")]).as_deref(),
-        Some("non-empty-lowercase-string&numeric-string")
+        Some("lowercase-string&numeric-string")
     );
 }
 

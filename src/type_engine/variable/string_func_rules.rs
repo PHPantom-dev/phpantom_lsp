@@ -229,30 +229,27 @@ fn case_type(args: &dyn ArrayFuncArgs, case: Case) -> Option<PhpType> {
     if !args.has_arg(0) || args.is_spread(0) {
         return None;
     }
-    let emptiness = subject_emptiness(args);
-    let non_empty = emptiness != Emptiness::Unknown;
-    let cased = match (case, non_empty) {
-        (Case::Lower, false) => Some(PhpType::lowercase_string()),
-        (Case::Lower, true) => Some(PhpType::non_empty_lowercase_string()),
-        (Case::Upper, false) => Some(PhpType::uppercase_string()),
-        (Case::Upper, true) => Some(PhpType::non_empty_uppercase_string()),
-        (Case::Unchanged, _) => None,
-    };
-    // The `non-empty-*case-string` keywords carry non-emptiness but not
-    // the stronger facts, which ride along as an intersection.
-    let stronger = match emptiness {
+    // How far from empty the subject was survives the mapping, as the
+    // strongest of the facts that imply non-emptiness.
+    let emptiness = match subject_emptiness(args) {
         Emptiness::Numeric => Some(PhpType::numeric_string()),
         Emptiness::NonFalsy => Some(PhpType::non_falsy_string()),
         Emptiness::NonEmpty => Some(PhpType::non_empty_string()),
         Emptiness::Unknown => None,
     };
-    match (cased, stronger) {
-        (Some(cased), Some(stronger)) if emptiness != Emptiness::NonEmpty => {
-            Some(PhpType::intersection(vec![cased, stronger]))
-        }
-        (Some(cased), _) => Some(cased),
-        (None, stronger) => stronger,
-    }
+    // Members in PHPStan's (alphabetical) order, so the intersection reads
+    // the way it does there.
+    let members = match case {
+        Case::Lower => [Some(PhpType::lowercase_string()), emptiness],
+        Case::Upper => [emptiness, Some(PhpType::uppercase_string())],
+        Case::Unchanged => return emptiness,
+    };
+    let mut members: Vec<PhpType> = members.into_iter().flatten().collect();
+    Some(if members.len() == 1 {
+        members.pop().unwrap()
+    } else {
+        PhpType::intersection(members)
+    })
 }
 
 /// `sprintf()` / `vsprintf()`: what the format string guarantees about

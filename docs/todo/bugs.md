@@ -2063,14 +2063,13 @@ No outstanding items.
 **Impact: Low · Complexity: Low**
 
 ```php
-/** @param enum-string $e */ $e;      // enum-string, should be class-string<UnitEnum>
-/** @param empty-scalar $s */ $s;     // empty-scalar, should be 0|0.0|''|'0'|false
 /** @var number $n */ $n;             // number, should be float|int
+/** @param closed-resource $r */ $r;  // closed-resource, should be resource
 ```
 
-The engine models these as keywords, but hover and the assertion runner print the keyword where PHPStan prints its expansion: `callable-array`, `closed-resource`, `open-resource`, `enum-string`, `non-empty-scalar`, `empty-scalar`, `non-empty-mixed`, the `non-empty-*-string` refinements, `pure-callable`, `number` and `numeric` (also when spelled `Number` or `Numeric` with no class of that name). Expanding them changes what other code matches on, so each needs checking against its uses rather than a blanket rewrite.
+The engine models these as keywords, but hover and the assertion runner print the keyword where PHPStan prints its expansion: `callable-array`, `closed-resource`, `open-resource`, `non-empty-mixed`, `pure-callable`, `number` and `numeric` (also when spelled `Number` or `Numeric` with no class of that name). Each of these is also built or matched by name inside the engine (`numeric` and `number` by arithmetic and narrowing, `non-empty-mixed` by truthiness, the resource refinements by `is_resource()`), so expanding one at parse time means moving those producers and matchers over to the expansion too. The resource refinements are a distinction PHPStan drops; keeping them may be the more correct reading.
 
-**Cases** (PHPStan `nsrt/`, 13 assertions): the `// SKIP` lines in `tests/phpstan_nsrt/more-types.php` (11) and `phpdoc-pseudotype-global.php` (2).
+**Cases** (PHPStan `nsrt/`, 7 assertions): the `// SKIP` lines in `tests/phpstan_nsrt/more-types.php` (5) and `phpdoc-pseudotype-global.php` (2).
 
 ### B888. A class-level `@method` or `@property` tag does not override a real member
 
@@ -2098,20 +2097,20 @@ rewrite those tests.
 
 **Cases** (PHPStan `nsrt/`, 5 assertions): `bug-3142.php` (3), `bug-6001.php`, `override-property-union-type-with-tag-subtype.php`.
 
-### B903. `self::CONST` in an inherited member's docblock reads the subclass's constant
+### B906. `static::CONST` in a docblock type is never resolved
 
 **Impact: Low · Complexity: Medium**
 
 ```php
 class Base {
     public const KEY = 'a';
-    /** @return self::KEY */ public function get(): string { return self::KEY; }
+    /** @return static::KEY */ public function get(): string { return static::KEY; }
 }
 class Child extends Base { public const KEY = 'b'; }
-(new Child())->get();   // 'b', should be 'a'
+(new Child())->get();   // static::KEY, should be 'b' (or string, for a receiver that may be a subclass)
 ```
 
-`self` is lexical, so it names the class that declares the member, but a method call's return type binds it to the receiver's class. The same goes for a shape key written `self::KEY`. `static::KEY` is the one spelling that should follow the receiver.
+The reference stays as raw text through the call, so hover shows `static::KEY` and nothing downstream can use the type. It should bind to the receiver's class, like `@return static` does, reading the constant's declared type when the receiver may be a subclass that redeclares it.
 
 ## Code actions
 

@@ -1,6 +1,6 @@
 use crate::common::{
     collect_diagnostics_with, create_test_backend, create_test_backend_with_full_stubs,
-    messages_with_code,
+    create_test_backend_with_stubs, messages_with_code,
 };
 use phpantom_lsp::Backend;
 use tower_lsp_server::gen_lsp_types::*;
@@ -10,6 +10,16 @@ use tower_lsp_server::gen_lsp_types::*;
 fn collect(php: &str) -> Vec<Diagnostic> {
     collect_diagnostics_with(
         &create_test_backend(),
+        php,
+        Backend::collect_return_type_diagnostics,
+    )
+}
+
+/// [`collect`] with the `UnitEnum` and `BackedEnum` stubs loaded, for a
+/// type such as `enum-string` that is written in terms of them.
+fn collect_with_enum_stubs(php: &str) -> Vec<Diagnostic> {
+    collect_diagnostics_with(
+        &create_test_backend_with_stubs(),
         php,
         Backend::collect_return_type_diagnostics,
     )
@@ -3817,9 +3827,12 @@ function returnsClassAsEnum() { return SomeClass::class; }
 /** @return trait-string */
 function returnsClassAsTrait() { return SomeClass::class; }
 "#;
-    let messages = messages_with_code(&collect(php), "type_mismatch_return");
+    let messages = messages_with_code(&collect_with_enum_stubs(php), "type_mismatch_return");
     assert_eq!(messages.len(), 2, "got {messages:?}");
-    assert!(messages[0].contains("enum-string"), "{messages:?}");
+    assert!(
+        messages[0].contains("class-string<UnitEnum>"),
+        "{messages:?}"
+    );
     assert!(messages[1].contains("trait-string"), "{messages:?}");
 }
 

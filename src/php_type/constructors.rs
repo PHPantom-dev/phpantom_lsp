@@ -74,24 +74,39 @@ keyword_types! {
     non_falsy_string => "non-falsy-string",
     /// `literal-string` type.
     literal_string => "literal-string",
-    /// `non-empty-literal-string` type.
-    non_empty_literal_string => "non-empty-literal-string",
     /// `numeric-string` type.
     numeric_string => "numeric-string",
     /// `lowercase-string` type.
     lowercase_string => "lowercase-string",
-    /// `non-empty-lowercase-string` type.
-    non_empty_lowercase_string => "non-empty-lowercase-string",
     /// `uppercase-string` type.
     uppercase_string => "uppercase-string",
-    /// `non-empty-uppercase-string` type.
-    non_empty_uppercase_string => "non-empty-uppercase-string",
     /// Internal `__empty` sentinel used during type narrowing to represent
     /// a fully-filtered-out union member.
     empty_sentinel => "__empty",
 }
 
 impl PhpType {
+    /// `non-empty-literal-string`: `literal-string&non-empty-string`.
+    pub fn non_empty_literal_string() -> PhpType {
+        PhpType::intersection(vec![PhpType::literal_string(), PhpType::non_empty_string()])
+    }
+
+    /// `non-empty-lowercase-string`: `lowercase-string&non-empty-string`.
+    pub fn non_empty_lowercase_string() -> PhpType {
+        PhpType::intersection(vec![
+            PhpType::lowercase_string(),
+            PhpType::non_empty_string(),
+        ])
+    }
+
+    /// `non-empty-uppercase-string`: `non-empty-string&uppercase-string`.
+    pub fn non_empty_uppercase_string() -> PhpType {
+        PhpType::intersection(vec![
+            PhpType::non_empty_string(),
+            PhpType::uppercase_string(),
+        ])
+    }
+
     /// Named type: a keyword, a class reference, or a template parameter.
     pub fn named(name: Atom) -> PhpType {
         TypeKind::Named(name).into()

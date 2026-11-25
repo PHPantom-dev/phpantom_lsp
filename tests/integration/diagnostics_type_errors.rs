@@ -1,7 +1,7 @@
 use crate::common::message_text;
 use crate::common::{
     collect_diagnostics_with, create_test_backend, create_test_backend_with_full_stubs,
-    create_test_backend_with_function_stubs, messages_with_code,
+    create_test_backend_with_function_stubs, create_test_backend_with_stubs, messages_with_code,
 };
 use phpantom_lsp::Backend;
 use tower_lsp_server::gen_lsp_types::*;
@@ -11,6 +11,16 @@ use tower_lsp_server::gen_lsp_types::*;
 fn collect(php: &str) -> Vec<Diagnostic> {
     collect_diagnostics_with(
         &create_test_backend(),
+        php,
+        Backend::collect_argument_type_diagnostics,
+    )
+}
+
+/// [`collect`] with the `UnitEnum` and `BackedEnum` stubs loaded, for a
+/// type such as `enum-string` that is written in terms of them.
+fn collect_with_enum_stubs(php: &str) -> Vec<Diagnostic> {
+    collect_diagnostics_with(
+        &create_test_backend_with_stubs(),
         php,
         Backend::collect_argument_type_diagnostics,
     )
@@ -2147,7 +2157,7 @@ function probe({base} $v): void {{
 }}
 "#
         );
-        let diags = collect(&php);
+        let diags = collect_with_enum_stubs(&php);
         assert!(
             has_type_error(&diags),
             "a bare {base} is not known to be a {refinement}, got: {diags:?}"
@@ -11754,7 +11764,7 @@ acceptsClassString(returnsBoundEnumString());
 acceptsBoundEnumString(SomeEnum::class);
 acceptsBoundEnumString(OtherEnum::class);
 "#;
-    let diags = collect(php);
+    let diags = collect_with_enum_stubs(php);
     assert!(
         messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "got {diags:?}"
@@ -11762,7 +11772,9 @@ acceptsBoundEnumString(OtherEnum::class);
     let messages = messages_with_code(&diags, "type_mismatch_argument");
     assert_eq!(messages.len(), 5, "got {messages:?}");
     assert!(
-        messages.iter().all(|m| m.contains("enum-string")),
+        messages
+            .iter()
+            .all(|m| m.contains("class-string<UnitEnum>") || m.contains("enum-string<")),
         "each message should name the expected type, got {messages:?}"
     );
 }

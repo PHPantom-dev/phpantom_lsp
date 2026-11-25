@@ -455,17 +455,48 @@ impl PhpType {
     /// inherited methods carry the declaring class's identity for `self`
     /// while preserving `static` for late-static-binding resolution.
     pub fn replace_bare_self(&self, class_name: &str) -> PhpType {
-        self.replace_bare_keyword("self", class_name)
+        self.replace_bare_self_with(&PhpType::named(atom(class_name)))
     }
 
     /// Replace only the `self` keyword with `replacement`, the type the
     /// declaring class stands for (`Builder<TModel>` for a generic one).
     ///
     /// A `self<…>` written with its own arguments keeps them and takes only
-    /// the class name from `replacement`.
+    /// the class name from `replacement`. A `self::NAME` constant reference,
+    /// as a type or as a shape key, reads the declaring class's constant
+    /// too, so it is qualified with that class.
     pub fn replace_bare_self_with(&self, replacement: &PhpType) -> PhpType {
+        let qualify = |constant: &str| qualify_self_constant(replacement, constant);
         match self.raw_kind() {
             TypeKind::Named(s) if s.eq_ignore_ascii_case("self") => replacement.clone(),
+            TypeKind::Named(s) if let Some(constant) = self_constant_name(s) => qualify(constant)
+                .map(|reference| PhpType::named(atom(&reference)))
+                .unwrap_or_else(|| self.clone()),
+            TypeKind::Raw(s) if let Some(constant) = self_constant_name(s) => qualify(constant)
+                .map(PhpType::raw)
+                .unwrap_or_else(|| self.clone()),
+            TypeKind::ArrayShape(entries)
+                if entries.iter().any(|e| {
+                    e.key
+                        .as_deref()
+                        .is_some_and(|key| self_constant_name(key).is_some())
+                }) =>
+            {
+                PhpType::array_shape(
+                    entries
+                        .iter()
+                        .map(|e| ShapeEntry {
+                            key: e.key.as_deref().map(|key| {
+                                self_constant_name(key)
+                                    .and_then(qualify)
+                                    .unwrap_or_else(|| key.to_string())
+                            }),
+                            value_type: e.value_type.replace_bare_self_with(replacement),
+                            optional: e.optional,
+                        })
+                        .collect(),
+                )
+            }
             TypeKind::Generic(g) if g.name.eq_ignore_ascii_case("self") => {
                 let name = match replacement.raw_kind() {
                     TypeKind::Generic(r) => r.name,
@@ -513,9 +544,9 @@ impl PhpType {
     }
 
     /// Returns `true` when this type contains the bare `self` keyword
-    /// (not `static` or `$this`).
+    /// (not `static` or `$this`), or a `self::NAME` constant reference.
     pub fn contains_bare_self(&self) -> bool {
-        self.contains_bare_keyword("self")
+        self.contains_bare_keyword("self") || self.contains_self_constant()
     }
 
     /// Returns `true` when this type contains the bare `parent` keyword.

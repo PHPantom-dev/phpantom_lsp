@@ -438,7 +438,7 @@ fn convert(src: &str, ty: &cst::Type<'_>) -> PhpType {
                     }
                     PhpType::generic(name, args)
                 }
-                None => PhpType::named(atom(name)),
+                None => pseudo_type_expansion(name).unwrap_or_else(|| PhpType::named(atom(name))),
             }
         }
 
@@ -575,7 +575,7 @@ fn convert(src: &str, ty: &cst::Type<'_>) -> PhpType {
             let name = normalize_keyword_casing(bytes_to_str(e.keyword.value));
             match &e.parameter {
                 Some(p) => PhpType::generic(&name, vec![convert(src, &p.entry.inner)]),
-                None => PhpType::named(atom(&name)),
+                None => pseudo_type_expansion(&name).unwrap_or_else(|| PhpType::named(atom(&name))),
             }
         }
         cst::Type::TraitString(t) => {
@@ -621,6 +621,11 @@ fn convert(src: &str, ty: &cst::Type<'_>) -> PhpType {
         cst::Type::Negated(n) => literal_number_type(format!("-{}", n.operand)),
         cst::Type::Posited(p) => literal_number_type(format!("+{}", p.operand)),
 
+        cst::Type::EmptyScalar(k) => {
+            let name = bytes_to_str(k.value);
+            pseudo_type_expansion(name).unwrap_or_else(|| PhpType::named(atom(name)))
+        }
+
         // -- Keyword types → Named -------------------------------------------
         cst::Type::Mixed(k)
         | cst::Type::NonEmptyMixed(k)
@@ -661,6 +666,9 @@ fn convert(src: &str, ty: &cst::Type<'_>) -> PhpType {
         | cst::Type::UnspecifiedLiteralFloat(k)
         | cst::Type::NonEmptyUnspecifiedLiteralString(k) => {
             let canonical = normalize_keyword_casing(bytes_to_str(k.value));
+            if let Some(expansion) = pseudo_type_expansion(&canonical) {
+                return expansion;
+            }
             match unmodelled_refinement_base(&canonical) {
                 Some(base) => PhpType::named(atom(base)),
                 None => PhpType::named(atom(&canonical)),
@@ -680,6 +688,50 @@ fn convert(src: &str, ty: &cst::Type<'_>) -> PhpType {
         // -- Catch-all for anything else (non_exhaustive) ---------------------
         other => PhpType::raw(other.to_string()),
     }
+}
+
+/// The type a PHPDoc pseudo-type is shorthand for, spelled out in types the
+/// engine models directly.
+///
+/// `enum-string` is the class-string of an enum, and the two scalar halves
+/// split `scalar` by truthiness the way PHPStan does: `empty-scalar` lists
+/// the falsy scalars, `non-empty-scalar` keeps every `float` (PHPStan does
+/// not exclude `0.0`).  Matched in lowercase only, like the other
+/// PHPDoc-only pseudo-types.
+fn pseudo_type_expansion(name: &str) -> Option<PhpType> {
+    Some(match name {
+        // Fully qualified: a bare `UnitEnum` would be resolved against the
+        // docblock's own namespace.
+        "enum-string" => PhpType::class_string(Some(PhpType::named(atom("\\UnitEnum")))),
+        "empty-scalar" => PhpType::union(vec![
+            PhpType::literal_int("0"),
+            PhpType::literal_float("0.0"),
+            PhpType::literal_string_value(""),
+            PhpType::literal_string_value("0"),
+            PhpType::false_(),
+        ]),
+        "non-empty-scalar" => PhpType::union(vec![
+            PhpType::float(),
+            PhpType::int_range("min", "-1"),
+            PhpType::int_range("1", "max"),
+            PhpType::non_falsy_string(),
+            PhpType::true_(),
+        ]),
+        // A string refinement that is also non-empty is the intersection of
+        // the two, which is how one built any other way reads.
+        "non-empty-literal-string" => {
+            PhpType::intersection(vec![PhpType::literal_string(), PhpType::non_empty_string()])
+        }
+        "non-empty-lowercase-string" => PhpType::intersection(vec![
+            PhpType::lowercase_string(),
+            PhpType::non_empty_string(),
+        ]),
+        "non-empty-uppercase-string" => PhpType::intersection(vec![
+            PhpType::non_empty_string(),
+            PhpType::uppercase_string(),
+        ]),
+        _ => return None,
+    })
 }
 
 /// Apply a postfix to the innermost unparenthesized callable return type.

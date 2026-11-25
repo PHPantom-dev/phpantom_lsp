@@ -42,15 +42,15 @@ class Foo
 		assertType('array&callable(): mixed', $callableArray); // SKIP
 		assertType('resource', $closedResource); // SKIP
 		assertType('resource', $openResource); // SKIP
-		assertType('class-string<UnitEnum>', $enumString); // SKIP
-		assertType('literal-string&non-empty-string', $nonEmptyLiteralString); // SKIP
-		assertType('float|int<min, -1>|int<1, max>|non-falsy-string|true', $nonEmptyScalar); // SKIP
-		assertType("0|0.0|''|'0'|false", $emptyScalar); // SKIP
+		assertType('class-string<UnitEnum>', $enumString);
+		assertType('literal-string&non-empty-string', $nonEmptyLiteralString);
+		assertType('float|int<min, -1>|int<1, max>|non-falsy-string|true', $nonEmptyScalar);
+		assertType("0|0.0|''|'0'|false", $emptyScalar);
 		assertType("mixed~(0|0.0|''|'0'|array{}|false|null)", $nonEmptyMixed); // SKIP
 		assertType('lowercase-string', $lowercaseString);
-		assertType('lowercase-string&non-empty-string', $nonEmptyLowercaseString); // SKIP
+		assertType('lowercase-string&non-empty-string', $nonEmptyLowercaseString);
 		assertType('uppercase-string', $uppercaseString);
-		assertType('non-empty-string&uppercase-string', $nonEmptyUppercaseString); // SKIP
+		assertType('non-empty-string&uppercase-string', $nonEmptyUppercaseString);
 	}
 
 }

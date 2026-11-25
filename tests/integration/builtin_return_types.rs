@@ -601,7 +601,7 @@ function probe(string $u, float $x, int $n, string $name): void {
             ("$amount", "numeric-string"),
             ("$grouped", "string"),
             ("$lower", "lowercase-string"),
-            ("$upperName", "non-empty-uppercase-string"),
+            ("$upperName", "non-empty-string&uppercase-string"),
         ],
     );
 }
@@ -635,7 +635,7 @@ function probe(array $names, array $labels): void {
             ("$names", "array<lowercase-string, string>"),
             (
                 "$labels",
-                "array<non-empty-lowercase-string&non-falsy-string, non-falsy-string>",
+                "array<lowercase-string&non-falsy-string, non-falsy-string>",
             ),
         ],
     );
