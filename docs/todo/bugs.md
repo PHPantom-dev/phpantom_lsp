@@ -2391,26 +2391,23 @@ parentheses reproduces the cases (`array-pop.php`, `array-shift.php`,
 `bug-10122.php`, `bug-4499.php`, the `functionPhpDocs*`/`methodPhpDocs*`
 `void` assertions, and the WordPress `output-constants.php`).
 
-### B904. A recursive or circular `@phpstan-type` alias resolves to a type
+### B909. An inline `@var` naming a local `@phpstan-type` alias keeps the alias name
 
 **Impact: Low · Complexity: Low**
 
 ```php
-/**
- * @phpstan-type RecursiveTypeAlias RecursiveTypeAlias[]
- * @phpstan-type CircularTypeAlias1 CircularTypeAlias2
- * @phpstan-type CircularTypeAlias2 CircularTypeAlias1
- * @property RecursiveTypeAlias $recursive
- * @property CircularTypeAlias1 $circular
- */
-class Foo {}
-(new Foo)->recursive;   // array<RecursiveTypeAlias>, should be an error type
-(new Foo)->circular;    // CircularTypeAlias1, should be an error type
+/** @phpstan-type Ids list<int> */
+class Foo {
+    public function f() {
+        /** @var Ids $x */
+        $x = [1];
+        $x;   // Ids, should be list<int>
+    }
+}
 ```
 
-A local alias that names itself, directly or through another local alias, is
-left as the unexpanded name where the cycle recurs, which then reads as a
-class. PHPStan reports the alias as invalid and types its uses as an error.
-Imported aliases that form a cycle already resolve to `mixed`.
-
-**Cases** (PHPStan `nsrt/`, 2 assertions): `type-aliases.php` (2).
+An alias named in a member signature is expanded when the file is parsed, and
+a `@param` type is expanded when the parameter is seeded, but an inline `@var`
+annotation keeps the bare alias name as the variable's type. Hover shows the
+alias name and type checks see a class named `Ids`. Member completion still
+works, since class resolution expands the alias on its own.

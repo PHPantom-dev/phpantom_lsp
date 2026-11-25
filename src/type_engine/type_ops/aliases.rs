@@ -34,8 +34,9 @@ use crate::types::*;
 /// that declares it, and a class-level `@template` of the same name hides
 /// it.  An alias named after a built-in type (`@phpstan-type int Foo`) is
 /// invalid and never replaces the built-in.  An alias body that names
-/// another alias is expanded first; a cycle is left unexpanded where it
-/// recurs rather than unrolled.
+/// another alias is expanded first.  An alias that names itself, directly
+/// or through other local aliases, is invalid and stands for `mixed`, as
+/// PHPStan types it as an error.
 pub(crate) fn expand_local_type_aliases(classes: &mut [ClassInfo]) {
     let mut names: Vec<String> = Vec::new();
     for class in classes.iter() {
@@ -54,8 +55,6 @@ pub(crate) fn expand_local_type_aliases(classes: &mut [ClassInfo]) {
             classes,
             names: &names,
             memo: HashMap::new(),
-            visiting: Vec::new(),
-            cycle_cut: false,
         };
         (0..classes.len())
             .map(|i| {
@@ -87,18 +86,13 @@ pub(crate) fn expand_local_type_aliases(classes: &mut [ClassInfo]) {
 struct LocalAliasExpander<'a> {
     classes: &'a [ClassInfo],
     names: &'a [String],
-    /// Expansions that did not run into a cycle, keyed by the declaring
-    /// class's index.  One that did depends on where the walk entered the
-    /// cycle, so it is recomputed each time.
+    /// Finished expansions, keyed by the declaring class's index.
     memo: HashMap<(usize, Atom), PhpType>,
-    visiting: Vec<(usize, Atom)>,
-    /// Set when the expansion under way stopped at a cycle.
-    cycle_cut: bool,
 }
 
 impl LocalAliasExpander<'_> {
     /// The expansion of `name` as seen from the class at `from`, or `None`
-    /// when it is not a local alias in that scope (or recurs in a cycle).
+    /// when it is not a local alias in that scope.
     fn lookup(&mut self, from: usize, name: &str) -> Option<PhpType> {
         let name = crate::atom::atom(name);
         let owner = from;
@@ -110,29 +104,54 @@ impl LocalAliasExpander<'_> {
         if let Some(done) = self.memo.get(&key) {
             return Some(done.clone());
         }
-        if self.visiting.contains(&key) {
-            self.cycle_cut = true;
-            return None;
-        }
-        self.visiting.push(key);
-        let outer_cut = std::mem::replace(&mut self.cycle_cut, false);
-        let mut subs = HashMap::new();
-        for alias in self.names {
-            if body.references_any_template_param(std::slice::from_ref(alias))
-                && let Some(expanded) = self.lookup(owner, alias)
-            {
-                subs.insert(alias.clone(), expanded);
+        // A cyclic alias never recurses, and an acyclic one can only reach
+        // other acyclic aliases or cyclic ones, so the walk terminates.
+        let expanded = if local_alias_is_cyclic(&self.classes[owner], &name) {
+            PhpType::mixed()
+        } else {
+            let mut subs = HashMap::new();
+            for alias in self.names {
+                if body.references_any_template_param(std::slice::from_ref(alias))
+                    && let Some(expanded) = self.lookup(owner, alias)
+                {
+                    subs.insert(alias.clone(), expanded);
+                }
             }
-        }
-        let expanded = body.substitute(&subs);
-        let cyclic = self.cycle_cut;
-        self.cycle_cut = outer_cut || cyclic;
-        self.visiting.pop();
-        if !cyclic {
-            self.memo.insert(key, expanded.clone());
-        }
+            body.substitute(&subs)
+        };
+        self.memo.insert(key, expanded.clone());
         Some(expanded)
     }
+}
+
+/// Whether the local alias `name` of `class` names itself, directly
+/// (`@phpstan-type A A[]`) or through other local aliases of the class.
+fn local_alias_is_cyclic(class: &ClassInfo, name: &Atom) -> bool {
+    let local: Vec<String> = class
+        .type_aliases
+        .iter()
+        .filter(|(n, d)| matches!(d, TypeAliasDef::Local(_)) && !is_builtin_non_class_type(n))
+        .map(|(n, _)| n.to_string())
+        .collect();
+    let mut stack: Vec<&str> = vec![name.as_str()];
+    let mut seen: Vec<&str> = Vec::new();
+    while let Some(current) = stack.pop() {
+        let Some(TypeAliasDef::Local(body)) = class.type_aliases.get(&atom(current)) else {
+            continue;
+        };
+        for alias in &local {
+            if body.references_any_template_param(std::slice::from_ref(alias)) {
+                if alias.as_str() == name.as_str() {
+                    return true;
+                }
+                if !seen.contains(&alias.as_str()) {
+                    seen.push(alias.as_str());
+                    stack.push(alias.as_str());
+                }
+            }
+        }
+    }
+    false
 }
 
 /// A copy of `class` with the aliases it imports with
@@ -502,7 +521,7 @@ pub(crate) fn expand_member_type_aliases(
     loop {
         let current: &ClassInfo = loaded_current.as_deref().unwrap_or(class);
         if let Some(def) = current.type_aliases.get(&name) {
-            let expanded = expand_type_alias_def(def, all_classes, class_loader)?;
+            let expanded = expand_type_alias_def(current, &name, def, all_classes, class_loader)?;
             return Some(
                 expand_nested_type_aliases(&expanded, &current.fqn(), all_classes, class_loader)
                     .unwrap_or(expanded),
@@ -543,31 +562,34 @@ fn resolve_type_alias_once(
 
     // An alias is scoped to the class that declares it.
     if !owning_class_name.is_empty() {
-        let def = find_class_by_fqn(all_classes, owning_class_name)?
-            .type_aliases
-            .get(&name)?;
-        return expand_type_alias_def(def, all_classes, class_loader);
+        let class = find_class_by_fqn(all_classes, owning_class_name)?;
+        let def = class.type_aliases.get(&name)?;
+        return expand_type_alias_def(class, &name, def, all_classes, class_loader);
     }
 
     // Without an owning class (the array-key completion path), any class
     // of the file may hold it.
-    all_classes
-        .iter()
-        .find_map(|cls| cls.type_aliases.get(&name))
-        .and_then(|def| expand_type_alias_def(def, all_classes, class_loader))
+    all_classes.iter().find_map(|cls| {
+        let def = cls.type_aliases.get(&name)?;
+        expand_type_alias_def(cls, &name, def, all_classes, class_loader)
+    })
 }
 
 /// Expand a [`TypeAliasDef`] into a resolved [`PhpType`].
 ///
-/// For local aliases, returns the `PhpType` directly.
+/// For local aliases, returns the `PhpType` directly, or `mixed` when the
+/// alias `name` of `class` names itself.
 /// For imports, loads the source class and returns the original alias
 /// definition.
 fn expand_type_alias_def(
+    class: &ClassInfo,
+    name: &Atom,
     def: &TypeAliasDef,
     all_classes: &[Arc<ClassInfo>],
     class_loader: &ResolvedClassLoader<'_>,
 ) -> Option<PhpType> {
     match def {
+        TypeAliasDef::Local(_) if local_alias_is_cyclic(class, name) => Some(PhpType::mixed()),
         TypeAliasDef::Local(php_type) => Some(php_type.clone()),
         TypeAliasDef::Import {
             source_class,
@@ -632,6 +654,9 @@ fn resolve_imported_alias_in_source(
     }
     visiting.borrow_mut().push(key);
     let resolved = match def {
+        TypeAliasDef::Local(_) if local_alias_is_cyclic(&source_class, &atom(original_name)) => {
+            Some(PhpType::mixed())
+        }
         TypeAliasDef::Local(php_type) => Some(expand_aliases_in_source(
             php_type,
             &source_class,

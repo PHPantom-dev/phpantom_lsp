@@ -1021,10 +1021,11 @@ function f(Base $b) {
     );
 }
 
-/// Aliases that name each other are expanded as far as the cycle allows and
-/// stop where it recurs, rather than unrolling.
+/// An alias that names itself, directly or through another local alias, is
+/// invalid and stands for `mixed`, as PHPStan types it as an error, both in
+/// a member signature and where the declaring file reads it.
 #[test]
-fn a_cycle_of_local_aliases_is_left_unexpanded_where_it_recurs() {
+fn a_cyclic_local_alias_is_mixed() {
     let (backend, _dir) = create_psr4_workspace(
         r#"{ "autoload": { "psr-4": { "App\\": "src/" } } }"#,
         &[(
@@ -1033,9 +1034,15 @@ fn a_cycle_of_local_aliases_is_left_unexpanded_where_it_recurs() {
                 "<?php\nnamespace App;\n/**\n",
                 " * @phpstan-type Node array{children: Nodes}\n",
                 " * @phpstan-type Nodes list<Node>\n",
+                " * @phpstan-type Itself Itself[]\n",
+                " * @phpstan-type Wrapper list<Itself>\n",
                 " */\nclass Tree {\n",
                 "    /** @return Nodes */\n",
-                "    public function roots(): array { return []; }\n",
+                "    public function roots() {}\n",
+                "    /** @return Itself */\n",
+                "    public function itself() {}\n",
+                "    /** @return Wrapper */\n",
+                "    public function wrapper() {}\n",
                 "}\n",
             ),
         )],
@@ -1044,14 +1051,33 @@ fn a_cycle_of_local_aliases_is_left_unexpanded_where_it_recurs() {
 namespace App;
 function f(Tree $t) {
     $roots = $t->roots();
+    $itself = $t->itself();
+    $wrapper = $t->wrapper();
 }
 "#;
     assert_assigned_types_on(
         &backend,
         "file:///consumer.php",
         content,
-        &[("$roots", "list<array{children: Nodes}>")],
+        &[
+            ("$roots", "mixed"),
+            ("$itself", "mixed"),
+            ("$wrapper", "list<mixed>"),
+        ],
     );
+    let content = r#"<?php
+namespace App;
+/**
+ * @phpstan-type Itself Itself[]
+ */
+class Local {
+    /** @param Itself $x */
+    public function f($x) {
+        $y = $x;
+    }
+}
+"#;
+    assert_assigned_types_on(&backend, "file:///local.php", content, &[("$y", "mixed")]);
 }
 
 // ─── @phpstan-type: object shape alias ──────────────────────────────────────

@@ -155,8 +155,8 @@ namespace TypeAliasesDataset {
 	assertType('Countable&Traversable', (new Foo)->importedAliasProperty);
 	assertType('Countable&Traversable', (new Foo)->reexportedAliasProperty);
 	assertType('TypeAliasesDataset\SubScope\Foo', (new Foo)->scopedAliasProperty);
-	assertType('*ERROR*', (new Foo)->recursiveAliasProperty);  // SKIP
-	assertType('*ERROR*', (new Foo)->circularAliasProperty);  // SKIP
+	assertType('*ERROR*', (new Foo)->recursiveAliasProperty);
+	assertType('*ERROR*', (new Foo)->circularAliasProperty);
 
 	trait FooTrait
 	{
