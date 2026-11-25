@@ -41,10 +41,10 @@ function doFoo(bool $b, int $i, float $f, $d, $r, string $s, array $a, $intOrStr
 	assertType("'null'", get_debug_type($null));
 	assertType("'int'|'string'", get_debug_type($intOrString));
 	assertType("'array'|'GetDebugType\\\\A'", get_debug_type($arrayOrObject));
-	assertType("'class@anonymous'", get_debug_type($anonymous)); // SKIP: get_debug_type() does not name anonymous classes
-	assertType("'GetDebugType\\\\B@anonymous'", get_debug_type($anonymousImplements)); // SKIP: get_debug_type() does not name anonymous classes
-	assertType("'GetDebugType\\\\D@anonymous'", get_debug_type($anonymousExtends)); // SKIP: get_debug_type() does not name anonymous classes
-	assertType("'GetDebugType\\\\D@anonymous'", get_debug_type($anonymousExtendsImplements)); // SKIP: get_debug_type() does not name anonymous classes
+	assertType("'class@anonymous'", get_debug_type($anonymous));
+	assertType("'GetDebugType\\\\B@anonymous'", get_debug_type($anonymousImplements));
+	assertType("'GetDebugType\\\\D@anonymous'", get_debug_type($anonymousExtends));
+	assertType("'GetDebugType\\\\D@anonymous'", get_debug_type($anonymousExtendsImplements));
 }
 
 /**

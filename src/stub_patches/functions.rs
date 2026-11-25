@@ -796,40 +796,56 @@ fn patch_hrtime(func: &mut FunctionInfo) {
 /// returns that part alone, or `null` when the URL lacks it. `false` is a
 /// seriously malformed URL either way. A component that is not a literal
 /// leaves the union of every form.
+///
+/// The string parts are cut out of the URL unchanged, so a `lowercase-string`
+/// URL has lowercase parts.
 fn patch_parse_url(func: &mut FunctionInfo) {
     const PHP_URL_PORT: &str = "2";
-    let all = PhpType::parse(
-        "array{scheme?: string, host?: string, port?: int<0, 65535>, user?: string, \
-         pass?: string, path?: string, query?: string, fragment?: string}|false",
-    );
-    let port = PhpType::parse("int<0, 65535>|false|null");
-    let string_part = PhpType::parse("string|false|null");
-    let string_components = PhpType::union(
-        ["0", "1", "3", "4", "5", "6", "7"]
-            .into_iter()
-            .map(PhpType::literal_int)
-            .collect(),
-    );
-    conditional_on(
-        func,
-        "$component",
-        PhpType::literal_int("-1"),
-        all,
+    if !func.parameters.iter().any(|p| p.name == "$url") {
+        return;
+    }
+    let by_component = |part: &str| {
+        let all = PhpType::parse(&format!(
+            "array{{scheme?: {part}, host?: {part}, port?: int<0, 65535>, user?: {part}, \
+             pass?: {part}, path?: {part}, query?: {part}, fragment?: {part}}}|false",
+        ));
+        let port = PhpType::parse("int<0, 65535>|false|null");
+        let string_part = PhpType::parse(&format!("{part}|false|null"));
+        let string_components = PhpType::union(
+            ["0", "1", "3", "4", "5", "6", "7"]
+                .into_iter()
+                .map(PhpType::literal_int)
+                .collect(),
+        );
         PhpType::conditional(
             "$component",
             false,
-            PhpType::literal_int(PHP_URL_PORT),
-            port,
+            PhpType::literal_int("-1"),
+            all,
             PhpType::conditional(
                 "$component",
                 false,
-                string_components,
-                string_part,
-                // An out-of-range component is a `ValueError`.
-                PhpType::never(),
+                PhpType::literal_int(PHP_URL_PORT),
+                port,
+                PhpType::conditional(
+                    "$component",
+                    false,
+                    string_components,
+                    string_part,
+                    // An out-of-range component is a `ValueError`.
+                    PhpType::never(),
+                ),
             ),
-        ),
-    );
+        )
+    };
+    func.conditional_return = Some(PhpType::conditional_answering_undecided(
+        "$url",
+        false,
+        PhpType::named(atom("lowercase-string")),
+        by_component("lowercase-string"),
+        by_component("string"),
+        UndecidedReading::ElseBranch,
+    ));
 }
 
 /// Patch `microtime()` to have a conditional return type keyed on `$as_float`.

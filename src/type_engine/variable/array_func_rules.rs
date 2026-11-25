@@ -137,6 +137,10 @@ pub(in crate::type_engine) fn array_func_raw_type(
         return Some(keys);
     }
 
+    if func_name.eq_ignore_ascii_case("array_column") {
+        return array_column_type(args);
+    }
+
     // Handed an array subject, the `preg_` replacers return its keys with
     // string values, dropping an entry whose replacement fails (and, for
     // `preg_filter`, one the pattern does not match). So a shape keeps its
@@ -869,6 +873,214 @@ fn shape_end_key_type(raw: &PhpType, first: bool) -> Option<PhpType> {
         }
     }
     literal_key_union(keys)
+}
+
+/// `array_column($array, $column_key, $index_key)` over rows that are
+/// arrays. Mirrors PHPStan's `ArrayColumnHelper`, minus object rows.
+///
+/// A constant shape of rows gives the shape `array_column()` builds: each
+/// row's column in order, a row lacking it skipped, keyed by the row's index
+/// column when that holds a literal key (a later row overwriting an earlier
+/// one of the same key) and appended otherwise. Any other array gives a list
+/// of the column's type, or an array keyed by the index column's.
+///
+/// `None` when a key argument is not a literal (or `null`) or a row is not
+/// an array, which leaves the stub's `array`.
+fn array_column_type(args: &dyn ArrayFuncArgs) -> Option<PhpType> {
+    if (0..3).any(|i| args.is_spread(i) || args.is_named(i)) {
+        return None;
+    }
+    let column = array_column_key_arg(args, 1)?;
+    let index = if args.has_arg(2) {
+        array_column_key_arg(args, 2)?
+    } else {
+        None
+    };
+    let input = args.arg_raw_type(0)?;
+    if let TypeKind::ArrayShape(rows) = input.kind()
+        && let Some(shape) = array_column_shape(rows, column.as_deref(), index.as_deref())
+    {
+        return Some(shape);
+    }
+    if input.is_empty_array_shape() {
+        return Some(PhpType::array_shape(Vec::new()));
+    }
+    let row = input.iterable_element_type()?;
+    let (value, certain) = match row_offset(&row, column.as_deref())? {
+        RowOffset::Never => return Some(PhpType::array_shape(Vec::new())),
+        RowOffset::Certain(value) => (value, true),
+        RowOffset::Maybe(value) => (value, false),
+    };
+    let non_empty = certain && input.is_provably_non_empty();
+    let Some(index) = index else {
+        let list = PhpType::list(value);
+        return Some(if non_empty {
+            list.non_empty_array_form()
+        } else {
+            list
+        });
+    };
+    let normalize = super::array_shape_writes::normalize_array_key_type_keeping_literals;
+    let key = match row_offset(&row, Some(&index))? {
+        RowOffset::Never => PhpType::int(),
+        RowOffset::Certain(key) => normalize(&key)?,
+        // A row without the index column is appended, under an int key
+        // that absorbs every literal int one.
+        RowOffset::Maybe(key) => {
+            let key = normalize(&key)?;
+            let mut members: Vec<PhpType> = key
+                .union_members()
+                .into_iter()
+                .filter(|member| !member.is_int_literal() && !member.is_int())
+                .cloned()
+                .collect();
+            members.push(PhpType::int());
+            PhpType::union(members)
+        }
+    };
+    let array = PhpType::generic_array(key, value);
+    Some(if non_empty {
+        array.non_empty_array_form()
+    } else {
+        array
+    })
+}
+
+/// A column or index key argument of `array_column()`: `Some(Some(keys))`
+/// for a literal key or a union of them, `Some(None)` for `null`, and
+/// `None` for anything that cannot be read.
+fn array_column_key_arg(args: &dyn ArrayFuncArgs, index: usize) -> Option<Option<Vec<String>>> {
+    let ty = args.arg_raw_type(index)?;
+    if ty.is_null() {
+        return Some(None);
+    }
+    ty.union_members()
+        .into_iter()
+        .map(literal_array_key)
+        .collect::<Option<_>>()
+        .map(Some)
+}
+
+/// The shape key a literal int or string is stored under, with a decimal
+/// integer string cast to the integer the way PHP casts an array key.
+fn literal_array_key(ty: &PhpType) -> Option<String> {
+    match ty.as_literal()? {
+        literal @ LiteralValue::Int(_) => Some(literal.parse_i64()?.to_string()),
+        literal @ LiteralValue::String(_) => {
+            let content = literal.string_content()?;
+            if let Some(n) = canonical_int_key(&content) {
+                return Some(n.to_string());
+            }
+            // A key spelled like a class constant would be read back as one.
+            (!content.contains("::")).then(|| content.into_owned())
+        }
+        LiteralValue::Float(_) => None,
+    }
+}
+
+/// What `array_column()` reads out of one row at a key.
+enum RowOffset {
+    /// No row has the key, so every row is skipped.
+    Never,
+    /// Every row has the key, holding this.
+    Certain(PhpType),
+    /// A row may lack the key; the ones that have it hold this.
+    Maybe(PhpType),
+}
+
+/// The value a row of type `row` holds at any of `keys` (the whole row for
+/// `None`), or `None` when the row is not an array.
+fn row_offset(row: &PhpType, keys: Option<&[String]>) -> Option<RowOffset> {
+    let Some(keys) = keys else {
+        return Some(RowOffset::Certain(row.clone()));
+    };
+    let mut values: Vec<PhpType> = Vec::new();
+    let mut certain = true;
+    for member in row.union_members() {
+        for key in keys {
+            match member.kind() {
+                TypeKind::ArrayShape(_) => match member.shape_entry(key) {
+                    Some(entry) => {
+                        certain &= !entry.optional;
+                        values.push(entry.value_type.clone());
+                    }
+                    None => certain = false,
+                },
+                _ if member.is_array_like() && !member.is_iterable() => {
+                    certain = false;
+                    values.push(
+                        member
+                            .iterable_element_type()
+                            .unwrap_or_else(PhpType::mixed),
+                    );
+                }
+                _ => return None,
+            }
+        }
+    }
+    Some(match values.len() {
+        0 => RowOffset::Never,
+        _ if certain => RowOffset::Certain(PhpType::union(values)),
+        _ => RowOffset::Maybe(PhpType::union(values)),
+    })
+}
+
+/// [`array_column_type`] over a constant shape of `rows`, or `None` when a
+/// row may or may not have the column, or its key cannot be told.
+fn array_column_shape(
+    rows: &[ShapeEntry],
+    column: Option<&[String]>,
+    index: Option<&[String]>,
+) -> Option<PhpType> {
+    let mut entries: Vec<ShapeEntry> = Vec::new();
+    let mut next_index: i64 = 0;
+    // An optional entry appended leaves the position of every later one open.
+    let mut appended_optional = false;
+    for row in rows {
+        let value = match row_offset(&row.value_type, column)? {
+            RowOffset::Never => continue,
+            RowOffset::Certain(value) => value,
+            RowOffset::Maybe(_) => return None,
+        };
+        let key = match index {
+            None => None,
+            Some(index) => match row_offset(&row.value_type, Some(index))? {
+                RowOffset::Never => None,
+                RowOffset::Certain(key) => Some(literal_array_key(&key)?),
+                RowOffset::Maybe(_) => return None,
+            },
+        };
+        let key = match key {
+            Some(key) => {
+                if let Some(n) = canonical_int_key(&key) {
+                    next_index = next_index.max(n + 1);
+                }
+                key
+            }
+            None => {
+                if appended_optional {
+                    return None;
+                }
+                appended_optional = row.optional;
+                let key = next_index.to_string();
+                next_index += 1;
+                key
+            }
+        };
+        match entries
+            .iter_mut()
+            .find(|entry| entry.key.as_deref() == Some(key.as_str()))
+        {
+            Some(entry) if !entry.optional && !row.optional => entry.value_type = value,
+            Some(_) => return None,
+            None => entries.push(ShapeEntry {
+                key: Some(key),
+                value_type: value,
+                optional: row.optional,
+            }),
+        }
+    }
+    Some(shape_with_implicit_keys(entries))
 }
 
 /// An array shape over `entries`, written positionally when they are the

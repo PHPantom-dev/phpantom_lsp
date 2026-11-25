@@ -139,6 +139,7 @@ enum CallSiteFunction {
     ClassRelation,
     GetType,
     GetDebugType,
+    CurlGetinfo,
     WordPress(wordpress::WordPressFunction),
 }
 
@@ -161,6 +162,8 @@ fn classify(func_name: &str) -> Option<CallSiteFunction> {
         Some(CallSiteFunction::GetType)
     } else if name.eq_ignore_ascii_case("get_debug_type") {
         Some(CallSiteFunction::GetDebugType)
+    } else if name.eq_ignore_ascii_case("curl_getinfo") {
+        Some(CallSiteFunction::CurlGetinfo)
     } else {
         wordpress::classify(name).map(CallSiteFunction::WordPress)
     }
@@ -227,6 +230,7 @@ pub(crate) fn call_site_return_type(
         CallSiteFunction::GetDebugType => {
             type_name_return(&args, TypeNaming::GetDebugType, class_loader)
         }
+        CallSiteFunction::CurlGetinfo => curl_getinfo_return(&args),
         CallSiteFunction::WordPress(function) => wordpress::return_type(function, &args),
     }
 }
@@ -538,6 +542,137 @@ fn class_relation_return(args: &CallArgs<'_>, declared: &PhpType) -> Option<PhpT
     ty.is_benevolent().then_some(ty)
 }
 
+/// Each `CURLINFO_*` option `curl_getinfo()` answers, its value, and the
+/// type of what it returns for it. Mirrors PHPStan's
+/// `CurlGetinfoFunctionDynamicReturnTypeExtension`.
+const CURLINFO_OPTIONS: &[(&str, i64, &str)] = &[
+    ("CURLINFO_EFFECTIVE_URL", 1_048_577, "string"),
+    ("CURLINFO_FILETIME", 2_097_166, "int"),
+    ("CURLINFO_TOTAL_TIME", 3_145_731, "float"),
+    ("CURLINFO_NAMELOOKUP_TIME", 3_145_732, "float"),
+    ("CURLINFO_CONNECT_TIME", 3_145_733, "float"),
+    ("CURLINFO_PRETRANSFER_TIME", 3_145_734, "float"),
+    ("CURLINFO_STARTTRANSFER_TIME", 3_145_745, "float"),
+    ("CURLINFO_REDIRECT_COUNT", 2_097_172, "int"),
+    ("CURLINFO_REDIRECT_TIME", 3_145_747, "float"),
+    ("CURLINFO_REDIRECT_URL", 1_048_607, "string|false"),
+    ("CURLINFO_PRIMARY_IP", 1_048_608, "string"),
+    ("CURLINFO_PRIMARY_PORT", 2_097_192, "int"),
+    ("CURLINFO_LOCAL_IP", 1_048_617, "string"),
+    ("CURLINFO_LOCAL_PORT", 2_097_194, "int"),
+    ("CURLINFO_SIZE_UPLOAD", 3_145_735, "float"),
+    ("CURLINFO_SIZE_DOWNLOAD", 3_145_736, "float"),
+    ("CURLINFO_SPEED_DOWNLOAD", 3_145_737, "float"),
+    ("CURLINFO_SPEED_UPLOAD", 3_145_738, "float"),
+    ("CURLINFO_HEADER_SIZE", 2_097_163, "int"),
+    ("CURLINFO_HEADER_OUT", 2, "string|false"),
+    ("CURLINFO_REQUEST_SIZE", 2_097_164, "int"),
+    ("CURLINFO_SSL_VERIFYRESULT", 2_097_165, "int"),
+    ("CURLINFO_CONTENT_LENGTH_DOWNLOAD", 3_145_743, "float"),
+    ("CURLINFO_CONTENT_LENGTH_UPLOAD", 3_145_744, "float"),
+    ("CURLINFO_CONTENT_TYPE", 1_048_594, "string|false"),
+    ("CURLINFO_PRIVATE", 1_048_597, "mixed"),
+    ("CURLINFO_RESPONSE_CODE", 2_097_154, "int"),
+    ("CURLINFO_HTTP_CODE", 2_097_154, "int"),
+    ("CURLINFO_HTTP_CONNECTCODE", 2_097_174, "int"),
+    ("CURLINFO_HTTPAUTH_AVAIL", 2_097_175, "int"),
+    ("CURLINFO_PROXYAUTH_AVAIL", 2_097_176, "int"),
+    ("CURLINFO_OS_ERRNO", 2_097_177, "int"),
+    ("CURLINFO_NUM_CONNECTS", 2_097_178, "int"),
+    ("CURLINFO_SSL_ENGINES", 4_194_331, "list<string>"),
+    ("CURLINFO_COOKIELIST", 4_194_332, "list<string>"),
+    ("CURLINFO_FTP_ENTRY_PATH", 1_048_606, "string|false"),
+    ("CURLINFO_APPCONNECT_TIME", 3_145_761, "float"),
+    (
+        "CURLINFO_CERTINFO",
+        4_194_338,
+        "list<array<string, string>>",
+    ),
+    ("CURLINFO_CONDITION_UNMET", 2_097_187, "int"),
+    ("CURLINFO_RTSP_CLIENT_CSEQ", 2_097_189, "int"),
+    ("CURLINFO_RTSP_CSEQ_RECV", 2_097_191, "int"),
+    ("CURLINFO_RTSP_SERVER_CSEQ", 2_097_190, "int"),
+    ("CURLINFO_RTSP_SESSION_ID", 1_048_612, "string|false"),
+    ("CURLINFO_HTTP_VERSION", 2_097_198, "int"),
+    ("CURLINFO_PROTOCOL", 2_097_200, "int"),
+    ("CURLINFO_PROXY_SSL_VERIFYRESULT", 2_097_199, "int"),
+    ("CURLINFO_SCHEME", 1_048_625, "string"),
+    ("CURLINFO_CONTENT_LENGTH_DOWNLOAD_T", 6_291_471, "int"),
+    ("CURLINFO_CONTENT_LENGTH_UPLOAD_T", 6_291_472, "int"),
+    ("CURLINFO_SIZE_DOWNLOAD_T", 6_291_464, "int"),
+    ("CURLINFO_SIZE_UPLOAD_T", 6_291_463, "int"),
+    ("CURLINFO_SPEED_DOWNLOAD_T", 6_291_465, "int"),
+    ("CURLINFO_SPEED_UPLOAD_T", 6_291_466, "int"),
+    ("CURLINFO_APPCONNECT_TIME_T", 6_291_512, "int"),
+    ("CURLINFO_CONNECT_TIME_T", 6_291_508, "int"),
+    ("CURLINFO_FILETIME_T", 6_291_470, "int"),
+    ("CURLINFO_NAMELOOKUP_TIME_T", 6_291_507, "int"),
+    ("CURLINFO_PRETRANSFER_TIME_T", 6_291_509, "int"),
+    ("CURLINFO_REDIRECT_TIME_T", 6_291_511, "int"),
+    ("CURLINFO_STARTTRANSFER_TIME_T", 6_291_510, "int"),
+    ("CURLINFO_TOTAL_TIME_T", 6_291_506, "int"),
+    ("CURLINFO_EFFECTIVE_METHOD", 1_048_634, "string"),
+    ("CURLINFO_PROXY_ERROR", 2_097_211, "int"),
+    ("CURLINFO_REFERER", 1_048_636, "string|false"),
+    ("CURLINFO_RETRY_AFTER", 6_291_513, "int"),
+    ("CURLINFO_CAINFO", 1_048_637, "string|false"),
+    ("CURLINFO_CAPATH", 1_048_638, "string|false"),
+    ("CURLINFO_POSTTRANSFER_TIME_T", 6_291_523, "int|false"),
+    ("CURLINFO_QUEUE_TIME_T", 6_291_521, "int|false"),
+    ("CURLINFO_USED_PROXY", 2_097_218, "int|false"),
+    ("CURLINFO_HTTPAUTH_USED", 2_097_221, "int|false"),
+    ("CURLINFO_PROXYAUTH_USED", 2_097_222, "int|false"),
+    ("CURLINFO_CONN_ID", 6_291_520, "int|false"),
+];
+
+/// What `curl_getinfo()` returns without an option: every piece of
+/// information in one array, or `false` on failure.
+const CURL_GETINFO_ALL: &str = "array{url: string, content_type: string|null, http_code: int, \
+    header_size: int, request_size: int, filetime: int, ssl_verify_result: int, \
+    redirect_count: int, total_time: float, namelookup_time: float, connect_time: float, \
+    pretransfer_time: float, size_upload: float, size_download: float, speed_download: float, \
+    speed_upload: float, download_content_length: float, upload_content_length: float, \
+    starttransfer_time: float, redirect_time: float, redirect_url: string, primary_ip: string, \
+    certinfo: list<array<string, string>>, primary_port: int, local_ip: string, \
+    local_port: int, http_version: int, protocol: int, ssl_verifyresult: int, scheme: string, \
+    appconnect_time_us: int, queue_time_us: int, connect_time_us: int, \
+    namelookup_time_us: int, pretransfer_time_us: int, redirect_time_us: int, \
+    starttransfer_time_us: int, posttransfer_time_us: int, total_time_us: int, \
+    request_header: string, effective_method: string, capath: string, cainfo: string, \
+    used_proxy: int, httpauth_used: int, proxyauth_used: int, conn_id: int}";
+
+/// `curl_getinfo($handle, $option)`: the type the `CURLINFO_*` option
+/// names, `false` for an integer that names none, and the array of every
+/// piece of information (benevolently `false` on failure, which a handle
+/// that made its request does not hit) without an option.
+///
+/// `None` for an option that cannot be pinned to one integer.
+fn curl_getinfo_return(args: &CallArgs<'_>) -> Option<PhpType> {
+    args.text("$handle")?;
+    let option = match args.text("$option") {
+        Some(text) if !text.trim().eq_ignore_ascii_case("null") => text,
+        _ => {
+            return Some(PhpType::benevolent(PhpType::union(vec![
+                PhpType::parse(CURL_GETINFO_ALL),
+                PhpType::false_(),
+            ])));
+        }
+    };
+    let option = option.trim();
+    let bare = option.trim_start_matches('\\');
+    if let Some(&(_, _, ty)) = CURLINFO_OPTIONS.iter().find(|(name, _, _)| *name == bare) {
+        return Some(PhpType::parse(ty));
+    }
+    let value = crate::php_type::parse_php_int_literal(option)
+        .or_else(|| args.resolve(option).as_ref().and_then(literal_int))?;
+    Some(
+        CURLINFO_OPTIONS
+            .iter()
+            .find(|(_, v, _)| *v == value)
+            .map_or_else(PhpType::false_, |&(_, _, ty)| PhpType::parse(ty)),
+    )
+}
+
 /// Which of PHP's two type-naming functions a call is to.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum TypeNaming {
@@ -658,6 +793,17 @@ fn type_names(
     if !debug {
         return one("object", "object");
     }
+    // An anonymous class cannot be extended, so it is the object's exact
+    // class. PHP names it after its parent, else its first interface.
+    if class.name.starts_with(crate::types::ANONYMOUS_CLASS_PREFIX) {
+        let base = class
+            .parent_class
+            .or_else(|| class.interfaces.first().copied());
+        let base = base
+            .as_deref()
+            .map_or("class", |b| b.trim_start_matches('\\'));
+        return Some(vec![format!("{base}@anonymous")]);
+    }
     let fqn = class.fqn();
     (class.is_final && !fqn.contains('@')).then(|| vec![fqn.to_string()])
 }
@@ -726,6 +872,11 @@ fn filter_return(args: &CallArgs<'_>, filter_param: &str, options_param: &str) -
         None => FILTER_DEFAULT,
     };
     let (flags, options) = filter_flags(args, options_param)?;
+    if options.is_none()
+        && let Some(known) = filter_known_input_return(args, filter, flags)
+    {
+        return Some(known);
+    }
     let element = filter_scalar_return(filter, flags, options.as_ref())?;
     // Array input runs through the filter entry by entry, each failure
     // reported in its place. `FILTER_FORCE_ARRAY` wraps a scalar input in an
@@ -744,6 +895,123 @@ fn filter_return(args: &CallArgs<'_>, filter_param: &str, options_param: &str) -
         ]));
     }
     Some(element)
+}
+
+/// `filter_var()` of an input whose type decides what the filter does with
+/// it: an `int` passes `FILTER_VALIDATE_INT` unchanged, `'12'` becomes `12`,
+/// `null` always fails, and so on, one union member at a time. Mirrors
+/// PHPStan's `FilterFunctionReturnTypeHelper::determineExactType()`.
+///
+/// `None` when the call reads its input from elsewhere (`filter_input()`),
+/// asks for an array, or any member of the input could go either way, which
+/// leaves the result to what the filter alone decides.
+fn filter_known_input_return(args: &CallArgs<'_>, filter: i64, flags: i64) -> Option<PhpType> {
+    if flags & FILTER_REQUIRE_ARRAY != 0 {
+        return None;
+    }
+    let input = args.resolve(&args.text("$value")?)?.strip_benevolence();
+    let mut members = Vec::new();
+    flatten_union(&input, &mut members);
+    let mut values: Vec<PhpType> = Vec::new();
+    let mut fails = false;
+    for member in &members {
+        match filter_exact_value(member, filter, flags)? {
+            Some(value) => {
+                if !values.contains(&value) {
+                    values.push(value);
+                }
+            }
+            None => fails = true,
+        }
+    }
+    if fails && flags & FILTER_THROW_ON_FAILURE == 0 {
+        values.push(filter_failure(flags, None));
+    }
+    if values.is_empty() {
+        return None;
+    }
+    let result = PhpType::union(values);
+    if flags & FILTER_FORCE_ARRAY != 0 {
+        return Some(PhpType::generic_array_val(result));
+    }
+    Some(result)
+}
+
+/// `FILTER_FLAG_STRIP_*` and `FILTER_FLAG_ENCODE_*`: the flags under which
+/// `FILTER_DEFAULT` rewrites a string rather than passing it through.
+const FILTER_DEFAULT_REWRITE_FLAGS: i64 = 4 | 8 | 16 | 32 | 64 | 512;
+const FILTER_FLAG_ALLOW_OCTAL: i64 = 1;
+const FILTER_FLAG_ALLOW_HEX: i64 = 2;
+
+/// What `filter` makes of a value of type `ty`: `Some(Some(value))` when it
+/// passes as `value`, `Some(None)` when it always fails, and `None` when
+/// the type does not decide.
+fn filter_exact_value(ty: &PhpType, filter: i64, flags: i64) -> Option<Option<PhpType>> {
+    let is_bool = ty.is_bool() || ty.is_true() || ty.is_false();
+    match filter {
+        FILTER_VALIDATE_BOOL => {
+            if is_bool {
+                return Some(Some(ty.clone()));
+            }
+            if ty.is_null() {
+                return Some(None);
+            }
+        }
+        FILTER_VALIDATE_FLOAT => {
+            if ty.is_float_subtype() {
+                return Some(Some(ty.clone()));
+            }
+            if let Some(value) = literal_int(ty) {
+                return Some(Some(PhpType::literal_float(format!("{:?}", value as f64))));
+            }
+            if ty.is_int_subtype() {
+                return Some(Some(PhpType::float()));
+            }
+            if ty.is_true() {
+                return Some(Some(PhpType::literal_float("1.0")));
+            }
+            if ty.is_false() || ty.is_null() {
+                return Some(None);
+            }
+        }
+        FILTER_VALIDATE_INT => {
+            if ty.is_int_subtype() {
+                return Some(Some(ty.clone()));
+            }
+            if ty.is_true() {
+                return Some(Some(PhpType::literal_int("1")));
+            }
+            if ty.is_false() || ty.is_null() {
+                return Some(None);
+            }
+            let literal = ty.as_literal()?;
+            if let Some(value) = literal.parse_f64() {
+                let whole = value.fract() == 0.0 && value.abs() < i64::MAX as f64;
+                return Some(whole.then(|| PhpType::literal_int((value as i64).to_string())));
+            }
+            let content = literal.string_content()?;
+            if flags & (FILTER_FLAG_ALLOW_OCTAL | FILTER_FLAG_ALLOW_HEX) != 0 {
+                return None;
+            }
+            // The filter trims the same characters `trim()` does by default.
+            let content = content.trim_matches([' ', '\t', '\n', '\r', '\x0b', '\0']);
+            let digits = content.strip_prefix(['+', '-']).unwrap_or(content);
+            let canonical = !digits.is_empty()
+                && digits.bytes().all(|b| b.is_ascii_digit())
+                && (digits == "0" || !digits.starts_with('0'));
+            return Some(
+                canonical
+                    .then(|| content.parse::<i64>().ok())
+                    .flatten()
+                    .map(|value| PhpType::literal_int(value.to_string())),
+            );
+        }
+        FILTER_DEFAULT if flags & FILTER_DEFAULT_REWRITE_FLAGS == 0 && ty.is_string_subtype() => {
+            return Some(Some(ty.clone()));
+        }
+        _ => {}
+    }
+    None
 }
 
 /// What a filter produces for one scalar: the filtered value, or the

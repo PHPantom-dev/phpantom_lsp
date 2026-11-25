@@ -1515,6 +1515,12 @@ pub(super) fn normalize_array_key_type(ty: &PhpType) -> Option<PhpType> {
     normalize_key_type(ty, false)
 }
 
+/// [`normalize_array_key_type`], keeping an integer or string literal as
+/// the literal key it names.
+pub(super) fn normalize_array_key_type_keeping_literals(ty: &PhpType) -> Option<PhpType> {
+    normalize_key_type(ty, true)
+}
+
 /// [`normalize_array_key_type`], but with `keep_literals` an integer or
 /// string literal stays the literal key it names, a decimal-integer string
 /// becoming the integer PHP stores it as.
@@ -1558,11 +1564,27 @@ fn normalize_key_type(ty: &PhpType, keep_literals: bool) -> Option<PhpType> {
                     return false;
                 }
                 // PHP converts the nullable branch to the empty string key.
-                push_unique(normalized, PhpType::string());
-                true
+                collect(&PhpType::null(), keep_literals, normalized)
             }
             _ if ty.is_null() => {
-                push_unique(normalized, PhpType::string());
+                push_unique(
+                    normalized,
+                    if keep_literals {
+                        PhpType::literal_string_value("")
+                    } else {
+                        PhpType::string()
+                    },
+                );
+                true
+            }
+            // `true` and `false` are stored as `1` and `0`.
+            _ if keep_literals && (ty.is_bool() || ty.is_true() || ty.is_false()) => {
+                if !ty.is_true() {
+                    push_unique(normalized, PhpType::literal_int("0"));
+                }
+                if !ty.is_false() {
+                    push_unique(normalized, PhpType::literal_int("1"));
+                }
                 true
             }
             TypeKind::Literal(value) if matches!(&**value, LiteralValue::String(_)) => {

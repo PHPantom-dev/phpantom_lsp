@@ -435,13 +435,22 @@ fn named_function_call<'b>(
         let call_site = call_site_name.and_then(|name| {
             let walker_types = walker_arg_types(argument_list, ctx);
             let arg_ty_resolver = |t: &str| walker_types(t).or_else(|| arg_ty_resolver(t));
+            // The file's own classes first: an anonymous class is only
+            // found there.
+            let class_loader = |fqn: crate::class_lookup::Fqn<'_>| {
+                crate::class_lookup::find_or_load_resolved(
+                    fqn.as_str(),
+                    ctx.file.all_classes,
+                    ctx.file.class_loader,
+                )
+            };
             crate::type_engine::type_ops::call_site_returns::call_site_return_type(
                 name,
                 &func_info.parameters,
                 &text_args,
                 func_info.return_type.as_ref(),
                 Some(&arg_ty_resolver),
-                Some(ctx.file.class_loader),
+                Some(&class_loader),
             )
         });
         let resolved_type = call_site.or_else(|| func_info.conditional_return.as_ref().and_then(|cond| {

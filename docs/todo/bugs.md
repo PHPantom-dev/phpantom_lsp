@@ -33,21 +33,6 @@ No outstanding items.
 
 ## Standard-library return types
 
-### B774. `filter_var()` does not read a known input value
-
-**Impact: Low · Complexity: Low**
-
-```php
-filter_var(12, FILTER_VALIDATE_INT);        // int|false, should be 12
-filter_var(3.27, FILTER_VALIDATE_FLOAT);    // float|false, should be 3.27
-filter_var(rand(), FILTER_VALIDATE_INT);    // int|false, should be int<0, max>
-```
-
-The result is typed from the filter and flags alone. An input whose type the
-filter accepts unchanged could pass through as itself, without the failure
-branch. `// SKIP` lines in `tests/phpstan_nsrt/filterVar.php`.
-
-**Upstream cases** (PHPStan `nsrt/`): `filter-var.php` (87), `filter-var-array.php` (48), `filter-var-returns-non-empty-string.php` (18), `filter-input-array.php` (13), `filter-var-php85.php` (2), `discussion-9134.php`.
 ### B775. A variable assigned on only some paths is not known to be maybe-undefined
 
 **Impact: Low · Complexity: Medium**
@@ -108,20 +93,20 @@ they stand for, and the result can be a value PHP never produces.
 **Fix:** fold over the literal's decoded value and print the result in a
 spelling that round-trips. `// SKIP` line in `tests/phpstan_nsrt/str-casing.php`.
 
-### B795. `array_column()` on a constant array returns `array`
+### B795. `array_column()` does not read object rows
 
-**Impact: Low · Complexity: Low**
+**Impact: Low · Complexity: Low-Medium**
 
 ```php
-$plop = [12 => ['name' => 'ROLE_USER'], 28 => ['name' => 'ROLE_ADMIN']];
-array_column($plop, 'name', null);   // array, should be array{'ROLE_USER', 'ROLE_ADMIN'}
+/** @param list<Foo> $objects */
+array_column($objects, 'id');   // array, should be list<int>
 ```
 
-**Fix:** when the input is a shape whose rows are shapes, build the result
-from the named column of each row (and the index column's values as keys,
-when given). `// SKIP` line in `tests/phpstan_nsrt/bug-12954.php`.
-
-**Upstream cases** (PHPStan `nsrt/`, 117 assertions): `array-column-php82.php` (111), `bug-8917.php` (2), `array-column-php8.php` (2), `bug-9204.php`, `bug-6497.php`.
+Rows that are arrays are read, but a row that is an object returns the
+stub's `array`. PHP reads the named public property of each object (and
+`__get()` behind `__isset()`), and an index column that holds arrays is not
+cast to a key either. `// SKIP` lines in
+`tests/phpstan_nsrt/array-column-php82.php`.
 
 ### B819. Built-ins whose result their arguments decide return the declared type
 
@@ -150,6 +135,7 @@ It also shows as:
 - `ReflectionEnum` methods are not specialized by the reflected enum
 - `DatePeriod`'s constructor arguments do not decide its end-date and recurrence types
 - `strtotime()` of a literal string is not folded
+- `rand()` and `mt_rand()` with no arguments are `int`, not `int<0, max>` (`// SKIP` line in `tests/phpstan_nsrt/filterVar.php`)
 - `DateTimeInterface::format()` with a literal format is not typed by the format
 - `sscanf()` with a literal format and no output arguments is not typed as a shape
 
@@ -296,22 +282,19 @@ to read the argument with.
 
 **Cases** (PHPStan `nsrt/`, 7 assertions): `dom-document-create-element.php` (7), `// SKIP` lines.
 
-### B907. Type-name and URL builtins miss a few argument forms
+### B907. `get_debug_type()` of an object built with `new` returns `string`
 
 **Impact: Low · Complexity: Low**
 
 ```php
-get_debug_type(new \stdClass());   // string, should be 'stdClass'
-get_debug_type(new class {});      // string, should be 'class@anonymous'
-/** @param lowercase-string $s */
-parse_url($s, PHP_URL_HOST);       // string|false|null, should be lowercase-string|false|null
+$o = new \stdClass();
+get_debug_type($o);   // string, should be 'stdClass'
 ```
 
-`get_debug_type()` only names an object whose class is final, since an
-object built with `new` is not known to be exactly that class, and it does
-not name anonymous classes. `parse_url()` does not carry a
-`lowercase-string` argument through to its components. `// SKIP` lines in
-`tests/phpstan_nsrt/get-debug-type.php` and `lowercase-string-parse-url.php`.
+`get_debug_type()` only names an object whose class is final (or anonymous),
+since a variable typed with a class may hold a subclass instance. An object
+built with `new` is exactly that class, but its type does not say so.
+`// SKIP` line in `tests/phpstan_nsrt/get-debug-type.php`.
 
 ### B908. Joining branches puts a key one branch removed at the end of the shape
 
@@ -386,20 +369,6 @@ It also shows as:
 - An inline `array_find()` callback's key parameter is `string`, not the array's literal keys (`// SKIP` line in `tests/phpstan_nsrt/array-find.php`)
 
 **Cases** (PHPStan `nsrt/`, 31 assertions): `bug-11730.php` (15), `bug-3132.php` (4), `array-filter-constant.php` (3), `array-filter-arrow-functions.php` (3), `array-functions.php` (2), `bug-7993.php`, `bug-11570.php`, `bug-6006.php`, `bug-7909.php`.
-
-### B835. `curl_getinfo()` with an option returns `mixed`
-
-**Impact: Low · Complexity: Low**
-
-```php
-$handle = curl_init();
-curl_getinfo($handle, CURLINFO_HTTP_CODE);   // mixed, should be int
-curl_getinfo($handle, CURLINFO_EFFECTIVE_URL); // mixed, should be string
-```
-
-The return type depends on the `CURLINFO_*` constant passed, and PHPStan keeps a table of them per PHP version.
-
-**Cases** (PHPStan `nsrt/`, 71 assertions): `curl_getinfo.php` (46), `curl_getinfo_7.3.php` (18), `curl_getinfo_8.2.php` (4), `curl_getinfo_8.3.php` (2), `curl_getinfo_8.4.php`.
 
 ### B836. `preg_split()` ignores its flags and literal arguments
 

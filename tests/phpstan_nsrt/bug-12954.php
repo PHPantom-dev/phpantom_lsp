@@ -34,5 +34,5 @@ function doSomething(array $array): void
 doSomething($result);
 doSomething($list);
 
-assertType('array{\'ROLE_USER\', \'ROLE_ADMIN\', \'ROLE_SUPER_ADMIN\'}', $result); // SKIP: `array_column()` on a constant array returns `array`
+assertType('array{\'ROLE_USER\', \'ROLE_ADMIN\', \'ROLE_SUPER_ADMIN\'}', $result);
 assertType('array{\'ROLE_USER\', \'ROLE_ADMIN\', \'ROLE_SUPER_ADMIN\'}', $list);

@@ -318,12 +318,12 @@ function () {
 	assertType('mixed', filter_var($mixed, $mixed));
 	assertType('string', filter_var($mixed, FILTER_SANITIZE_URL, ["options" => ["default" => "foo"]]));
 	assertType('string|false', filter_var($mixed));
-	assertType('12', filter_var(12, FILTER_VALIDATE_INT)); // SKIP: filter_var() does not read a known input value
-	assertType('false', filter_var(false, FILTER_VALIDATE_BOOLEAN)); // SKIP: filter_var() does not read a known input value
-	assertType('array<false>', filter_var(false, FILTER_VALIDATE_BOOLEAN, FILTER_FORCE_ARRAY)); // SKIP: filter_var() does not read a known input value
-	assertType('array<false>', filter_var(false, FILTER_VALIDATE_BOOLEAN, FILTER_FORCE_ARRAY | FILTER_NULL_ON_FAILURE)); // SKIP: filter_var() does not read a known input value
-	assertType('3.27', filter_var(3.27, FILTER_VALIDATE_FLOAT)); // SKIP: filter_var() does not read a known input value
-	assertType('3.27', filter_var(3.27, FILTER_VALIDATE_FLOAT, FILTER_NULL_ON_FAILURE)); // SKIP: filter_var() does not read a known input value
-	assertType('int<0, max>', filter_var(rand(), FILTER_VALIDATE_INT)); // SKIP: filter_var() does not read a known input value
-	assertType('12.0', filter_var(12, FILTER_VALIDATE_FLOAT)); // SKIP: filter_var() does not read a known input value
+	assertType('12', filter_var(12, FILTER_VALIDATE_INT));
+	assertType('false', filter_var(false, FILTER_VALIDATE_BOOLEAN));
+	assertType('array<false>', filter_var(false, FILTER_VALIDATE_BOOLEAN, FILTER_FORCE_ARRAY));
+	assertType('array<false>', filter_var(false, FILTER_VALIDATE_BOOLEAN, FILTER_FORCE_ARRAY | FILTER_NULL_ON_FAILURE));
+	assertType('3.27', filter_var(3.27, FILTER_VALIDATE_FLOAT));
+	assertType('3.27', filter_var(3.27, FILTER_VALIDATE_FLOAT, FILTER_NULL_ON_FAILURE));
+	assertType('int<0, max>', filter_var(rand(), FILTER_VALIDATE_INT)); // SKIP: rand() with no arguments is typed `int`, not `int<0, max>`
+	assertType('12.0', filter_var(12, FILTER_VALIDATE_FLOAT));
 };
