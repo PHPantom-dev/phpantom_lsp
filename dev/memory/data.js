@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795627490233,
+  "lastUpdate": 1795629621870,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -16239,6 +16239,65 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_yii_action",
             "value": 106,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "6e9689570e9f4d77a758efcb597d050cced472bc",
+          "message": "Reading a `@property-write` property is `never`",
+          "timestamp": "2026-11-25T18:53:28+01:00",
+          "tree_id": "de17043f17e0308c7ddbf3324c4cb1481540ec4c",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/6e9689570e9f4d77a758efcb597d050cced472bc"
+        },
+        "date": 1795629611522,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_drupal_module",
+            "value": 271.9,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_hello_world",
+            "value": 44.4,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 80.3,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_symfony_controller",
+            "value": 80.9,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_tempest_view",
+            "value": 77.9,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_wordpress_plugin",
+            "value": 79,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_yii_action",
+            "value": 103.4,
             "unit": "MiB"
           }
         ]
