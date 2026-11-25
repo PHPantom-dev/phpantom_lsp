@@ -2369,17 +2369,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b909-an-inline-var-naming-a-local-phpstan-type-alias-keeps-the-alias-name" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B909. An inline <code>@var</code> naming a local <code>@phpstan-type</code> alias keeps the alias name
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -4365,17 +4354,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b909-an-inline-var-naming-a-local-phpstan-type-alias-keeps-the-alias-name" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B909. An inline <code>@var</code> naming a local <code>@phpstan-type</code> alias keeps the alias name
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -6036,22 +6014,6 @@ side. Wrapping every expression in <code>tests/assert_type_runner.rs</code> in
 parentheses reproduces the cases (<code>array-pop.php</code>, <code>array-shift.php</code>,
 <code>bug-10122.php</code>, <code>bug-4499.php</code>, the <code>functionPhpDocs*</code>/<code>methodPhpDocs*</code>
 <code>void</code> assertions, and the WordPress <code>output-constants.php</code>).</p>
-<h3 id="b909-an-inline-var-naming-a-local-phpstan-type-alias-keeps-the-alias-name">B909. An inline <code>@var</code> naming a local <code>@phpstan-type</code> alias keeps the alias name<a class="headerlink" href="#b909-an-inline-var-naming-a-local-phpstan-type-alias-keeps-the-alias-name" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-120-1" name="__codelineno-120-1" href="#__codelineno-120-1"></a><span class="x">/** @phpstan-type Ids list&lt;int&gt; */</span>
-<a id="__codelineno-120-2" name="__codelineno-120-2" href="#__codelineno-120-2"></a><span class="x">class Foo {</span>
-<a id="__codelineno-120-3" name="__codelineno-120-3" href="#__codelineno-120-3"></a><span class="x">    public function f() {</span>
-<a id="__codelineno-120-4" name="__codelineno-120-4" href="#__codelineno-120-4"></a><span class="x">        /** @var Ids $x */</span>
-<a id="__codelineno-120-5" name="__codelineno-120-5" href="#__codelineno-120-5"></a><span class="x">        $x = [1];</span>
-<a id="__codelineno-120-6" name="__codelineno-120-6" href="#__codelineno-120-6"></a><span class="x">        $x;   // Ids, should be list&lt;int&gt;</span>
-<a id="__codelineno-120-7" name="__codelineno-120-7" href="#__codelineno-120-7"></a><span class="x">    }</span>
-<a id="__codelineno-120-8" name="__codelineno-120-8" href="#__codelineno-120-8"></a><span class="x">}</span>
-</code></pre></div>
-<p>An alias named in a member signature is expanded when the file is parsed, and
-a <code>@param</code> type is expanded when the parameter is seeded, but an inline <code>@var</code>
-annotation keeps the bare alias name as the variable's type. Hover shows the
-alias name and type checks see a class named <code>Ids</code>. Member completion still
-works, since class resolution expands the alias on its own.</p>
 
 
 
