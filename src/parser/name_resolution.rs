@@ -15,7 +15,7 @@ use crate::names::{lookup_import, resolve_to_fqn};
 use crate::php_type::PhpType;
 use crate::type_engine::type_ops::docblock_narrowing;
 use crate::types::{
-    ClassInfo, DocTypeSlot, DocblockMembers, FunctionInfo, MethodInfo, NamespaceSpan,
+    ClassInfo, DocProperty, DocTypeSlot, DocblockMembers, FunctionInfo, MethodInfo, NamespaceSpan,
     ParameterInfo, SeeRef, TypeAliasDef, UnverifiedDocType,
 };
 
@@ -939,13 +939,13 @@ impl Backend {
     ) -> Option<Arc<DocblockMembers>> {
         let mut changed = false;
 
-        let properties: Vec<(Atom, Option<PhpType>)> = doc
+        let properties: Vec<DocProperty> = doc
             .properties
             .iter()
-            .map(|(name, ty)| {
-                let mut ty = ty.clone();
-                changed |= qualify_in_place(&mut ty, resolver);
-                (*name, ty)
+            .map(|prop| {
+                let mut prop = prop.clone();
+                changed |= qualify_in_place(&mut prop.type_hint, resolver);
+                prop
             })
             .collect();
 

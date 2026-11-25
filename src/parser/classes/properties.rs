@@ -177,6 +177,7 @@ fn extract_property_info(property: &Property, content: Option<&str>) -> Vec<Prop
             deprecated_replacement: None,
             see_refs: Vec::new(),
             is_virtual: false,
+            is_write_only: false,
             source: default_value.map(|value| PropertySource::DeclaredDefault { value }),
         });
     };

@@ -77,6 +77,9 @@ pub struct PropertyInfo {
     /// providers; set to `false` by the parser for real declared
     /// properties.
     pub is_virtual: bool,
+    /// Declared only by `@property-write`: the property can be assigned
+    /// through `__set()` but not read, so a read of it is `never`.
+    pub is_write_only: bool,
     /// Structured source for synthesized/model properties.
     pub source: Option<PropertySource>,
 }
@@ -211,6 +214,7 @@ impl PropertyInfo {
             && self.deprecation_message == other.deprecation_message
             && self.deprecated_replacement == other.deprecated_replacement
             && self.is_virtual == other.is_virtual
+            && self.is_write_only == other.is_write_only
             && self.source == other.source
     }
 
@@ -274,6 +278,7 @@ impl PropertyInfo {
             deprecated_replacement: None,
             see_refs: Vec::new(),
             is_virtual: true,
+            is_write_only: false,
             source: None,
         }
     }

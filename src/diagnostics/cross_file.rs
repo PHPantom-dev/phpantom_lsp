@@ -335,8 +335,8 @@ fn push_all_member_keys(keys: &mut HashSet<ReferenceIndexKey>, class: &ClassInfo
         for method in &doc.methods {
             push_member_keys(keys, &method.name);
         }
-        for (name, _) in &doc.properties {
-            push_member_keys(keys, name);
+        for prop in &doc.properties {
+            push_member_keys(keys, &prop.name);
         }
     }
 }

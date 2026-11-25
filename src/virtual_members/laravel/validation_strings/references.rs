@@ -824,7 +824,7 @@ fn is_model_column(model: &ClassInfo, name: &str) -> bool {
         || model
             .doc_properties()
             .iter()
-            .any(|(column, _)| column.as_str() == name)
+            .any(|column| column.name == name)
         || model.laravel().is_some_and(|metadata| {
             metadata
                 .casts_definitions

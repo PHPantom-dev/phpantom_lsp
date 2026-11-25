@@ -544,13 +544,11 @@ pub(super) fn collect_mixin_members(
                 collector.methods.push(Arc::new(m));
             }
 
-            for (name, type_hint) in &doc.properties {
-                if !collector.dedup.properties.insert(*name) {
+            for prop in &doc.properties {
+                if !collector.dedup.properties.insert(prop.name) {
                     continue;
                 }
-                collector
-                    .properties
-                    .push(doc_property(*name, type_hint.as_ref(), &subs));
+                collector.properties.push(doc_property(prop, &subs));
             }
         }
 

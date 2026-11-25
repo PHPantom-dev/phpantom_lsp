@@ -268,6 +268,7 @@ fn type_hint_to_classes_typed_depth(
                             is_readonly: false,
                             doc_readonly: DocReadonly::No,
                             is_virtual: true,
+                            is_write_only: false,
                             source: None,
                         })
                     })

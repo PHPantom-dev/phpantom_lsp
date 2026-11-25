@@ -423,8 +423,8 @@ pub(crate) fn attribute_names(
             push(property.name, property.type_hint.as_ref());
         }
         if let Some(members) = &owner.doc_members {
-            for (name, ty) in &members.properties {
-                push(*name, ty.as_ref());
+            for prop in &members.properties {
+                push(prop.name, prop.type_hint.as_ref());
             }
         }
     }

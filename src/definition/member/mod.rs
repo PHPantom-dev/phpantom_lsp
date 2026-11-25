@@ -824,7 +824,7 @@ impl Backend {
         let has_property = class
             .doc_properties()
             .iter()
-            .any(|(name, _)| name == member_name);
+            .any(|prop| prop.name == member_name);
 
         (has_method, has_property)
     }

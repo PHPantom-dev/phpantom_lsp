@@ -15,7 +15,7 @@ use super::parser::{DocblockInfo, TagInfo, parse_docblock_for_tags, vendor_rank}
 use super::tags::sanitise_and_parse_docblock_type;
 use super::type_strings::split_type_token;
 use crate::php_type::PhpType;
-use crate::types::{MethodExtras, MethodInfo, ParameterInfo, Visibility};
+use crate::types::{DocProperty, MethodExtras, MethodInfo, ParameterInfo, Visibility};
 
 // ─── @property Tags ─────────────────────────────────────────────────────────
 
@@ -37,13 +37,16 @@ pub fn extract_property_tags(docblock: &str) -> Vec<(Atom, Option<PhpType>)> {
         return Vec::new();
     };
     extract_property_tags_from_info(&info)
+        .into_iter()
+        .map(|p| (p.name, p.type_hint))
+        .collect()
 }
 
 /// [`extract_property_tags`] against an already-parsed docblock.
 ///
 /// Class-level docblocks are parsed once during extraction, so the class
 /// parser reuses that [`DocblockInfo`] instead of re-parsing the text.
-pub fn extract_property_tags_from_info(info: &DocblockInfo) -> Vec<(Atom, Option<PhpType>)> {
+pub fn extract_property_tags_from_info(info: &DocblockInfo) -> Vec<DocProperty> {
     const PROPERTY_KINDS: &[TagKind] = &[
         TagKind::Property,
         TagKind::PropertyRead,
@@ -85,7 +88,11 @@ pub fn extract_property_tags_from_info(info: &DocblockInfo) -> Vec<(Atom, Option
         let parsed = tag
             .type_text()
             .and_then(|type_text| sanitise_and_parse_docblock_type(&type_text));
-        results.push((name, parsed));
+        results.push(DocProperty {
+            name,
+            type_hint: parsed,
+            write_only: tag.kind == TagKind::PropertyWrite,
+        });
     }
 
     results

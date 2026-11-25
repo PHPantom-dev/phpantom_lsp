@@ -81,6 +81,9 @@ fn with_answering_method<T>(
 /// Uses full resolution (base inheritance + virtual member providers)
 /// so that virtual properties from `@property` tags, `@mixin` classes,
 /// and framework providers are included.
+///
+/// This is the type a *read* yields: a `@property-write` property cannot
+/// be read, so it is `never` whatever type the tag declares.
 pub(crate) fn resolve_property_type_hint(
     class: &ClassInfo,
     prop_name: &str,
@@ -88,22 +91,24 @@ pub(crate) fn resolve_property_type_hint(
 ) -> Option<PhpType> {
     // Try the class directly first — it may already have the property
     // with generic substitutions applied.
-    if let Some(p) = class.properties.iter().find(|p| p.name == prop_name)
-        && p.type_hint.is_some()
-    {
-        let hint = p.type_hint.clone().unwrap();
-        return Some(replace_self_in_property_type(hint, class));
+    if let Some(p) = class.properties.iter().find(|p| p.name == prop_name) {
+        if p.is_write_only {
+            return Some(PhpType::never());
+        }
+        if let Some(hint) = &p.type_hint {
+            return Some(replace_self_in_property_type(hint.clone(), class));
+        }
     }
     let cache = crate::virtual_members::active_resolved_class_cache();
     let merged =
         crate::virtual_members::resolve_class_fully_maybe_cached(class, class_loader, cache);
-    if let Some(hint) = merged
-        .properties
-        .iter()
-        .find(|p| p.name == prop_name)
-        .and_then(|p| p.type_hint.clone())
-    {
-        return Some(replace_self_in_property_type(hint, class));
+    if let Some(p) = merged.properties.iter().find(|p| p.name == prop_name) {
+        if p.is_write_only {
+            return Some(PhpType::never());
+        }
+        if let Some(hint) = &p.type_hint {
+            return Some(replace_self_in_property_type(hint.clone(), class));
+        }
     }
 
     // Eloquent relation properties resolve case-insensitively: access like

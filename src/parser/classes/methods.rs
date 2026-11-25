@@ -313,6 +313,7 @@ fn push_promoted_properties<'a>(
             deprecated_replacement: None,
             see_refs: Vec::new(),
             is_virtual: false,
+            is_write_only: false,
             source: Some(PropertySource::PromotedParameter),
         });
     }

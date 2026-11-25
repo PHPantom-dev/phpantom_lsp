@@ -771,7 +771,7 @@ impl Backend {
             .filter(|c| offset < c.decl_start_offset)
             .min_by_key(|c| c.decl_start_offset)
         {
-            if class.doc_properties().iter().any(|(prop, _)| prop == name) {
+            if class.doc_properties().iter().any(|prop| prop.name == name) {
                 return TT_PROPERTY;
             }
             if class

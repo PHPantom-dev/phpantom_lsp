@@ -2490,18 +2490,3 @@ class. PHPStan reports the alias as invalid and types its uses as an error.
 Imported aliases that form a cycle already resolve to `mixed`.
 
 **Cases** (PHPStan `nsrt/`, 2 assertions): `type-aliases.php` (2).
-
-### B905. Reading a `@property-write` property gives its type
-
-**Impact: Low · Complexity: Low**
-
-```php
-/** @property-write int $baz */
-#[AllowDynamicProperties]
-class Foo { function f() { $this->baz; } }   // int, should be never
-```
-
-A write-only magic property cannot be read, so PHPStan types a read of it as
-`*NEVER*`. PHPantom reads `@property-write` like `@property`.
-
-**Cases** (PHPStan `nsrt/`, 1 assertion): `classPhpDocs-phpstanPropertyPrefix.php`.

@@ -613,7 +613,7 @@ fn enrich_from_interfaces(
 }
 
 /// Retype an inherited non-public property that the class documents
-/// with a `@property` tag of its own.
+/// with a `@property` or `@property-read` tag of its own.
 ///
 /// A tag documents a magic read, and PHP only reaches `__get()` when no
 /// *accessible* property of that name exists.  An ancestor's
@@ -630,11 +630,12 @@ fn retype_documented_properties(class: &ClassInfo, merged: &mut ClassInfo) {
     let Some(doc) = class.doc_members.as_deref() else {
         return;
     };
-    for (name, type_hint) in &doc.properties {
-        let Some(hint) = type_hint else {
+    for tag in &doc.properties {
+        let Some(hint) = &tag.type_hint else {
             continue;
         };
-        if class.properties.iter().any(|p| p.name == *name) {
+        let name = &tag.name;
+        if tag.write_only || class.properties.iter().any(|p| p.name == *name) {
             continue;
         }
         // Look the index up immutably so a class with nothing to

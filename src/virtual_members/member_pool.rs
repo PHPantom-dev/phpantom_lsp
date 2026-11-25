@@ -325,6 +325,7 @@ fn property_eq(a: &PropertyInfo, b: &PropertyInfo) -> bool {
         deprecated_replacement,
         see_refs,
         is_virtual,
+        is_write_only,
         source,
     } = a;
     *name == b.name
@@ -340,6 +341,7 @@ fn property_eq(a: &PropertyInfo, b: &PropertyInfo) -> bool {
         && *deprecation_message == b.deprecation_message
         && *deprecated_replacement == b.deprecated_replacement
         && *see_refs == b.see_refs
+        && *is_write_only == b.is_write_only
         && *source == b.source
 }
 

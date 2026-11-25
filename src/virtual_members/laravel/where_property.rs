@@ -158,9 +158,9 @@ fn collect_names<'a>(
     // are added by PHPDocProvider during full resolution, which runs
     // after this function), so read them from the tags parsed when the
     // class was extracted.
-    for (name, _type) in class.doc_properties() {
-        if !rejected.contains(name.as_str()) {
-            push(name);
+    for prop in class.doc_properties() {
+        if !rejected.contains(prop.name.as_str()) {
+            push(&prop.name);
         }
     }
 

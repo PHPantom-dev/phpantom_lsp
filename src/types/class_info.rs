@@ -204,10 +204,20 @@ pub struct DoctrineMapping {
 pub struct DocblockMembers {
     /// `@method` / `@psalm-method` signatures, in source order.
     pub methods: Vec<Arc<MethodInfo>>,
-    /// `@property`, `@property-read`, and `@property-write` entries as
-    /// `(name, declared type)`.  The name carries no `$` prefix, and the
-    /// type is `None` for an untyped `@property $name`.
-    pub properties: Vec<(Atom, Option<PhpType>)>,
+    /// `@property`, `@property-read`, and `@property-write` entries.
+    pub properties: Vec<DocProperty>,
+}
+
+/// One `@property` / `@property-read` / `@property-write` tag.
+#[derive(Debug, Clone)]
+pub struct DocProperty {
+    /// The property name, without the `$` prefix.
+    pub name: Atom,
+    /// The declared type, `None` for an untyped `@property $name`.
+    pub type_hint: Option<PhpType>,
+    /// Declared by `@property-write`: the property can be assigned but
+    /// not read.
+    pub write_only: bool,
 }
 
 impl DocblockMembers {
@@ -772,9 +782,9 @@ impl ClassInfo {
     }
 
     /// `@property` / `@property-read` / `@property-write` tags declared on
-    /// this class's own docblock, as `(name, declared type)`.
+    /// this class's own docblock.
     #[inline]
-    pub fn doc_properties(&self) -> &[(Atom, Option<PhpType>)] {
+    pub fn doc_properties(&self) -> &[DocProperty] {
         self.doc_members.as_deref().map_or(&[], |d| &d.properties)
     }
 
