@@ -2370,10 +2370,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#b904-a-recursive-or-circular-phpstan-type-alias-resolves-to-a-type" class="md-nav__link">
+  <a href="#b909-an-inline-var-naming-a-local-phpstan-type-alias-keeps-the-alias-name" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B904. A recursive or circular <code>@phpstan-type</code> alias resolves to a type
+        B909. An inline <code>@var</code> naming a local <code>@phpstan-type</code> alias keeps the alias name
       </span>
     </span>
   </a>
@@ -4366,10 +4366,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#b904-a-recursive-or-circular-phpstan-type-alias-resolves-to-a-type" class="md-nav__link">
+  <a href="#b909-an-inline-var-naming-a-local-phpstan-type-alias-keeps-the-alias-name" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B904. A recursive or circular <code>@phpstan-type</code> alias resolves to a type
+        B909. An inline <code>@var</code> naming a local <code>@phpstan-type</code> alias keeps the alias name
       </span>
     </span>
   </a>
@@ -6036,24 +6036,22 @@ side. Wrapping every expression in <code>tests/assert_type_runner.rs</code> in
 parentheses reproduces the cases (<code>array-pop.php</code>, <code>array-shift.php</code>,
 <code>bug-10122.php</code>, <code>bug-4499.php</code>, the <code>functionPhpDocs*</code>/<code>methodPhpDocs*</code>
 <code>void</code> assertions, and the WordPress <code>output-constants.php</code>).</p>
-<h3 id="b904-a-recursive-or-circular-phpstan-type-alias-resolves-to-a-type">B904. A recursive or circular <code>@phpstan-type</code> alias resolves to a type<a class="headerlink" href="#b904-a-recursive-or-circular-phpstan-type-alias-resolves-to-a-type" title="Permanent link">&para;</a></h3>
+<h3 id="b909-an-inline-var-naming-a-local-phpstan-type-alias-keeps-the-alias-name">B909. An inline <code>@var</code> naming a local <code>@phpstan-type</code> alias keeps the alias name<a class="headerlink" href="#b909-an-inline-var-naming-a-local-phpstan-type-alias-keeps-the-alias-name" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-120-1" name="__codelineno-120-1" href="#__codelineno-120-1"></a><span class="x">/**</span>
-<a id="__codelineno-120-2" name="__codelineno-120-2" href="#__codelineno-120-2"></a><span class="x"> * @phpstan-type RecursiveTypeAlias RecursiveTypeAlias[]</span>
-<a id="__codelineno-120-3" name="__codelineno-120-3" href="#__codelineno-120-3"></a><span class="x"> * @phpstan-type CircularTypeAlias1 CircularTypeAlias2</span>
-<a id="__codelineno-120-4" name="__codelineno-120-4" href="#__codelineno-120-4"></a><span class="x"> * @phpstan-type CircularTypeAlias2 CircularTypeAlias1</span>
-<a id="__codelineno-120-5" name="__codelineno-120-5" href="#__codelineno-120-5"></a><span class="x"> * @property RecursiveTypeAlias $recursive</span>
-<a id="__codelineno-120-6" name="__codelineno-120-6" href="#__codelineno-120-6"></a><span class="x"> * @property CircularTypeAlias1 $circular</span>
-<a id="__codelineno-120-7" name="__codelineno-120-7" href="#__codelineno-120-7"></a><span class="x"> */</span>
-<a id="__codelineno-120-8" name="__codelineno-120-8" href="#__codelineno-120-8"></a><span class="x">class Foo {}</span>
-<a id="__codelineno-120-9" name="__codelineno-120-9" href="#__codelineno-120-9"></a><span class="x">(new Foo)-&gt;recursive;   // array&lt;RecursiveTypeAlias&gt;, should be an error type</span>
-<a id="__codelineno-120-10" name="__codelineno-120-10" href="#__codelineno-120-10"></a><span class="x">(new Foo)-&gt;circular;    // CircularTypeAlias1, should be an error type</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-120-1" name="__codelineno-120-1" href="#__codelineno-120-1"></a><span class="x">/** @phpstan-type Ids list&lt;int&gt; */</span>
+<a id="__codelineno-120-2" name="__codelineno-120-2" href="#__codelineno-120-2"></a><span class="x">class Foo {</span>
+<a id="__codelineno-120-3" name="__codelineno-120-3" href="#__codelineno-120-3"></a><span class="x">    public function f() {</span>
+<a id="__codelineno-120-4" name="__codelineno-120-4" href="#__codelineno-120-4"></a><span class="x">        /** @var Ids $x */</span>
+<a id="__codelineno-120-5" name="__codelineno-120-5" href="#__codelineno-120-5"></a><span class="x">        $x = [1];</span>
+<a id="__codelineno-120-6" name="__codelineno-120-6" href="#__codelineno-120-6"></a><span class="x">        $x;   // Ids, should be list&lt;int&gt;</span>
+<a id="__codelineno-120-7" name="__codelineno-120-7" href="#__codelineno-120-7"></a><span class="x">    }</span>
+<a id="__codelineno-120-8" name="__codelineno-120-8" href="#__codelineno-120-8"></a><span class="x">}</span>
 </code></pre></div>
-<p>A local alias that names itself, directly or through another local alias, is
-left as the unexpanded name where the cycle recurs, which then reads as a
-class. PHPStan reports the alias as invalid and types its uses as an error.
-Imported aliases that form a cycle already resolve to <code>mixed</code>.</p>
-<p><strong>Cases</strong> (PHPStan <code>nsrt/</code>, 2 assertions): <code>type-aliases.php</code> (2).</p>
+<p>An alias named in a member signature is expanded when the file is parsed, and
+a <code>@param</code> type is expanded when the parameter is seeded, but an inline <code>@var</code>
+annotation keeps the bare alias name as the variable's type. Hover shows the
+alias name and type checks see a class named <code>Ids</code>. Member completion still
+works, since class resolution expands the alias on its own.</p>
 
 
 
