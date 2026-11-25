@@ -78,10 +78,13 @@ function probe(bool $asNumber): void {
     assert_assigned_types(
         content,
         &[
-            ("$number", "int|float"),
-            ("$pair", "array{int, int}|false"),
-            ("$pairExplicit", "array{int, int}|false"),
-            ("$unknown", "int|float|array{int, int}|false"),
+            ("$number", "int<1, max>|float"),
+            ("$pair", "array{int<1, max>, int<0, 999999999>}"),
+            ("$pairExplicit", "array{int<1, max>, int<0, 999999999>}"),
+            (
+                "$unknown",
+                "int<1, max>|float|array{int<1, max>, int<0, 999999999>}",
+            ),
         ],
     );
 }

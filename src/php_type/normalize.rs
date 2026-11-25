@@ -425,6 +425,31 @@ fn named_value_domain(name: &str) -> Option<ValueDomain> {
     }
 }
 
+/// Drop each member a benevolent union beside it already holds.
+///
+/// `Exception::getCode()` is `(int|string)` and `LogicException::getCode()`
+/// is `int`, so a receiver that may be either answers with the benevolent
+/// union alone rather than spelling the `int` twice.
+pub(crate) fn absorb_into_benevolent(types: &mut Vec<PhpType>) {
+    let Some(at) = types
+        .iter()
+        .position(|t| matches!(t.raw_kind(), TypeKind::Benevolent(_)))
+    else {
+        return;
+    };
+    let TypeKind::Benevolent(inner) = types[at].raw_kind() else {
+        return;
+    };
+    let inner = inner.clone();
+    let held = inner.union_members();
+    let mut index = 0;
+    types.retain(|t| {
+        let keep = index == at || !held.iter().any(|h| h.equivalent(t));
+        index += 1;
+        keep
+    });
+}
+
 /// Drop each `Foo::class` that sits beside the `class-string<Foo>` it is
 /// one of, and each `Suit::Hearts` that sits beside its enum `Suit`, since
 /// the wider type already says everything the exact one does.

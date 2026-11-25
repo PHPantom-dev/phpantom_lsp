@@ -32,7 +32,20 @@ pub fn apply_class_stub_patches(class: &mut ClassInfo) {
         "Number" if class.fqn() == "BcMath\\Number" => patch_numeric_to_string(class),
         "PDOStatement" => patch_fetch_object(class, "fetchObject", "T|false"),
         "mysqli_result" => patch_fetch_object(class, "fetch_object", "T|false|null"),
+        "Throwable" | "Exception" => patch_exception_get_code(class),
+        "Error" => patch_method_return_type(class, "getCode", PhpType::int()),
         _ => {}
+    }
+    if matches!(
+        class.name.as_str(),
+        "ReflectionClass"
+            | "ReflectionFunctionAbstract"
+            | "ReflectionParameter"
+            | "ReflectionProperty"
+            | "ReflectionClassConstant"
+            | "ReflectionConstant"
+    ) {
+        patch_get_attributes(class);
     }
     mark_benevolent_methods(class);
     mark_impure_methods(class);
@@ -635,6 +648,54 @@ fn patch_fetch_object(class: &mut ClassInfo, method_name: &str, return_type: &st
     }) {
         patch_method_return_type(class, method_name, PhpType::parse(return_type));
     }
+}
+
+/// Type `getCode()` by the exception it is called on.
+///
+/// The stubs say `mixed|int`. Every built-in exception has an `int` code
+/// except `PDOException`, whose code is the SQLSTATE string, so the result
+/// is `int|string` only when the receiver may be one: `PDOException` itself
+/// or the classes it extends (`Throwable`, `Exception`, `RuntimeException`).
+/// Mirrors PHPStan's `ThrowableReturnTypeExtension`.
+fn patch_exception_get_code(class: &mut ClassInfo) {
+    // Benevolent, as PHPStan types it: passing a caught exception's code on
+    // to another exception's `int $code` is the universal idiom, and the
+    // `string` only exists for a database error.
+    let int_or_string =
+        PhpType::benevolent(PhpType::union(vec![PhpType::int(), PhpType::string()]));
+    with_method_mut(class, "getCode", |method| {
+        method.return_type = Some(int_or_string.clone());
+        // A receiver that may or may not be a `PDOException` gets both
+        // branches, still benevolent.
+        method.extras_mut().conditional_return = Some(PhpType::conditional_answering_undecided(
+            "$this",
+            false,
+            PhpType::named(atom("PDOException")),
+            int_or_string,
+            PhpType::int(),
+            crate::php_type::UndecidedReading::BenevolentBothBranches,
+        ));
+    });
+}
+
+/// Make `getAttributes()` return a list, and an unfiltered call a list of
+/// `ReflectionAttribute<object>`.
+///
+/// The stubs declare `@template T` with `@return ReflectionAttribute<T>[]`,
+/// so the no-filter call leaves `T` unbound (`mixed`) and the result keyed
+/// by anything. PHP builds the array with `add_next_index_zval`, a list,
+/// and every attribute instantiates to an object.
+fn patch_get_attributes(class: &mut ClassInfo) {
+    with_method_mut(class, "getAttributes", |method| {
+        if !method.template_params().iter().any(|t| t.as_str() == "T") {
+            return;
+        }
+        method.return_type = Some(PhpType::parse("list<ReflectionAttribute<T>>"));
+        method
+            .extras_mut()
+            .template_param_bounds
+            .insert(atom("T"), PhpType::named(atom("object")));
+    });
 }
 
 /// Give a method a conditional return type, provided the stub declares the

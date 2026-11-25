@@ -288,6 +288,7 @@ fn named_function_call<'b>(
                 &text_args,
                 func_info.return_type.as_ref(),
                 Some(&arg_ty_resolver),
+                Some(ctx.file.class_loader),
             )
         });
         let resolved_type = call_site.or_else(|| func_info.conditional_return.as_ref().and_then(|cond| {

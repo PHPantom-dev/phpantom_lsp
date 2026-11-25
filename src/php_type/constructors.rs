@@ -265,6 +265,7 @@ impl PhpType {
         normalize::absorb_int_ranges(&mut members);
         normalize::absorb_subsumed_shapes(&mut members);
         normalize::absorb_exact_values(&mut members);
+        normalize::absorb_into_benevolent(&mut members);
         if members.len() == 1 {
             return members.into_iter().next().unwrap();
         }

@@ -9,14 +9,14 @@ class Foo
 
 	public function doFoo(\Throwable $t): void
 	{
-		assertType('(int|string)', (new \Exception())->getCode());  // SKIP
-		assertType('(int|string)', $t->getCode());  // SKIP
-		assertType('(int|string)', (new \RuntimeException())->getCode());  // SKIP
-		assertType('int', (new \LogicException())->getCode());  // SKIP
-		assertType('(int|string)', (new \PDOException())->getCode());  // SKIP
-		assertType('int', (new MyException())->getCode());  // SKIP
-		assertType('(int|string)', (new SubPDOException())->getCode());  // SKIP
-		assertType('1|2|3', (new ExceptionWithMethodTag())->getCode());  // SKIP
+		assertType('(int|string)', (new \Exception())->getCode());
+		assertType('(int|string)', $t->getCode());
+		assertType('(int|string)', (new \RuntimeException())->getCode());
+		assertType('int', (new \LogicException())->getCode());
+		assertType('(int|string)', (new \PDOException())->getCode());
+		assertType('int', (new MyException())->getCode());
+		assertType('(int|string)', (new SubPDOException())->getCode());
+		assertType('1|2|3', (new ExceptionWithMethodTag())->getCode()); // SKIP: an @method tag does not override an inherited native method
 	}
 
 	/**
@@ -25,7 +25,7 @@ class Foo
 	 */
 	public function doBar($exception): void
 	{
-		assertType('(int|string)', $exception->getCode());  // SKIP
+		assertType('(int|string)', $exception->getCode());
 	}
 
 }

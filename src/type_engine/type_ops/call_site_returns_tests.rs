@@ -33,6 +33,7 @@ fn narrow(text_args: &str) -> Option<String> {
         text_args,
         Some(&string_or_false()),
         None,
+        None,
     )
     .map(|ty| ty.to_string())
 }
@@ -60,6 +61,7 @@ fn filter_var(text_args: &str) -> Option<String> {
         text_args,
         Some(&PhpType::mixed()),
         Some(&filter_resolver),
+        None,
     )
     .map(|ty| ty.to_string())
 }
@@ -81,6 +83,7 @@ fn class_implements(text_args: &str) -> Option<PhpType> {
         text_args,
         Some(&PhpType::union(vec![PhpType::array(), PhpType::false_()])),
         Some(&resolver),
+        None,
     )
 }
 
@@ -137,6 +140,7 @@ fn resolved_literal_int_argument_is_bit_tested() {
         "$value, self::FLAGS",
         Some(&string_or_false()),
         Some(&resolver),
+        None,
     );
     assert_eq!(narrowed.map(|ty| ty.to_string()).as_deref(), Some("string"));
 }
@@ -246,6 +250,7 @@ fn filter_input_adds_the_missing_variable_result() {
         &params(&["$type", "$var_name", "$filter", "$options"]),
         "INPUT_GET, 'id', FILTER_VALIDATE_INT",
         Some(&PhpType::mixed()),
+        None,
         None,
     );
     assert_eq!(ty.map(|t| t.to_string()).as_deref(), Some("int|false|null"));

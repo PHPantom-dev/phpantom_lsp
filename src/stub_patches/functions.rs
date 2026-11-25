@@ -24,7 +24,15 @@ pub fn apply_function_stub_patches(func: &mut FunctionInfo) {
         "array_values" => patch_array_key_value_generics(func, "$array", "list<TValue>"),
         "array_search" => patch_array_key_value_generics(func, "$haystack", "TKey|false"),
         "array_key_first" | "array_key_last" => {
-            patch_array_key_value_generics(func, "$array", "TKey|null")
+            patch_array_key_value_generics(func, "$array", "TKey|null");
+            // Only an empty array has no first or last key.
+            conditional_on(
+                func,
+                "$array",
+                PhpType::parse("non-empty-array"),
+                PhpType::named(atom("TKey")),
+                PhpType::parse("TKey|null"),
+            );
         }
         "key" => patch_array_key_value_generics(func, "$array", "TKey|null"),
         "pathinfo" => patch_pathinfo(func),
@@ -35,8 +43,11 @@ pub fn apply_function_stub_patches(func: &mut FunctionInfo) {
             func.return_type = Some(PhpType::parse("T|false|null"))
         }
         "hrtime" => patch_hrtime(func),
+        "parse_url" => patch_parse_url(func),
         "microtime" => patch_microtime(func),
         "getenv" => patch_getenv(func),
+        // Every JSON text is at least one character (`1`, `""`, `[]`).
+        "json_encode" => func.return_type = Some(PhpType::parse("non-empty-string|false")),
         "func_get_args" => func.return_type = Some(PhpType::list(PhpType::mixed())),
         "class_implements" => patch_class_relation(func, "interface-string"),
         "class_parents" => patch_class_relation(func, "class-string"),
@@ -764,14 +775,60 @@ fn patch_class_relation(func: &mut FunctionInfo, name_type: &str) {
 ///
 /// The stubs declare `int[]|int|float|false`, but the two shapes are decided
 /// by the argument: the number form is an `int` (a `float` on 32-bit builds)
-/// and the array form is the `[seconds, nanoseconds]` pair.
+/// and the array form is the `[seconds, nanoseconds]` pair. The `false` is a
+/// platform without a monotonic clock, which no supported platform is.
 fn patch_hrtime(func: &mut FunctionInfo) {
     conditional_on(
         func,
         "$as_number",
         PhpType::parse("true"),
-        PhpType::union(vec![PhpType::int(), PhpType::float()]),
-        PhpType::parse("array{int, int}|false"),
+        PhpType::parse("int<1, max>|float"),
+        PhpType::parse("array{int<1, max>, int<0, 999999999>}"),
+    );
+}
+
+/// Patch `parse_url()` to have a conditional return type keyed on
+/// `$component`.
+///
+/// The stubs declare the union of every form, with every key of the array
+/// form present. Without a component (`-1`, the default) PHP returns only
+/// the parts the URL has, so each key is optional; naming a component
+/// returns that part alone, or `null` when the URL lacks it. `false` is a
+/// seriously malformed URL either way. A component that is not a literal
+/// leaves the union of every form.
+fn patch_parse_url(func: &mut FunctionInfo) {
+    const PHP_URL_PORT: &str = "2";
+    let all = PhpType::parse(
+        "array{scheme?: string, host?: string, port?: int<0, 65535>, user?: string, \
+         pass?: string, path?: string, query?: string, fragment?: string}|false",
+    );
+    let port = PhpType::parse("int<0, 65535>|false|null");
+    let string_part = PhpType::parse("string|false|null");
+    let string_components = PhpType::union(
+        ["0", "1", "3", "4", "5", "6", "7"]
+            .into_iter()
+            .map(PhpType::literal_int)
+            .collect(),
+    );
+    conditional_on(
+        func,
+        "$component",
+        PhpType::literal_int("-1"),
+        all,
+        PhpType::conditional(
+            "$component",
+            false,
+            PhpType::literal_int(PHP_URL_PORT),
+            port,
+            PhpType::conditional(
+                "$component",
+                false,
+                string_components,
+                string_part,
+                // An out-of-range component is a `ValueError`.
+                PhpType::never(),
+            ),
+        ),
     );
 }
 

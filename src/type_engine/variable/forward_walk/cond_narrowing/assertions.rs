@@ -68,7 +68,8 @@ pub(super) fn constant_array_key(expr: &Expression<'_>, scope: &ScopeState) -> O
 /// Drop the shape alternatives a key-existence check rules out: the ones
 /// that cannot hold the key when it is `present`, and the ones that
 /// require it when it is not. `array_key_exists(4, $data)` on
-/// `array{A, B}|array{A, B, C, D, E}` leaves only the second.
+/// `array{A, B}|array{A, B, C, D, E}` leaves only the second. A scalar
+/// alternative goes either way, since only an array can be checked.
 ///
 /// Leaves the type alone when every alternative would go: the check then
 /// contradicts what the variable is declared to hold, which says nothing
@@ -80,6 +81,19 @@ pub(super) fn drop_shapes_contradicting_key(
     scope: &mut ScopeState,
 ) {
     let contradicts = |ty: &PhpType| {
+        // Only an array can be asked (PHP 8 throws a `TypeError` for
+        // anything else), so whichever way the check went, a scalar
+        // alternative (`parse_url()`'s `false`) was not what it was handed.
+        if ty.is_null()
+            || ty.is_bool()
+            || ty.is_true()
+            || ty.is_false()
+            || ty.is_int_subtype()
+            || ty.is_float()
+            || ty.is_string_subtype()
+        {
+            return true;
+        }
         if ty.as_unsealed_shape().is_some() {
             return false;
         }

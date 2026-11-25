@@ -26,10 +26,15 @@
 //! no failure branch for the flag to remove. What both of them throw under
 //! the flag is decided here too ([`call_site_throws`]).
 //!
+//! - `gettype()` and `get_debug_type()` are declared `string`, but each name
+//!   their argument's runtime type from a fixed set, so an argument of known
+//!   type decides which of those names comes back.
+//!
 //! WordPress functions whose arguments decide their result the same way are
 //! in [`wordpress`].
 
 use crate::atom::atom;
+use crate::class_lookup::{Fqn, ResolvedClassLoader};
 use crate::php_type::{PhpType, TypeKind};
 use crate::types::ParameterInfo;
 
@@ -130,6 +135,8 @@ enum CallSiteFunction {
     FilterVar,
     FilterInput,
     ClassRelation,
+    GetType,
+    GetDebugType,
     WordPress(wordpress::WordPressFunction),
 }
 
@@ -146,6 +153,10 @@ fn classify(func_name: &str) -> Option<CallSiteFunction> {
         .any(|f| name.eq_ignore_ascii_case(f))
     {
         Some(CallSiteFunction::ClassRelation)
+    } else if name.eq_ignore_ascii_case("gettype") {
+        Some(CallSiteFunction::GetType)
+    } else if name.eq_ignore_ascii_case("get_debug_type") {
+        Some(CallSiteFunction::GetDebugType)
     } else {
         wordpress::classify(name).map(CallSiteFunction::WordPress)
     }
@@ -184,6 +195,7 @@ pub(crate) fn call_site_return_type(
     text_args: &str,
     declared: Option<&PhpType>,
     arg_type_resolver: ArgTypeResolver<'_>,
+    class_loader: Option<&ResolvedClassLoader<'_>>,
 ) -> Option<PhpType> {
     let args = CallArgs {
         params,
@@ -206,6 +218,10 @@ pub(crate) fn call_site_return_type(
             Some(PhpType::union(vec![filtered, missing]))
         }
         CallSiteFunction::ClassRelation => class_relation_return(&args, declared?),
+        CallSiteFunction::GetType => type_name_return(&args, TypeNaming::GetType, class_loader),
+        CallSiteFunction::GetDebugType => {
+            type_name_return(&args, TypeNaming::GetDebugType, class_loader)
+        }
         CallSiteFunction::WordPress(function) => wordpress::return_type(function, &args),
     }
 }
@@ -325,6 +341,130 @@ fn class_relation_return(args: &CallArgs<'_>, declared: &PhpType) -> Option<PhpT
     }
     let ty = PhpType::benevolent(declared.clone());
     ty.is_benevolent().then_some(ty)
+}
+
+/// Which of PHP's two type-naming functions a call is to.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum TypeNaming {
+    GetType,
+    GetDebugType,
+}
+
+/// Every name `gettype()` can return, for an argument of unknown type.
+const GETTYPE_NAMES: [&str; 10] = [
+    "array",
+    "boolean",
+    "double",
+    "integer",
+    "NULL",
+    "object",
+    "resource",
+    "resource (closed)",
+    "string",
+    "unknown type",
+];
+
+/// `gettype()` and `get_debug_type()`: the names their argument's type
+/// decides, one literal per member of a union.
+///
+/// `get_debug_type()` names an object by its class, which only a final
+/// class pins down (a subclass instance would report its own name), so any
+/// other object, or a resource (named after its resource type), leaves the
+/// declared `string`. Mirrors PHPStan's `GettypeFunctionReturnTypeExtension`
+/// and `GetDebugTypeFunctionReturnTypeExtension`.
+fn type_name_return(
+    args: &CallArgs<'_>,
+    naming: TypeNaming,
+    class_loader: Option<&ResolvedClassLoader<'_>>,
+) -> Option<PhpType> {
+    let ty = args.resolve(&args.text("$value")?)?.strip_benevolence();
+    let mut members = Vec::new();
+    flatten_union(&ty, &mut members);
+    let mut names: Vec<String> = Vec::new();
+    for member in &members {
+        for name in type_names(member, naming, class_loader)? {
+            if !names.contains(&name) {
+                names.push(name);
+            }
+        }
+    }
+    Some(PhpType::union(
+        names.iter().map(PhpType::literal_string_value).collect(),
+    ))
+}
+
+fn flatten_union(ty: &PhpType, out: &mut Vec<PhpType>) {
+    match ty.kind() {
+        TypeKind::Union(members) => members.iter().for_each(|m| flatten_union(m, out)),
+        TypeKind::Nullable(inner) => {
+            flatten_union(inner, out);
+            out.push(PhpType::null());
+        }
+        _ => out.push(ty.clone()),
+    }
+}
+
+/// The names one non-union type member is reported as, or `None` when they
+/// cannot be told (an object `get_debug_type()` cannot name, a type this
+/// does not recognise).
+fn type_names(
+    ty: &PhpType,
+    naming: TypeNaming,
+    class_loader: Option<&ResolvedClassLoader<'_>>,
+) -> Option<Vec<String>> {
+    let debug = naming == TypeNaming::GetDebugType;
+    let one = |gettype: &str, debug_type: &str| {
+        Some(vec![if debug { debug_type } else { gettype }.to_string()])
+    };
+    if ty.is_null() {
+        return one("NULL", "null");
+    }
+    if ty.is_bool() || ty.is_true() || ty.is_false() {
+        return one("boolean", "bool");
+    }
+    if ty.is_int_subtype() {
+        return one("integer", "int");
+    }
+    if ty.is_float() || ty.is_float_subtype() {
+        return one("double", "float");
+    }
+    if ty.is_string_subtype() || is_class_name_string(ty) {
+        return one("string", "string");
+    }
+    if ty.is_array_key() {
+        let names = if debug {
+            ["int", "string"]
+        } else {
+            ["integer", "string"]
+        };
+        return Some(names.iter().map(|n| n.to_string()).collect());
+    }
+    if ty.is_array_like() && !ty.is_iterable() {
+        return one("array", "array");
+    }
+    if ty.is_resource() {
+        return (!debug).then(|| vec!["resource".to_string(), "resource (closed)".to_string()]);
+    }
+    if ty.is_mixed() {
+        return (!debug).then(|| GETTYPE_NAMES.iter().map(|n| n.to_string()).collect());
+    }
+    if let TypeKind::Named(name) = ty.kind()
+        && name.eq_ignore_ascii_case("object")
+    {
+        return (!debug).then(|| vec!["object".to_string()]);
+    }
+    // A class: confirmed by loading it, since an unresolved name (a
+    // template parameter, a missing class) says nothing about the value.
+    let class_name = match ty.kind() {
+        TypeKind::Generic(g) => g.name.as_str(),
+        _ => ty.base_name()?,
+    };
+    let class = class_loader?(Fqn::new(class_name.trim_start_matches('\\')))?;
+    if !debug {
+        return one("object", "object");
+    }
+    let fqn = class.fqn();
+    (class.is_final && !fqn.contains('@')).then(|| vec![fqn.to_string()])
 }
 
 /// Whether `ty` is a string known to name a class-like (`Foo::class`, a

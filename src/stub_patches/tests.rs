@@ -257,7 +257,7 @@ fn argument_dependent_builtins_get_conditional_returns() {
         (
             "hrtime",
             &[("$as_number", "bool")],
-            "$as_number is true ? int|float : array{int, int}|false",
+            "$as_number is true ? int<1, max>|float : array{int<1, max>, int<0, 999999999>}",
         ),
         (
             "microtime",

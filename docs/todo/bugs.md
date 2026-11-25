@@ -339,40 +339,6 @@ The backing-value lookup is not done for literal (or constant-folded, or narrowe
 
 **Cases** (PHPStan `nsrt/`, 22 assertions): `enum-from.php` (22).
 
-### B827. `getAttributes()` returns `array` rather than `list` and an unfiltered call gives `ReflectionAttribute<mixed>`
-
-**Impact: Low · Complexity: Low**
-
-```php
-$r = new ReflectionClass(Foo::class);
-$r->getAttributes();             // array<ReflectionAttribute<mixed>>, should be list<ReflectionAttribute<object>>
-$r->getAttributes(Abc::class);   // array<ReflectionAttribute<Abc>>, should be list<ReflectionAttribute<Abc>>
-```
-
-Affects ReflectionClass/Method/Parameter/Property/ClassConstant/Function. The return should be a list, and the template default without a filter should be object.
-
-**Cases** (PHPStan `nsrt/`, 16 assertions): `reflectionclass-issue-5511-php8.php` (16).
-
-### B828. `parse_url()` marks every component present and ignores its component argument
-
-**Impact: Medium · Complexity: Low**
-
-```php
-parse_url($url);                 // got array{scheme: string, ..., fragment: string}|string|int|false|null
-                                 // should be array{scheme?: string, host?: string, port?: int<0, 65535>, ...}|false
-parse_url($url, PHP_URL_HOST);   // got the same union, should be string|false|null
-```
-
-Every call returns the full union of all components. The shape's keys should all be optional, the component constants should pick one member, and `array_key_exists()` should then narrow those optional keys (bug-3009.php).
-
-It also shows as:
-
-- `parse_url()` without a component returns the union of every component's type
-
-**Fix:** return the shape with every key optional, and the component's own type when `$component` is given.
-
-**Cases** (PHPStan `nsrt/`, 33 assertions): `bug-4754.php` (11), `lowercase-string-parse-url.php` (9), `bug-2001-php8.php` (6), `bug-3009.php` (4), `functions.php` (3).
-
 ### B829. `json_decode()` of a literal JSON string is not evaluated
 
 **Impact: Low · Complexity: Low**
@@ -392,32 +358,52 @@ It also shows as:
 
 **Cases** (PHPStan `nsrt/`, 21 assertions): `json-decode-narrow_type.php` (10), `json-decode-narrow_type_with_force_array.php` (6), `json-decode-invalid_type.php` (4), `json-decode-json_object_as_array.php`.
 
-### B830. Some stub return types keep a `|false` that PHP 8 never returns
+### B830. `DOMDocument::createElement()` with a valid literal name keeps `|false`
 
 **Impact: Low · Complexity: Low**
 
 ```php
 $doc->createElement('div');   // DOMElement|false, should be DOMElement
-hrtime();                     // array{int, int}|false, should be array{int, int}
 ```
 
-PHP 8 throws on invalid element names, and hrtime() cannot fail on supported platforms; the stubs' |false should be dropped (as PHPStan's extensions do).
+PHP 8 throws on an invalid element name, so a literal name that is a valid
+XML name cannot produce `false`. PHPStan keeps the `false` only for a name it
+cannot read or one that is not valid. A method has no call-site return rule
+to read the argument with.
 
-**Cases** (PHPStan `nsrt/`, 10 assertions): `dom-document-create-element.php` (7), `php73_functions.php` (3).
+**Cases** (PHPStan `nsrt/`, 7 assertions): `dom-document-create-element.php` (7), `// SKIP` lines.
 
-### B831. `Exception::getCode()` returns `mixed|int` rather than `int|string`
+### B907. Type-name and URL builtins miss a few argument forms
 
 **Impact: Low · Complexity: Low**
 
 ```php
-(new \Exception())->getCode();       // mixed|int, should be int|string
-(new \LogicException())->getCode();  // mixed|int, should be int
-$throwable->getCode();               // int, should be int|string
+get_debug_type(new \stdClass());   // string, should be 'stdClass'
+get_debug_type(new class {});      // string, should be 'class@anonymous'
+/** @param lowercase-string $s */
+parse_url($s, PHP_URL_HOST);       // string|false|null, should be lowercase-string|false|null
 ```
 
-The stub's `@return mixed|int` is used verbatim; PDOException (and anything that may be one) can return a string code, other built-in exceptions an int.
+`get_debug_type()` only names an object whose class is final, since an
+object built with `new` is not known to be exactly that class, and it does
+not name anonymous classes. `parse_url()` does not carry a
+`lowercase-string` argument through to its components. `// SKIP` lines in
+`tests/phpstan_nsrt/get-debug-type.php` and `lowercase-string-parse-url.php`.
 
-**Cases** (PHPStan `nsrt/`, 8 assertions): `bug-6001.php` (8).
+### B908. Joining branches puts a key one branch removed at the end of the shape
+
+**Impact: Low · Complexity: Low**
+
+```php
+/** @var array{a?: int, b?: int, c?: int} $x */
+if (array_key_exists('b', $x)) { /* ... */ }
+$x;   // array{a?: int, c?: int, b?: int}, should keep the declared order
+```
+
+The branch where the check failed dropped the optional key, and the join
+re-adds it after the keys both branches share. The type is the same; only
+the spelling differs. `// SKIP` lines in `tests/phpstan_nsrt/bug-3009.php`
+and `bug-2001-php8.php`.
 
 ### B832. Key-preserving array functions return a plain `array`
 
@@ -503,21 +489,6 @@ preg_split($p, $s, -1, PREG_SPLIT_OFFSET_CAPTURE); // array<string>|false, shoul
 `PREG_SPLIT_OFFSET_CAPTURE` changes the element type and literal arguments fix the result.
 
 **Cases** (PHPStan `nsrt/`, 43 assertions): `preg_split.php` (37), `preg_filter.php` (6).
-
-### B837. `gettype()` and `get_debug_type()` of a known type return `string`
-
-**Impact: Low · Complexity: Low**
-
-```php
-function f(bool $b, ?Foo $o) {
-    gettype($b);         // string, should be 'boolean'
-    get_debug_type($o);  // string, should be 'Foo'|'null'
-}
-```
-
-Both map each runtime type to a fixed name, so a known argument type decides a union of literals.
-
-**Cases** (PHPStan `nsrt/`, 42 assertions): `get-debug-type.php` (21), `gettype.php` (21).
 
 ## Reachability
 
