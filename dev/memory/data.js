@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795686522751,
+  "lastUpdate": 1795687162195,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -17065,6 +17065,65 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_yii_action",
             "value": 101.8,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "549df0a237f22db580650ac94c1675cc4298b4fd",
+          "message": "Update repo settings",
+          "timestamp": "2026-11-26T10:52:25+01:00",
+          "tree_id": "2f317977c8aef75cdbb8c867be23a6799bc9dcd0",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/549df0a237f22db580650ac94c1675cc4298b4fd"
+        },
+        "date": 1795687150950,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_drupal_module",
+            "value": 273.8,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_hello_world",
+            "value": 47.8,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 80.8,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_symfony_controller",
+            "value": 81.3,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_tempest_view",
+            "value": 78.8,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_wordpress_plugin",
+            "value": 79.7,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_yii_action",
+            "value": 100.9,
             "unit": "MiB"
           }
         ]
