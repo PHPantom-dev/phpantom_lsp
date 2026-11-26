@@ -2041,6 +2041,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Framework names in strings">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b911-symfony-yii-and-tempest-files-are-looked-up-from-the-workspace-root-not-their-projects" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B911. Symfony, Yii and Tempest files are looked up from the workspace root, not their project's
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -3949,6 +3966,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Framework names in strings">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b911-symfony-yii-and-tempest-files-are-looked-up-from-the-workspace-root-not-their-projects" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B911. Symfony, Yii and Tempest files are looked up from the workspace root, not their project's
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -5518,7 +5552,25 @@ types <code>array_map()</code> gives it. See <code>tests/phpstan_nsrt/array_valu
 </ul>
 <p><strong>Cases</strong> (PHPStan <code>nsrt/</code>, 29 assertions): <code>array-map.php</code> (10), <code>array_map_multiple.php</code> (10), <code>bug-10685.php</code> (2), <code>bug-9224b.php</code> (2), <code>array-functions.php</code> (2), <code>bug-4902-php8.php</code>, <code>bug-10442.php</code>, <code>pipe-operator.php</code>.</p>
 <h2 id="framework-names-in-strings">Framework names in strings<a class="headerlink" href="#framework-names-in-strings" title="Permanent link">&para;</a></h2>
-<p>No outstanding items.</p>
+<h3 id="b911-symfony-yii-and-tempest-files-are-looked-up-from-the-workspace-root-not-their-projects">B911. Symfony, Yii and Tempest files are looked up from the workspace root, not their project's<a class="headerlink" href="#b911-symfony-yii-and-tempest-files-are-looked-up-from-the-workspace-root-not-their-projects" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Medium · Complexity: Low</strong></p>
+<p>In a monorepo opened at its top, with the application in a subdirectory
+(<code>backend/</code>) and no <code>composer.json</code> at the root, the framework's own files
+are looked for relative to the workspace root. Laravel already finds its
+application's base path at indexing time (<code>Backend::laravel_root</code>), but
+the other frameworks read <code>workspace_root</code> directly: Symfony's
+<code>%kernel.project_dir%</code> (<code>framework.rs</code>, <code>symfony/route_world.rs</code>,
+<code>symfony/translations.rs</code>), Yii's aliases, params, views, migrations and
+assets (<code>yii/</code>), and Tempest's discovery (<code>tempest/discovery.rs</code>). Their
+route, service, template and translation names then resolve against the
+wrong directory.</p>
+<p>The fix is the same shape as Laravel's: record the subproject holding the
+framework's application when the root is not one (Symfony's <code>bin/console</code>
+and <code>config/bundles.php</code>, Yii's <code>yii</code> script and <code>config/</code>, Tempest's
+<code>tempest</code> script), and route each conventional lookup through an accessor
+that falls back to the workspace root. Laravel's detection is
+<code>composer::laravel_app_subproject</code>; a per-framework variant of it, or one
+helper keyed by marker file, would serve all three.</p>
 <h2 id="name-resolution">Name resolution<a class="headerlink" href="#name-resolution" title="Permanent link">&para;</a></h2>
 <h3 id="b888-a-class-level-method-or-property-tag-does-not-override-a-real-member">B888. A class-level <code>@method</code> or <code>@property</code> tag does not override a real member<a class="headerlink" href="#b888-a-class-level-method-or-property-tag-does-not-override-a-real-member" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Low (needs a decision first)</strong></p>

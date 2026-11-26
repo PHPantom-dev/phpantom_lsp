@@ -2762,7 +2762,7 @@ highlighting remains in charge of ordinary PHP syntax.</p>
 <td><code>paths</code></td>
 <td>string[]</td>
 <td><code>["database/schema"]</code></td>
-<td>Schema dump files or directories to scan, relative to the workspace root.</td>
+<td>Schema dump files or directories to scan, relative to the workspace root. The default is the Laravel application's own <code>database/schema</code>, which in a monorepo is inside the application's directory.</td>
 </tr>
 </tbody>
 </table>
