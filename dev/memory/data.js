@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795693831466,
+  "lastUpdate": 1795694831283,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -17419,6 +17419,65 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_yii_action",
             "value": 100.7,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "0d40623f007b3e8de5e192452a05f76b0cb613df",
+          "message": "Better handeling of invalid files",
+          "timestamp": "2026-11-26T13:00:27+01:00",
+          "tree_id": "98b9951ba8d76e416df17d6c1dcff213f271e972",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/0d40623f007b3e8de5e192452a05f76b0cb613df"
+        },
+        "date": 1795694816864,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_drupal_module",
+            "value": 274.3,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_hello_world",
+            "value": 44.4,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 79.2,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_symfony_controller",
+            "value": 80.7,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_tempest_view",
+            "value": 74,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_wordpress_plugin",
+            "value": 78.1,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_yii_action",
+            "value": 98.6,
             "unit": "MiB"
           }
         ]
