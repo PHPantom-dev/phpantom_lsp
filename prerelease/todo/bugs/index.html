@@ -2222,10 +2222,21 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#b895-new-var-has-no-type-unless-var-is-a-class-stringt" class="md-nav__link">
+  <a href="#b913-method_exists-does-not-narrow-its-subject-to-hasmethod" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B895. <code>new $var()</code> has no type unless <code>$var</code> is a <code>class-string&lt;T&gt;</code>
+        B913. <code>method_exists()</code> does not narrow its subject to <code>hasMethod()</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b914-class_exists-widens-a-string-literal-to-class-string" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B914. <code>class_exists()</code> widens a string literal to <code>class-string</code>
       </span>
     </span>
   </a>
@@ -4070,10 +4081,21 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#b895-new-var-has-no-type-unless-var-is-a-class-stringt" class="md-nav__link">
+  <a href="#b913-method_exists-does-not-narrow-its-subject-to-hasmethod" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B895. <code>new $var()</code> has no type unless <code>$var</code> is a <code>class-string&lt;T&gt;</code>
+        B913. <code>method_exists()</code> does not narrow its subject to <code>hasMethod()</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b914-class_exists-widens-a-string-literal-to-class-string" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B914. <code>class_exists()</code> widens a string literal to <code>class-string</code>
       </span>
     </span>
   </a>
@@ -5605,20 +5627,33 @@ literal's own body reading is memoized per request. The callback
 argument paths (template binding from a closure argument, and the
 callback return inference behind <code>array_map</code>/<code>array_filter</code>) re-read a
 nested callback once per enclosing level instead of sharing one answer.</p>
-<h3 id="b895-new-var-has-no-type-unless-var-is-a-class-stringt">B895. <code>new $var()</code> has no type unless <code>$var</code> is a <code>class-string&lt;T&gt;</code><a class="headerlink" href="#b895-new-var-has-no-type-unless-var-is-a-class-stringt" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-105-1" name="__codelineno-105-1" href="#__codelineno-105-1"></a><span class="x">/** @param mixed $a */</span>
-<a id="__codelineno-105-2" name="__codelineno-105-2" href="#__codelineno-105-2"></a><span class="x">function f($a, string $s) {</span>
-<a id="__codelineno-105-3" name="__codelineno-105-3" href="#__codelineno-105-3"></a><span class="x">    new $a();   // no type, should be object</span>
-<a id="__codelineno-105-4" name="__codelineno-105-4" href="#__codelineno-105-4"></a><span class="x">    new $s();   // no type, should be object</span>
+<h3 id="b913-method_exists-does-not-narrow-its-subject-to-hasmethod">B913. <code>method_exists()</code> does not narrow its subject to <code>hasMethod()</code><a class="headerlink" href="#b913-method_exists-does-not-narrow-its-subject-to-hasmethod" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Complexity: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-105-1" name="__codelineno-105-1" href="#__codelineno-105-1"></a><span class="x">function f(object $foo) {</span>
+<a id="__codelineno-105-2" name="__codelineno-105-2" href="#__codelineno-105-2"></a><span class="x">    if (method_exists($foo, 'doFoo')) {</span>
+<a id="__codelineno-105-3" name="__codelineno-105-3" href="#__codelineno-105-3"></a><span class="x">        $foo;   // object, should be object&amp;hasMethod(doFoo)</span>
+<a id="__codelineno-105-4" name="__codelineno-105-4" href="#__codelineno-105-4"></a><span class="x">    }</span>
 <a id="__codelineno-105-5" name="__codelineno-105-5" href="#__codelineno-105-5"></a><span class="x">}</span>
 </code></pre></div>
-<p><code>new</code> on class-string<Foo> works, but a mixed/string/object/plain class-string operand yields nothing instead of object.</p>
-<p>It also shows as:</p>
-<ul>
-<li><code>new $class</code> has no type when <code>$class</code> is a plain string or an intersection with <code>class-string</code></li>
-</ul>
-<p><strong>Cases</strong> (PHPStan <code>nsrt/</code>, 9 assertions): <code>generic-class-string.php</code> (6), <code>bug-4579.php</code> (2), <code>bug-7374.php</code>.</p>
+<p>There is no <code>hasMethod()</code> accessory type, so a <code>method_exists()</code> guard
+leaves the object as it was and <code>$foo-&gt;doFoo()</code> reads as an unknown
+member.</p>
+<p><strong>Cases</strong> (PHPStan <code>nsrt/</code>, 1 assertion): <code>bug-4579.php</code>.</p>
+<h3 id="b914-class_exists-widens-a-string-literal-to-class-string">B914. <code>class_exists()</code> widens a string literal to <code>class-string</code><a class="headerlink" href="#b914-class_exists-widens-a-string-literal-to-class-string" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Complexity: Low</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-106-1" name="__codelineno-106-1" href="#__codelineno-106-1"></a><span class="x">$c = \stdClass::class;</span>
+<a id="__codelineno-106-2" name="__codelineno-106-2" href="#__codelineno-106-2"></a><span class="x">if (class_exists($c)) {</span>
+<a id="__codelineno-106-3" name="__codelineno-106-3" href="#__codelineno-106-3"></a><span class="x">    $c;   // class-string&lt;stdClass&gt;, should stay 'stdClass'</span>
+<a id="__codelineno-106-4" name="__codelineno-106-4" href="#__codelineno-106-4"></a><span class="x">}</span>
+<a id="__codelineno-106-5" name="__codelineno-106-5" href="#__codelineno-106-5"></a><span class="x">$n = 'NonexistentClass';</span>
+<a id="__codelineno-106-6" name="__codelineno-106-6" href="#__codelineno-106-6"></a><span class="x">if (class_exists($n)) {</span>
+<a id="__codelineno-106-7" name="__codelineno-106-7" href="#__codelineno-106-7"></a><span class="x">    $n;   // class-string, should stay 'NonexistentClass'</span>
+<a id="__codelineno-106-8" name="__codelineno-106-8" href="#__codelineno-106-8"></a><span class="x">}</span>
+</code></pre></div>
+<p>The guard replaces a literal with a <code>class-string</code> type instead of
+keeping the more precise literal, and for a class that does not exist
+it drops the class name entirely.</p>
+<p><strong>Cases</strong> (PHPStan <code>nsrt/</code>, 2 assertions): <code>generic-class-string.php</code> (2).</p>
 
 
 
