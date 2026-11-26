@@ -81,12 +81,14 @@ mod tests {
                 }
             }
         };
+        // Package files come back in the canonical spelling the index
+        // stores, which on Windows can differ from the temp dir's (an 8.3
+        // short name), so compare both canonicalized.
+        let target = dunce::canonicalize(location.uri.to_file_path().unwrap()).unwrap();
+        let root = dunce::canonicalize(dir.path()).unwrap();
         Some(
-            location
-                .uri
-                .to_file_path()
-                .unwrap()
-                .strip_prefix(dir.path())
+            target
+                .strip_prefix(&root)
                 .unwrap()
                 .to_string_lossy()
                 .replace('\\', "/"),
