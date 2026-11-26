@@ -62,7 +62,7 @@ class ArrayColumnTest
 	/** @param array<int, array<string, array>> $array */
 	public function testArray8(array $array): void
 	{
-		assertType('array<int, array>', array_column($array, 'column', 'key')); // SKIP: array_column() with an index column holding arrays returns `array`
+		assertType('array<int, array>', array_column($array, 'column', 'key'));
 	}
 
 	/** @param array<int, array{column: string, key: string}> $array */
@@ -184,43 +184,43 @@ class ArrayColumnTest
 	/** @param array<int, DOMElement> $array */
 	public function testImprecise5(array $array): void
 	{
-		assertType('list<string>', array_column($array, 'nodeName')); // SKIP: array_column() does not read object rows
-		assertType('list<string>', array_column($array, 'nodeName', null)); // SKIP: array_column() does not read object rows
-		assertType('array<string, string>', array_column($array, 'nodeName', 'tagName')); // SKIP: array_column() does not read object rows
-		assertType('array<string, DOMElement>', array_column($array, null, 'tagName')); // SKIP: array_column() does not read object rows
-		assertType('list', array_column($array, 'foo')); // SKIP: array_column() does not read object rows
-		assertType('list', array_column($array, 'foo', null)); // SKIP: array_column() does not read object rows
-		assertType('array<string, mixed>', array_column($array, 'foo', 'tagName')); // SKIP: array_column() does not read object rows
-		assertType('array<string>', array_column($array, 'nodeName', 'foo')); // SKIP: array_column() does not read object rows
-		assertType('array<DOMElement>', array_column($array, null, 'foo')); // SKIP: array_column() does not read object rows
+		assertType('list<string>', array_column($array, 'nodeName'));
+		assertType('list<string>', array_column($array, 'nodeName', null));
+		assertType('array<string, string>', array_column($array, 'nodeName', 'tagName'));
+		assertType('array<string, DOMElement>', array_column($array, null, 'tagName'));
+		assertType('list', array_column($array, 'foo'));
+		assertType('list', array_column($array, 'foo', null));
+		assertType('array<string, mixed>', array_column($array, 'foo', 'tagName'));
+		assertType('array<string>', array_column($array, 'nodeName', 'foo'));
+		assertType('array<DOMElement>', array_column($array, null, 'foo'));
 	}
 
 	/** @param non-empty-array<int, DOMElement> $array */
 	public function testObjects1(array $array): void
 	{
-		assertType('non-empty-list<string>', array_column($array, 'nodeName')); // SKIP: array_column() does not read object rows
-		assertType('non-empty-list<string>', array_column($array, 'nodeName', null)); // SKIP: array_column() does not read object rows
-		assertType('non-empty-array<string, string>', array_column($array, 'nodeName', 'tagName')); // SKIP: array_column() does not read object rows
-		assertType('non-empty-array<string, DOMElement>', array_column($array, null, 'tagName')); // SKIP: array_column() does not read object rows
-		assertType('list', array_column($array, 'foo')); // SKIP: array_column() does not read object rows
-		assertType('list', array_column($array, 'foo', null)); // SKIP: array_column() does not read object rows
-		assertType('array<string, mixed>', array_column($array, 'foo', 'tagName')); // SKIP: array_column() does not read object rows
-		assertType('non-empty-array<string>', array_column($array, 'nodeName', 'foo')); // SKIP: array_column() does not read object rows
-		assertType('non-empty-array<DOMElement>', array_column($array, null, 'foo')); // SKIP: array_column() does not read object rows
+		assertType('non-empty-list<string>', array_column($array, 'nodeName'));
+		assertType('non-empty-list<string>', array_column($array, 'nodeName', null));
+		assertType('non-empty-array<string, string>', array_column($array, 'nodeName', 'tagName'));
+		assertType('non-empty-array<string, DOMElement>', array_column($array, null, 'tagName'));
+		assertType('list', array_column($array, 'foo'));
+		assertType('list', array_column($array, 'foo', null));
+		assertType('array<string, mixed>', array_column($array, 'foo', 'tagName'));
+		assertType('non-empty-array<string>', array_column($array, 'nodeName', 'foo'));
+		assertType('non-empty-array<DOMElement>', array_column($array, null, 'foo'));
 	}
 
 	/** @param array{DOMElement} $array */
 	public function testObjects2(array $array): void
 	{
-		assertType('array{string}', array_column($array, 'nodeName')); // SKIP: array_column() does not read object rows
-		assertType('array{string}', array_column($array, 'nodeName', null)); // SKIP: array_column() does not read object rows
-		assertType('non-empty-array<string, string>', array_column($array, 'nodeName', 'tagName')); // SKIP: array_column() does not read object rows
-		assertType('non-empty-array<string, DOMElement>', array_column($array, null, 'tagName')); // SKIP: array_column() does not read object rows
-		assertType('list', array_column($array, 'foo')); // SKIP: array_column() does not read object rows
-		assertType('list', array_column($array, 'foo', null)); // SKIP: array_column() does not read object rows
-		assertType('array<string, mixed>', array_column($array, 'foo', 'tagName')); // SKIP: array_column() does not read object rows
-		assertType('non-empty-array<string>', array_column($array, 'nodeName', 'foo')); // SKIP: array_column() does not read object rows
-		assertType('non-empty-array<DOMElement>', array_column($array, null, 'foo')); // SKIP: array_column() does not read object rows
+		assertType('array{string}', array_column($array, 'nodeName'));
+		assertType('array{string}', array_column($array, 'nodeName', null));
+		assertType('non-empty-array<string, string>', array_column($array, 'nodeName', 'tagName'));
+		assertType('non-empty-array<string, DOMElement>', array_column($array, null, 'tagName'));
+		assertType('list', array_column($array, 'foo'));
+		assertType('list', array_column($array, 'foo', null));
+		assertType('array<string, mixed>', array_column($array, 'foo', 'tagName'));
+		assertType('non-empty-array<string>', array_column($array, 'nodeName', 'foo'));
+		assertType('non-empty-array<DOMElement>', array_column($array, null, 'foo'));
 	}
 
 }
@@ -231,9 +231,9 @@ final class Foo
 	/** @param array<int, self> $a */
 	public function doFoo(array $a): void
 	{
-		assertType('array{}', array_column($a, 'nodeName')); // SKIP: array_column() does not read object rows
-		assertType('array{}', array_column($a, 'nodeName', null)); // SKIP: array_column() does not read object rows
-		assertType('array{}', array_column($a, 'nodeName', 'tagName')); // SKIP: array_column() does not read object rows
+		assertType('array{}', array_column($a, 'nodeName'));
+		assertType('array{}', array_column($a, 'nodeName', null));
+		assertType('array{}', array_column($a, 'nodeName', 'tagName'));
 	}
 
 }
@@ -258,17 +258,17 @@ class ArrayColumnVisibilityNonFinalTest
 	/** @param array<int, NonFinalObjectWithVisibility> $objects */
 	public function testNonFinal(array $objects): void
 	{
-		assertType('list<int>', array_column($objects, 'pub')); // SKIP: array_column() does not read object rows
-		assertType('list<int>', array_column($objects, 'prot')); // SKIP: array_column() does not read object rows
-		assertType('list', array_column($objects, 'priv')); // SKIP: array_column() does not read object rows
+		assertType('list<int>', array_column($objects, 'pub'));
+		assertType('list<int>', array_column($objects, 'prot'));
+		assertType('list', array_column($objects, 'priv'));
 	}
 
 	/** @param array{NonFinalObjectWithVisibility} $objects */
 	public function testNonFinalConstant(array $objects): void
 	{
-		assertType('array{int}', array_column($objects, 'pub')); // SKIP: array_column() does not read object rows
-		assertType('list<int>', array_column($objects, 'prot')); // Could be array{}|array{int} // SKIP: array_column() does not read object rows
-		assertType('list', array_column($objects, 'priv')); // SKIP: array_column() does not read object rows
+		assertType('array{int}', array_column($objects, 'pub'));
+		assertType('list<int>', array_column($objects, 'prot')); // Could be array{}|array{int}
+		assertType('list', array_column($objects, 'priv'));
 	}
 
 }
@@ -279,24 +279,24 @@ class ArrayColumnVisibilityFinalTest
 	/** @param array<int, FinalObjectWithVisibility> $objects */
 	public function testFinal(array $objects): void
 	{
-		assertType('list<int>', array_column($objects, 'pub')); // SKIP: array_column() does not read object rows
-		assertType('array{}', array_column($objects, 'prot')); // SKIP: array_column() does not read object rows
-		assertType('array{}', array_column($objects, 'priv')); // SKIP: array_column() does not read object rows
+		assertType('list<int>', array_column($objects, 'pub'));
+		assertType('array{}', array_column($objects, 'prot'));
+		assertType('array{}', array_column($objects, 'priv'));
 	}
 
 	/** @param array{FinalObjectWithVisibility} $objects */
 	public function testFinalConstant(array $objects): void
 	{
-		assertType('array{int}', array_column($objects, 'pub')); // SKIP: array_column() does not read object rows
-		assertType('array{}', array_column($objects, 'prot')); // SKIP: array_column() does not read object rows
-		assertType('array{}', array_column($objects, 'priv')); // SKIP: array_column() does not read object rows
+		assertType('array{int}', array_column($objects, 'pub'));
+		assertType('array{}', array_column($objects, 'prot'));
+		assertType('array{}', array_column($objects, 'priv'));
 	}
 
 	/** @param array<int, FinalObjectWithVisibility> $objects */
 	public function testNonPublicAsIndex(array $objects): void
 	{
-		assertType('array<int, int>', array_column($objects, 'pub', 'pub')); // SKIP: array_column() does not read object rows
-		assertType('array<int, int>', array_column($objects, 'pub', 'priv')); // SKIP: array_column() does not read object rows
+		assertType('array<int, int>', array_column($objects, 'pub', 'pub'));
+		assertType('array<int, int>', array_column($objects, 'pub', 'priv'));
 	}
 
 }
@@ -307,9 +307,9 @@ class ArrayColumnVisibilityImplicitFinalTest
 	public function testNewExpression(): void
 	{
 		$objects = [new NonFinalObjectWithVisibility()];
-		assertType('array{int}', array_column($objects, 'pub')); // SKIP: array_column() does not read object rows
-		assertType('array{}', array_column($objects, 'prot')); // SKIP: array_column() does not read object rows
-		assertType('array{}', array_column($objects, 'priv')); // SKIP: array_column() does not read object rows
+		assertType('array{int}', array_column($objects, 'pub'));
+		assertType('array{}', array_column($objects, 'prot')); // SKIP: an object built with `new` is not known to be exactly that class
+		assertType('array{}', array_column($objects, 'priv')); // SKIP: an object built with `new` is not known to be exactly that class
 	}
 
 }
@@ -323,8 +323,8 @@ class ArrayColumnVisibilityFromInsideTest
 	/** @param list<self> $objects */
 	public function testFromInside(array $objects): void
 	{
-		assertType('list<int>', array_column($objects, 'pub')); // SKIP: array_column() does not read object rows
-		assertType('list<int>', array_column($objects, 'priv')); // SKIP: array_column() does not read object rows
+		assertType('list<int>', array_column($objects, 'pub'));
+		assertType('list<int>', array_column($objects, 'priv'));
 	}
 
 }
@@ -335,9 +335,9 @@ class ArrayColumnVisibilityFromChildTest extends NonFinalObjectWithVisibility
 	/** @param list<NonFinalObjectWithVisibility> $objects */
 	public function testFromChild(array $objects): void
 	{
-		assertType('list<int>', array_column($objects, 'pub')); // SKIP: array_column() does not read object rows
-		assertType('list<int>', array_column($objects, 'prot')); // SKIP: array_column() does not read object rows
-		assertType('list', array_column($objects, 'priv')); // SKIP: array_column() does not read object rows
+		assertType('list<int>', array_column($objects, 'pub'));
+		assertType('list<int>', array_column($objects, 'prot'));
+		assertType('list', array_column($objects, 'priv'));
 	}
 
 }
@@ -358,7 +358,7 @@ class ArrayColumnVisibilityWithIssetOnlyTest
 	/** @param array<int, ObjectWithIssetOnly> $objects */
 	public function testWithIssetOnly(array $objects): void
 	{
-		assertType('array{}', array_column($objects, 'priv')); // SKIP: array_column() does not read object rows
+		assertType('array{}', array_column($objects, 'priv'));
 	}
 
 }
@@ -385,15 +385,15 @@ class ArrayColumnVisibilityWithIssetTest
 	/** @param array<int, ObjectWithIsset> $objects */
 	public function testWithIsset(array $objects): void
 	{
-		assertType('list<int>', array_column($objects, 'pub')); // SKIP: array_column() does not read object rows
-		assertType('list', array_column($objects, 'priv')); // SKIP: array_column() does not read object rows
+		assertType('list<int>', array_column($objects, 'pub'));
+		assertType('list', array_column($objects, 'priv'));
 	}
 
 	/** @param array{ObjectWithIsset} $objects */
 	public function testWithIssetConstant(array $objects): void
 	{
-		assertType('array{int}', array_column($objects, 'pub')); // SKIP: array_column() does not read object rows
-		assertType('list', array_column($objects, 'priv')); // SKIP: array_column() does not read object rows
+		assertType('array{int}', array_column($objects, 'pub'));
+		assertType('list', array_column($objects, 'priv'));
 	}
 
 }

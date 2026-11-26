@@ -273,6 +273,36 @@ pub(crate) fn overloaded_number_result(
     (!bitwise || class.overloads_bitwise()).then(|| class.to_type())
 }
 
+/// `**` between a `GMP` or `BcMath\Number` and a plain object: either
+/// operand may be the one whose class takes the operation over, so the
+/// result is one of the two. PHPStan's `ObjectType::exponentiate()` answers
+/// the same. `None` unless both operands are objects throughout and exactly
+/// one of them is one of those classes.
+fn object_power_result(lhs_types: &[ResolvedType], rhs_types: &[ResolvedType]) -> Option<PhpType> {
+    let all_objects = |types: &[ResolvedType]| {
+        !types.is_empty()
+            && types.iter().all(|rt| {
+                rt.type_string
+                    .union_members()
+                    .iter()
+                    .all(|m| m.is_object_like())
+            })
+    };
+    if !all_objects(lhs_types) || !all_objects(rhs_types) {
+        return None;
+    }
+    match (
+        OverloadedNumber::of_operand(lhs_types),
+        OverloadedNumber::of_operand(rhs_types),
+    ) {
+        (Some(_), None) | (None, Some(_)) => Some(PhpType::union(vec![
+            ResolvedType::types_joined(lhs_types),
+            ResolvedType::types_joined(rhs_types),
+        ])),
+        _ => None,
+    }
+}
+
 /// Classify a resolved operand as `int`, `float`, or unknown for arithmetic
 /// type promotion.
 ///
@@ -407,6 +437,11 @@ pub(crate) fn infer_arithmetic_result_type(
     rhs_types: &[ResolvedType],
     op_kind: ArithmeticOpKind,
 ) -> PhpType {
+    if op_kind == ArithmeticOpKind::Exponentiation
+        && let Some(result) = object_power_result(lhs_types, rhs_types)
+    {
+        return result;
+    }
     if let Some(result) = overloaded_number_result(lhs_types, rhs_types, false) {
         return result;
     }
@@ -422,6 +457,12 @@ pub(crate) fn infer_arithmetic_result_type(
     ) && let Some(folded) = fold_literal_arithmetic(op_kind, lhs_lit, rhs_lit)
     {
         return folded;
+    }
+
+    if op_kind == ArithmeticOpKind::Exponentiation
+        && let Some(result) = super::exponentiation::exponentiation_result(lhs_types, rhs_types)
+    {
+        return result;
     }
 
     let lhs = classify_numeric_operand(lhs_types);

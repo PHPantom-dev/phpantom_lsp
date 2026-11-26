@@ -715,6 +715,7 @@ fn normalize_type(ty: &str) -> String {
         .replace("negative-int", "int<min, -1>")
         .replace("array<mixed, mixed>", "array")
         .replace("array<mixed>", "array")
+        .replace("list<mixed>", "list")
         .replace("iterable<mixed, mixed>", "iterable")
         .replace("iterable<mixed>", "iterable")
         .replace("non-empty-array<int|string, ", "non-empty-array<")

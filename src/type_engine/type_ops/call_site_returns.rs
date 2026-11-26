@@ -30,6 +30,10 @@
 //! - `gettype()` and `get_debug_type()` are declared `string`, but each name
 //!   their argument's runtime type from a fixed set, so an argument of known
 //!   type decides which of those names comes back.
+//! - `random_int()`, `rand()` and `mt_rand()` are declared `int`, but return
+//!   a value between their bounds.
+//! - `date()` is declared `string`, but a literal format decides which
+//!   strings it can produce.
 //!
 //! WordPress functions whose arguments decide their result the same way are
 //! in [`wordpress`].
@@ -142,6 +146,8 @@ enum CallSiteFunction {
     GetDebugType,
     CurlGetinfo,
     PregSplit,
+    Random { swaps_bounds: bool },
+    Date,
     WordPress(wordpress::WordPressFunction),
 }
 
@@ -168,6 +174,14 @@ fn classify(func_name: &str) -> Option<CallSiteFunction> {
         Some(CallSiteFunction::CurlGetinfo)
     } else if name.eq_ignore_ascii_case("preg_split") {
         Some(CallSiteFunction::PregSplit)
+    } else if name.eq_ignore_ascii_case("date") {
+        Some(CallSiteFunction::Date)
+    } else if name.eq_ignore_ascii_case("random_int") {
+        Some(CallSiteFunction::Random {
+            swaps_bounds: false,
+        })
+    } else if name.eq_ignore_ascii_case("rand") || name.eq_ignore_ascii_case("mt_rand") {
+        Some(CallSiteFunction::Random { swaps_bounds: true })
     } else {
         wordpress::classify(name).map(CallSiteFunction::WordPress)
     }
@@ -236,6 +250,8 @@ pub(crate) fn call_site_return_type(
         }
         CallSiteFunction::CurlGetinfo => curl_getinfo_return(&args),
         CallSiteFunction::PregSplit => preg_split::return_type(&args),
+        CallSiteFunction::Random { swaps_bounds } => random_return(&args, swaps_bounds),
+        CallSiteFunction::Date => date_return(&args),
         CallSiteFunction::WordPress(function) => wordpress::return_type(function, &args),
     }
 }
@@ -676,6 +692,136 @@ fn curl_getinfo_return(args: &CallArgs<'_>) -> Option<PhpType> {
             .find(|(_, v, _)| *v == value)
             .map_or_else(PhpType::false_, |&(_, _, ty)| PhpType::parse(ty)),
     )
+}
+
+/// `random_int($min, $max)`, `rand($min, $max)` and `mt_rand($min, $max)`:
+/// the range from the lowest value `$min` may hold to the highest `$max`
+/// may. Without arguments `rand()` and `mt_rand()` return a non-negative
+/// int. Mirrors PHPStan's `RandomIntFunctionReturnTypeExtension`.
+///
+/// `rand()` and `mt_rand()` accept their bounds either way round, where
+/// `random_int()` throws for a `$max` below `$min`; `swaps_bounds` says
+/// which of the two a call is to.
+fn random_return(args: &CallArgs<'_>, swaps_bounds: bool) -> Option<PhpType> {
+    if args.args.iter().all(|a| a.trim().is_empty()) {
+        return swaps_bounds.then(|| PhpType::int_range("0", "max"));
+    }
+    let bound = |param: &str| {
+        let ty = args.resolve(&args.text(param)?)?;
+        let intervals = ty
+            .union_members()
+            .into_iter()
+            .map(super::int_interval::IntInterval::of_int)
+            .collect::<Option<Vec<_>>>()?;
+        Some(super::int_interval::IntInterval::hull_of(&intervals))
+    };
+    let (low, high) = (bound("$min")?, bound("$max")?);
+    let (min, max) = (low.min, high.max);
+    if let (Some(min), Some(max)) = (min, max)
+        && min > max
+    {
+        if !swaps_bounds {
+            return None;
+        }
+        return Some(
+            super::int_interval::IntInterval {
+                min: Some(max),
+                max: Some(min),
+            }
+            .into_type(),
+        );
+    }
+    Some(super::int_interval::IntInterval { min, max }.into_type())
+}
+
+/// The characters `date()` replaces in its format, every other character
+/// being copied as written.
+const DATE_FORMAT_CHARS: &str = "dDjlNSwzWFmMntLoXxYyaABgGhHisuveIOPpTZcrU";
+
+/// The format characters whose output is all digits.
+const DATE_DIGIT_CHARS: &str = "djNwzWmntLoYygGhHisuvBUI";
+
+/// `date($format)` over a literal format (or a union of them): a format of
+/// one character that picks a number gives every string it can be, one
+/// with no format characters is copied as written, and any other gives a
+/// `numeric-string` when every character it outputs is a digit and a
+/// `non-falsy-string` otherwise. Mirrors PHPStan's
+/// `DateFunctionReturnTypeHelper`.
+fn date_return(args: &CallArgs<'_>) -> Option<PhpType> {
+    let format = args.resolve(&args.text("$format")?)?;
+    let formats: Vec<String> = format
+        .union_members()
+        .into_iter()
+        .map(|member| Some(member.as_literal()?.string_content()?.into_owned()))
+        .collect::<Option<_>>()?;
+    let mut results: Vec<PhpType> = Vec::new();
+    for format in &formats {
+        let ty = date_format_type(format);
+        if !results.contains(&ty) {
+            results.push(ty);
+        }
+    }
+    Some(PhpType::union(results))
+}
+
+fn date_format_type(format: &str) -> PhpType {
+    let numbers = |min: u32, max: u32, pad: bool| {
+        PhpType::union(
+            (min..=max)
+                .map(|i| {
+                    PhpType::literal_string_value(&if pad {
+                        format!("{i:02}")
+                    } else {
+                        i.to_string()
+                    })
+                })
+                .collect(),
+        )
+    };
+    match format {
+        "d" => return numbers(1, 31, true),
+        "j" => return numbers(1, 31, false),
+        "N" => return numbers(1, 7, false),
+        "w" => return numbers(0, 6, false),
+        "m" => return numbers(1, 12, true),
+        "n" | "g" => return numbers(1, 12, false),
+        "t" => return numbers(28, 31, false),
+        "L" | "I" => return numbers(0, 1, false),
+        "G" => return numbers(0, 23, false),
+        "h" => return numbers(1, 12, true),
+        "H" => return numbers(0, 23, true),
+        // `date()` works on whole seconds.
+        "u" => return PhpType::literal_string_value("000000"),
+        "v" => return PhpType::literal_string_value("000"),
+        _ => {}
+    }
+    let mut copied = String::new();
+    let mut has_format_char = false;
+    let mut all_digits = !format.is_empty();
+    let mut chars = format.chars();
+    while let Some(c) = chars.next() {
+        if c == '\\' {
+            // An escaped character is copied as written.
+            if let Some(next) = chars.next() {
+                copied.push(next);
+                all_digits &= next.is_ascii_digit();
+            }
+        } else if DATE_FORMAT_CHARS.contains(c) {
+            has_format_char = true;
+            all_digits &= DATE_DIGIT_CHARS.contains(c);
+        } else {
+            copied.push(c);
+            all_digits &= c.is_ascii_digit();
+        }
+    }
+    if !has_format_char {
+        return PhpType::literal_string_value(&copied);
+    }
+    PhpType::named(atom(if all_digits {
+        "numeric-string"
+    } else {
+        "non-falsy-string"
+    }))
 }
 
 /// Which of PHP's two type-naming functions a call is to.

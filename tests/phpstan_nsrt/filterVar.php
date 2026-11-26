@@ -324,6 +324,6 @@ function () {
 	assertType('array<false>', filter_var(false, FILTER_VALIDATE_BOOLEAN, FILTER_FORCE_ARRAY | FILTER_NULL_ON_FAILURE));
 	assertType('3.27', filter_var(3.27, FILTER_VALIDATE_FLOAT));
 	assertType('3.27', filter_var(3.27, FILTER_VALIDATE_FLOAT, FILTER_NULL_ON_FAILURE));
-	assertType('int<0, max>', filter_var(rand(), FILTER_VALIDATE_INT)); // SKIP: rand() with no arguments is typed `int`, not `int<0, max>`
+	assertType('int<0, max>', filter_var(rand(), FILTER_VALIDATE_INT));
 	assertType('12.0', filter_var(12, FILTER_VALIDATE_FLOAT));
 };

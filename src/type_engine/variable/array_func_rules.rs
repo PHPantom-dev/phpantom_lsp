@@ -102,6 +102,31 @@ pub(in crate::type_engine) trait ArrayFuncArgs {
             guard, subject, None,
         )
     }
+
+    /// What reading the instance property `name` off an object of type
+    /// `object` gives from where the call is written, or `None` when the
+    /// object's class cannot be loaded.
+    fn object_property(&self, object: &PhpType, name: &str) -> Option<ObjectProperty> {
+        let _ = (object, name);
+        None
+    }
+}
+
+/// What [`ArrayFuncArgs::object_property`] finds, the way PHPStan's
+/// `ArrayColumnHelper` reads an object row.
+pub(in crate::type_engine) enum ObjectProperty {
+    /// The property is there and readable, holding this.
+    Readable(PhpType),
+    /// No object of the class has a property the caller can read under
+    /// that name: the class is final and lacks it (or hides it without
+    /// magic to read it through).
+    Missing,
+    /// A subclass instance may have a readable property of this type
+    /// (a `protected` one read from outside a non-final class).
+    MaybeReadable(PhpType),
+    /// Nothing is known: a non-final class may grow the property, a
+    /// `private` one may be shadowed, or `__isset()`/`__get()` decide.
+    Unknown,
 }
 
 /// A call's arguments with the one at `index` replaced by `ty`, so a rule
@@ -142,6 +167,9 @@ impl ArrayFuncArgs for SwappedArg<'_> {
     }
     fn narrows(&self, inferred: &PhpType, declared: &PhpType) -> bool {
         self.args.narrows(inferred, declared)
+    }
+    fn object_property(&self, object: &PhpType, name: &str) -> Option<ObjectProperty> {
+        self.args.object_property(object, name)
     }
     fn arg_atom_text(&self, index: usize) -> Option<String> {
         (index != self.index)
@@ -1348,7 +1376,7 @@ fn shape_end_key_type(raw: &PhpType, first: bool) -> Option<PhpType> {
 }
 
 /// `array_column($array, $column_key, $index_key)` over rows that are
-/// arrays. Mirrors PHPStan's `ArrayColumnHelper`, minus object rows.
+/// arrays or objects. Mirrors PHPStan's `ArrayColumnHelper`.
 ///
 /// A constant shape of rows gives the shape `array_column()` builds: each
 /// row's column in order, a row lacking it skipped, keyed by the row's index
@@ -1356,8 +1384,9 @@ fn shape_end_key_type(raw: &PhpType, first: bool) -> Option<PhpType> {
 /// one of the same key) and appended otherwise. Any other array gives a list
 /// of the column's type, or an array keyed by the index column's.
 ///
-/// `None` when a key argument is not a literal (or `null`) or a row is not
-/// an array, which leaves the stub's `array`.
+/// `None` when a key argument is not a literal (or `null`) or a row is
+/// neither an array nor an object of a class that can be loaded, which
+/// leaves the stub's `array`.
 fn array_column_type(args: &dyn ArrayFuncArgs) -> Option<PhpType> {
     if (0..3).any(|i| args.is_spread(i) || args.is_named(i)) {
         return None;
@@ -1370,7 +1399,7 @@ fn array_column_type(args: &dyn ArrayFuncArgs) -> Option<PhpType> {
     };
     let input = args.arg_raw_type(0)?;
     if let TypeKind::ArrayShape(rows) = input.kind()
-        && let Some(shape) = array_column_shape(rows, column.as_deref(), index.as_deref())
+        && let Some(shape) = array_column_shape(args, rows, column.as_deref(), index.as_deref())
     {
         return Some(shape);
     }
@@ -1378,7 +1407,7 @@ fn array_column_type(args: &dyn ArrayFuncArgs) -> Option<PhpType> {
         return Some(PhpType::array_shape(Vec::new()));
     }
     let row = input.iterable_element_type()?;
-    let (value, certain) = match row_offset(&row, column.as_deref())? {
+    let (value, certain) = match row_offset(args, &row, column.as_deref())? {
         RowOffset::Never => return Some(PhpType::array_shape(Vec::new())),
         RowOffset::Certain(value) => (value, true),
         RowOffset::Maybe(value) => (value, false),
@@ -1393,13 +1422,28 @@ fn array_column_type(args: &dyn ArrayFuncArgs) -> Option<PhpType> {
         });
     };
     let normalize = super::array_shape_writes::normalize_array_key_type_keeping_literals;
-    let key = match row_offset(&row, Some(&index))? {
+    let key = match row_offset(args, &row, Some(&index))? {
         RowOffset::Never => PhpType::int(),
         RowOffset::Certain(key) => normalize(&key)?,
         // A row without the index column is appended, under an int key
         // that absorbs every literal int one.
+        // A key nothing is known about is cast to some key.
+        RowOffset::Maybe(key) if key.is_mixed() => PhpType::named(crate::atom::atom("array-key")),
         RowOffset::Maybe(key) => {
-            let key = normalize(&key)?;
+            // An array is no key: PHP 8 throws for one, so only the rows
+            // holding something else leave a key behind, beside the int a
+            // row without the column is appended under.
+            let kept: Vec<PhpType> = key
+                .union_members()
+                .into_iter()
+                .filter(|member| !member.is_array_like())
+                .cloned()
+                .collect();
+            let key = if kept.is_empty() {
+                PhpType::int()
+            } else {
+                normalize(&PhpType::union(kept))?
+            };
             let mut members: Vec<PhpType> = key
                 .union_members()
                 .into_iter()
@@ -1461,8 +1505,13 @@ enum RowOffset {
 }
 
 /// The value a row of type `row` holds at any of `keys` (the whole row for
-/// `None`), or `None` when the row is not an array.
-fn row_offset(row: &PhpType, keys: Option<&[String]>) -> Option<RowOffset> {
+/// `None`), or `None` when the row is neither an array nor an object
+/// [`ArrayFuncArgs::object_property`] can read.
+fn row_offset(
+    args: &dyn ArrayFuncArgs,
+    row: &PhpType,
+    keys: Option<&[String]>,
+) -> Option<RowOffset> {
     let Some(keys) = keys else {
         return Some(RowOffset::Certain(row.clone()));
     };
@@ -1486,6 +1535,14 @@ fn row_offset(row: &PhpType, keys: Option<&[String]>) -> Option<RowOffset> {
                             .unwrap_or_else(PhpType::mixed),
                     );
                 }
+                _ if member.is_object_like() => match args.object_property(member, key)? {
+                    ObjectProperty::Readable(value) => values.push(value),
+                    ObjectProperty::Missing => {}
+                    // One row that may or may not have the property says
+                    // nothing certain about any of them.
+                    ObjectProperty::MaybeReadable(value) => return Some(RowOffset::Maybe(value)),
+                    ObjectProperty::Unknown => return Some(RowOffset::Maybe(PhpType::mixed())),
+                },
                 _ => return None,
             }
         }
@@ -1500,6 +1557,7 @@ fn row_offset(row: &PhpType, keys: Option<&[String]>) -> Option<RowOffset> {
 /// [`array_column_type`] over a constant shape of `rows`, or `None` when a
 /// row may or may not have the column, or its key cannot be told.
 fn array_column_shape(
+    args: &dyn ArrayFuncArgs,
     rows: &[ShapeEntry],
     column: Option<&[String]>,
     index: Option<&[String]>,
@@ -1509,14 +1567,14 @@ fn array_column_shape(
     // An optional entry appended leaves the position of every later one open.
     let mut appended_optional = false;
     for row in rows {
-        let value = match row_offset(&row.value_type, column)? {
+        let value = match row_offset(args, &row.value_type, column)? {
             RowOffset::Never => continue,
             RowOffset::Certain(value) => value,
             RowOffset::Maybe(_) => return None,
         };
         let key = match index {
             None => None,
-            Some(index) => match row_offset(&row.value_type, Some(index))? {
+            Some(index) => match row_offset(args, &row.value_type, Some(index))? {
                 RowOffset::Never => None,
                 RowOffset::Certain(key) => Some(literal_array_key(&key)?),
                 RowOffset::Maybe(_) => return None,

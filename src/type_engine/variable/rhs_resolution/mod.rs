@@ -75,6 +75,7 @@ mod constant_access;
 mod conversion_calls;
 mod doctrine_calls;
 mod drupal_calls;
+mod exponentiation;
 mod function_calls;
 mod instantiation;
 mod key_path_calls;

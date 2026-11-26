@@ -38,56 +38,35 @@ No outstanding items.
 **Impact: Low · Complexity: Low-Medium**
 
 ```php
-date('N');   // string, should be '1'|'2'|'3'|'4'|'5'|'6'|'7'
+'foo'[0];   // string, should be 'f'
 ```
 
 The string functions that rewrite a literal, the numeric conversions
 (`intval()` and friends, `abs()`, `pow()`), `str_increment()`,
-`str_decrement()`, `strlen()`/`mb_strlen()`, `implode()` and
-`array_sum()`/`array_product()` fold, but `date()` with a literal format and
-the rest below do not. `mb_strlen()` with an encoding other than UTF-8 is not
+`str_decrement()`, `strlen()`/`mb_strlen()`, `implode()`,
+`array_sum()`/`array_product()` and `date()` fold, but an offset into a
+literal string and the rest below do not. `mb_strlen()` with an encoding other than UTF-8 is not
 measured either (`// SKIP` lines in `tests/phpstan_nsrt/mb-strlen-php83.php`).
 
 **Fix:** fold each function over its literal arguments, one at a time; each
 upstream fixture is the spec for its function.
 
-**Upstream cases** (PHPStan `nsrt/`): `date.php` (13), `range-function.php` (11), `constantTypes.php` (8), `string-offsets.php` (8), 19 more.
+**Upstream cases** (PHPStan `nsrt/`): `range-function.php` (11), `constantTypes.php` (8), `string-offsets.php` (8), 19 more.
 
-### B910. `**` does not work out its result from integer ranges or a trivial operand
+### B910. `**` with an operand PHP rejects is not an error type
 
 **Impact: Low · Complexity: Low-Medium**
 
 ```php
-$range = rand(1, 3);
-$range ** 2;        // int|float, should be int<1, 9>
-$int ** 0;          // int|float, should be 1
-$int ** true;       // int|float, should be int
-null ** $int;       // int|float, should be 0|1
-$gmp ** $object;    // GMP, should be GMP|stdClass
+$int ** [];         // int|float, should be *ERROR*
+'a' ** 1;           // int|float, should be *ERROR*
+pow(-1, 5.5);       // float, should be NAN
 ```
 
-Two known numbers fold, but integer ranges are not raised the way `+`, `-`
-and `*` combine them, an exponent of `0`, `1`, `null` or `bool` does not
-decide the result, an operand `**` rejects is not an error, and a plain
-object beside a `GMP` is dropped. `pow()` goes through the same typing.
-`rand()` with bounds is typed `int` rather than the range between them,
-which hides the range cases behind it. `// SKIP` lines in
+`**` and `pow()` throw a `TypeError` for an array or plain object operand,
+and for a non-numeric string, but the result is still typed as a number.
+A result that is not a number (`NAN`) is a plain `float`. `// SKIP` lines in
 `tests/phpstan_nsrt/pow.php`.
-
-### B795. `array_column()` does not read object rows
-
-**Impact: Low · Complexity: Low-Medium**
-
-```php
-/** @param list<Foo> $objects */
-array_column($objects, 'id');   // array, should be list<int>
-```
-
-Rows that are arrays are read, but a row that is an object returns the
-stub's `array`. PHP reads the named public property of each object (and
-`__get()` behind `__isset()`), and an index column that holds arrays is not
-cast to a key either. `// SKIP` lines in
-`tests/phpstan_nsrt/array-column-php82.php`.
 
 ### B819. Built-ins whose result their arguments decide return the declared type
 
@@ -115,7 +94,6 @@ It also shows as:
 - `ReflectionEnum` methods are not specialized by the reflected enum
 - `DatePeriod`'s constructor arguments do not decide its end-date and recurrence types
 - `strtotime()` of a literal string is not folded
-- `rand()` and `mt_rand()` with no arguments are `int`, not `int<0, max>` (`// SKIP` line in `tests/phpstan_nsrt/filterVar.php`)
 - `DateTimeInterface::format()` with a literal format is not typed by the format
 - `sscanf()` with a literal format and no output arguments is not typed as a shape
 
@@ -246,7 +224,10 @@ get_debug_type($o);   // string, should be 'stdClass'
 `get_debug_type()` only names an object whose class is final (or anonymous),
 since a variable typed with a class may hold a subclass instance. An object
 built with `new` is exactly that class, but its type does not say so.
-`// SKIP` line in `tests/phpstan_nsrt/get-debug-type.php`.
+`// SKIP` line in `tests/phpstan_nsrt/get-debug-type.php`. The same gap keeps
+`array_column()` over `[new Foo()]` reading a `protected` or `private`
+property as possibly there (`// SKIP` lines in
+`tests/phpstan_nsrt/array-column-php82.php`).
 
 ### B832. Array functions lose a shape merged with a generic array, an object key, or an array-or-string subject
 

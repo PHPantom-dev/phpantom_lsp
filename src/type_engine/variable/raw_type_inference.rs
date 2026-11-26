@@ -731,6 +731,84 @@ impl ArrayFuncArgs for AstArrayFuncArgs<'_, '_, '_> {
             Some(&self.ctx.file.class_loader),
         )
     }
+
+    fn object_property(
+        &self,
+        object: &PhpType,
+        name: &str,
+    ) -> Option<super::array_func_rules::ObjectProperty> {
+        object_property_from_scope(object, name, self.ctx)
+    }
+}
+
+/// [`ArrayFuncArgs::object_property`] read from the class the call is
+/// written in: a `private` property is readable from its own class, a
+/// `protected` one from the declaring class's family.
+fn object_property_from_scope(
+    object: &PhpType,
+    name: &str,
+    ctx: &VarResolutionCtx<'_>,
+) -> Option<super::array_func_rules::ObjectProperty> {
+    use super::array_func_rules::ObjectProperty;
+    use crate::types::Visibility;
+    let class_name = object.class_name()?;
+    let class = crate::class_lookup::find_or_load_resolved(
+        class_name.trim_start_matches('\\'),
+        ctx.file.all_classes,
+        ctx.file.class_loader,
+    )?;
+    let resolved = crate::virtual_members::resolve_class_fully_maybe_cached(
+        &class,
+        ctx.file.class_loader,
+        ctx.resolved_class_cache,
+    );
+    let Some(property) = resolved.get_property(name).filter(|p| !p.is_static) else {
+        return Some(if class.is_final {
+            ObjectProperty::Missing
+        } else {
+            ObjectProperty::Unknown
+        });
+    };
+    let value = || {
+        property
+            .type_hint
+            .clone()
+            .or_else(|| property.native_type_hint.clone())
+            .unwrap_or_else(PhpType::mixed)
+    };
+    let current = ctx.current_class;
+    let readable = match property.visibility {
+        Visibility::Public => true,
+        Visibility::Private => current.fqn() == class.fqn(),
+        Visibility::Protected => {
+            // The merged class no longer says which ancestor declared the
+            // property, so the scope is checked against the whole family.
+            current.fqn() == class.fqn()
+                || crate::class_lookup::is_subtype_of(
+                    current,
+                    class.fqn().as_str(),
+                    ctx.file.class_loader,
+                )
+                || crate::class_lookup::is_subtype_of(
+                    &class,
+                    current.fqn().as_str(),
+                    ctx.file.class_loader,
+                )
+        }
+    };
+    if readable {
+        return Some(ObjectProperty::Readable(value()));
+    }
+    if resolved.has_method("__isset") && resolved.has_method("__get") {
+        return Some(ObjectProperty::Unknown);
+    }
+    Some(if class.is_final {
+        ObjectProperty::Missing
+    } else if property.visibility == Visibility::Private {
+        ObjectProperty::Unknown
+    } else {
+        ObjectProperty::MaybeReadable(value())
+    })
 }
 
 /// For known array-producing functions, resolve the **raw output type**

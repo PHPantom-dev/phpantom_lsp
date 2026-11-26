@@ -204,6 +204,60 @@ impl IntInterval {
         }
     }
 
+    /// The interval of `base ** exponent` for every integer pair the two
+    /// intervals hold, or `None` when some pair can produce a `float`: a
+    /// negative exponent, a result past what an `int` holds, or a base that
+    /// is unbounded below (whose odd powers are too).
+    ///
+    /// For one exponent the power is monotonic in the base on either side
+    /// of zero, and for one base its magnitude is monotonic in the exponent
+    /// with the sign following the exponent's parity, so the extremes are
+    /// among the edge bases (and `-1`, `0`, `1` inside the interval) raised
+    /// to the lowest and highest exponent of each parity.
+    ///
+    /// An exponent unbounded above leaves the result open on the side a
+    /// base past `1` grows towards, the way PHPStan's ranges ignore the
+    /// overflow into `float` there; a base past `-1` below makes both sides
+    /// open, which is no range at all.
+    pub(crate) fn pow(self, exponent: Self) -> Option<Self> {
+        let e_min = exponent.min.filter(|&e| e >= 0)?;
+        let b_min = self.min?;
+        if exponent.max.is_none() && b_min <= -2 {
+            return None;
+        }
+        let grows_open =
+            self.max.is_none() || (exponent.max.is_none() && self.max.is_some_and(|b| b >= 2));
+        let mut bases: Vec<i64> = [Some(b_min), self.max]
+            .into_iter()
+            .flatten()
+            .chain(
+                [-1, 0, 1]
+                    .into_iter()
+                    .filter(|&b| b >= b_min && self.max.is_none_or(|max| b <= max)),
+            )
+            .collect();
+        bases.dedup();
+        let mut exponents: Vec<i64> = vec![e_min, e_min.saturating_add(1)];
+        if let Some(e_max) = exponent.max {
+            exponents.extend([e_max.saturating_sub(1), e_max]);
+            exponents.retain(|&e| e >= e_min && e <= e_max);
+        }
+        let mut lowest: Option<i64> = None;
+        let mut highest: Option<i64> = None;
+        for &base in &bases {
+            for &e in &exponents {
+                let value = i128::from(base).checked_pow(u32::try_from(e).ok()?)?;
+                let value = i64::try_from(value).ok()?;
+                lowest = Some(lowest.map_or(value, |low| low.min(value)));
+                highest = Some(highest.map_or(value, |high| high.max(value)));
+            }
+        }
+        Some(Self {
+            min: lowest,
+            max: if grows_open { None } else { highest },
+        })
+    }
+
     /// The interval of the absolute values: `int<-123, 5>` gives
     /// `int<0, 123>`.
     pub(crate) fn abs(self) -> Self {
@@ -413,6 +467,27 @@ mod tests {
             IntInterval::UNBOUNDED.mul(IntInterval::exact(0)),
             IntInterval::exact(0)
         );
+    }
+
+    #[test]
+    fn powers_take_the_extremes_of_each_exponent_parity() {
+        let i = |min, max| interval(Some(min), Some(max));
+        assert_eq!(i(1, 3).pow(i(2, 2)), Some(i(1, 9)));
+        assert_eq!(i(2, 3).pow(i(2, 3)), Some(i(4, 27)));
+        // An odd exponent keeps a negative base negative.
+        assert_eq!(i(-6, -4).pow(i(4, 6)), Some(i(-7776, 46656)));
+        assert_eq!(i(-2, 3).pow(i(0, 1)), Some(i(-2, 3)));
+        // A negative exponent can give a float.
+        assert_eq!(i(2, 3).pow(interval(None, Some(3))), None);
+        // So can an overflow.
+        assert_eq!(i(2, 3).pow(i(64, 64)), None);
+        // An exponent unbounded above opens the side a base past 1 grows to.
+        assert_eq!(
+            i(2, 3).pow(interval(Some(1), None)),
+            Some(interval(Some(2), None))
+        );
+        assert_eq!(i(-2, 3).pow(interval(Some(1), None)), None);
+        assert_eq!(i(-1, 1).pow(interval(Some(1), None)), Some(i(-1, 1)));
     }
 
     #[test]
