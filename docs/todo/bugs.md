@@ -2238,18 +2238,3 @@ It also shows as:
 - A short `set => expr` property hook's parameter has no type
 
 **Cases** (PHPStan `nsrt/`, 19 assertions): `property-hooks.php` (19).
-
-### B897. A bitwise operator with a `string` and a `mixed` operand gives `int`
-
-**Impact: Low · Complexity: Low**
-
-```php
-function f(string $s, $mixed) {
-    $s & $mixed;   // int, should be string
-    $mixed | $s;   // int, should be string
-}
-```
-
-The string-operand bitwise rule (string op string => string) is not used when the other side is mixed.
-
-**Cases** (PHPStan `nsrt/`, 6 assertions): `bitwise.php` (6).
