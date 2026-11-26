@@ -6304,8 +6304,9 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 <ul>
 <li><strong>Livewire 4's view locations are view roots.</strong> Templates in the directories Livewire 4's <code>component_locations</code> and <code>component_namespaces</code> settings name (by default <code>resources/views/livewire</code> and <code>pages::</code>) are views by those names, so <code>view()</code> and <code>@include</code> calls naming them are no longer reported as unknown. A <code>&lt;livewire:…&gt;</code> tag is checked against the components in every location the config names.</li>
 <li><strong><code>$app</code> is defined in every Blade template.</strong> Laravel shares the application with all views, so <code>{{ $app-&gt;getLocale() }}</code> is no longer reported as an undefined variable and its members complete.</li>
+<li><strong>No unknown-component report for a bare tag a package path answers.</strong> <code>&lt;x-badge&gt;</code> reaches a template a package registered with <code>Blade::anonymousComponentPath()</code> under a prefix, as Laravel resolves it, so it is no longer reported as unknown.</li>
 <li>
-<p><strong>No unknown-component report for a bare tag a package path answers.</strong> <code>&lt;x-badge&gt;</code> reaches a template a package registered with <code>Blade::anonymousComponentPath()</code> under a prefix, as Laravel resolves it, so it is no longer reported as unknown.</p>
+<p><strong>Creating a missing Inertia page stays inside the page directory.</strong> A page name with <code>..</code> segments, such as <code>Inertia::render('../../x')</code>, is reported as unknown but no longer offers to create a file outside the project.</p>
 </li>
 <li>
 <p><strong>Claude Code no longer sees outdated diagnostics after an edit.</strong> Results from before an edit, at line numbers that no longer match the file, are not reported to the agent as new findings.</p>
