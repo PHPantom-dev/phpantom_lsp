@@ -2211,10 +2211,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#b894-a-closures-inferred-return-type-misses-void-never-branch-returns-and-generator-values" class="md-nav__link">
+  <a href="#b912-analysis-time-doubles-with-each-level-of-nested-callback-arguments" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B894. A closure's inferred return type misses <code>void</code>, <code>never</code>, branch returns and generator values
+        B912. Analysis time doubles with each level of nested callback arguments
       </span>
     </span>
   </a>
@@ -4059,10 +4059,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#b894-a-closures-inferred-return-type-misses-void-never-branch-returns-and-generator-values" class="md-nav__link">
+  <a href="#b912-analysis-time-doubles-with-each-level-of-nested-callback-arguments" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B894. A closure's inferred return type misses <code>void</code>, <code>never</code>, branch returns and generator values
+        B912. Analysis time doubles with each level of nested callback arguments
       </span>
     </span>
   </a>
@@ -5584,21 +5584,27 @@ completion goes through the same path. <code>// SKIP</code> lines in
 <li><code>int-mask&lt;...&gt;</code> and <code>int-mask-of&lt;...&gt;</code> over non-contiguous values resolve to <code>int</code></li>
 </ul>
 <p><strong>Cases</strong> (PHPStan <code>nsrt/</code>, 12 assertions): <code>bug-9384.php</code> (9), <code>int-mask.php</code> (3).</p>
-<h3 id="b894-a-closures-inferred-return-type-misses-void-never-branch-returns-and-generator-values">B894. A closure's inferred return type misses <code>void</code>, <code>never</code>, branch returns and generator values<a class="headerlink" href="#b894-a-closures-inferred-return-type-misses-void-never-branch-returns-and-generator-values" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-104-1" name="__codelineno-104-1" href="#__codelineno-104-1"></a><span class="x">$f = function () use ($i) { if (rand(0, 1)) { return $i; } return null; };</span>
-<a id="__codelineno-104-2" name="__codelineno-104-2" href="#__codelineno-104-2"></a><span class="x">$f();   // null, should be int|null</span>
-<a id="__codelineno-104-3" name="__codelineno-104-3" href="#__codelineno-104-3"></a><span class="x">$g = function () { $a = ['foo' =&gt; 'bar']; return $a; };</span>
-<a id="__codelineno-104-4" name="__codelineno-104-4" href="#__codelineno-104-4"></a><span class="x">$g();   // mixed, should be array{foo: 'bar'}</span>
+<h3 id="b912-analysis-time-doubles-with-each-level-of-nested-callback-arguments">B912. Analysis time doubles with each level of nested callback arguments<a class="headerlink" href="#b912-analysis-time-doubles-with-each-level-of-nested-callback-arguments" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Complexity: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-104-1" name="__codelineno-104-1" href="#__codelineno-104-1"></a><span class="x">function t($x) {</span>
+<a id="__codelineno-104-2" name="__codelineno-104-2" href="#__codelineno-104-2"></a><span class="x">    $r = array_map(function ($q) use ($x) {</span>
+<a id="__codelineno-104-3" name="__codelineno-104-3" href="#__codelineno-104-3"></a><span class="x">        $y = $q;</span>
+<a id="__codelineno-104-4" name="__codelineno-104-4" href="#__codelineno-104-4"></a><span class="x">        if ($y) {</span>
+<a id="__codelineno-104-5" name="__codelineno-104-5" href="#__codelineno-104-5"></a><span class="x">            // … the same `array_map(function …)` again, one level deeper …</span>
+<a id="__codelineno-104-6" name="__codelineno-104-6" href="#__codelineno-104-6"></a><span class="x">        }</span>
+<a id="__codelineno-104-7" name="__codelineno-104-7" href="#__codelineno-104-7"></a><span class="x">        return array_filter([$y], function ($z) use ($x) { return $z; });</span>
+<a id="__codelineno-104-8" name="__codelineno-104-8" href="#__codelineno-104-8"></a><span class="x">    }, [$x]);</span>
+<a id="__codelineno-104-9" name="__codelineno-104-9" href="#__codelineno-104-9"></a><span class="x">    return $r;</span>
+<a id="__codelineno-104-10" name="__codelineno-104-10" href="#__codelineno-104-10"></a><span class="x">}</span>
 </code></pre></div>
-<p>Only the last top-level <code>return</code> seems to be read; returns nested in <code>if</code>/<code>else</code>, a bare <code>return;</code> mixed with a valued one, an implicit fall-through, and a returned local assigned in the body are missed.</p>
-<p>It also shows as:</p>
-<ul>
-<li>A closure with no <code>return</code> value is inferred as <code>mixed</code> instead of <code>void</code></li>
-<li>Generator closures widen yielded literals, lose <code>yield from</code> values, and ignore the body under a declared <code>Generator</code> or <code>iterable</code> return</li>
-<li>A closure that always ends in a <code>never</code> call or a <code>throw</code> is not inferred as <code>never</code></li>
-</ul>
-<p><strong>Cases</strong> (PHPStan <code>nsrt/</code>, 24 assertions): <code>closure-return-type.php</code> (15), <code>missing-closure-native-return-typehint.php</code> (7), <code>bug-7031.php</code> (2).</p>
+<p>Each level of closures passed as call arguments doubles the time
+<code>analyze</code> spends on the file: 0.8 s of CPU at 14 levels, 3.1 s at 16,
+12.6 s at 18 and 49 s at 20 (release build). The same nesting written
+as closures assigned to variables stays flat, because a closure
+literal's own body reading is memoized per request. The callback
+argument paths (template binding from a closure argument, and the
+callback return inference behind <code>array_map</code>/<code>array_filter</code>) re-read a
+nested callback once per enclosing level instead of sharing one answer.</p>
 <h3 id="b895-new-var-has-no-type-unless-var-is-a-class-stringt">B895. <code>new $var()</code> has no type unless <code>$var</code> is a <code>class-string&lt;T&gt;</code><a class="headerlink" href="#b895-new-var-has-no-type-unless-var-is-a-class-stringt" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Low</strong></p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-105-1" name="__codelineno-105-1" href="#__codelineno-105-1"></a><span class="x">/** @param mixed $a */</span>
