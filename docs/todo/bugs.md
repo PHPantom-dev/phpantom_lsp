@@ -2217,24 +2217,3 @@ It also shows as:
 - `new $class` has no type when `$class` is a plain string or an intersection with `class-string`
 
 **Cases** (PHPStan `nsrt/`, 9 assertions): `generic-class-string.php` (6), `bug-4579.php` (2), `bug-7374.php`.
-
-### B896. A property hook's `set` parameter does not take the property's type
-
-**Impact: Medium · Complexity: Low**
-
-```php
-/** @var array<string> */
-public array $l {
-    set { $value; }             // array, should be array<string>
-}
-/** @var array<T> */
-public array $m { set (array $val) { $val; } }   // array, should be array<T>
-```
-
-The implicit $value and an explicit `set (array $val)` parameter use only the native type; the property's @var (or promoted constructor @param) type is not applied.
-
-It also shows as:
-
-- A short `set => expr` property hook's parameter has no type
-
-**Cases** (PHPStan `nsrt/`, 19 assertions): `property-hooks.php` (19).

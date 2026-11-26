@@ -439,8 +439,14 @@ fn seed_from_call_site(
 /// `$this` is the enclosing instance (a hook can never be static), and a
 /// `set` hook receives the assigned value as a parameter.  When a `set`
 /// hook writes no parameter list of its own, PHP still gives it a `$value`
-/// typed as the property, so seed that from `property_hint`.
+/// typed as the property.
+///
+/// `property_name` is the hooked property's variable (with its `$`) and
+/// `property_hint` its native hint.  The property's declared type, `@var`
+/// or a promoted constructor parameter's `@param` included, is read from
+/// `ctx.current_class`.
 pub(crate) fn seed_property_hook_scope(
+    property_name: &str,
     property_hint: Option<&Hint<'_>>,
     hook: &PropertyHook<'_>,
     ctx: &ForwardWalkCtx<'_>,
@@ -448,39 +454,83 @@ pub(crate) fn seed_property_hook_scope(
     let mut scope = ScopeState::new();
     seed_this(&mut scope, ctx);
 
+    let property = property_name.strip_prefix('$').and_then(|name| {
+        ctx.current_class
+            .properties
+            .iter()
+            .find(|p| !p.is_static && p.name == name)
+    });
+
     if let Some(params) = &hook.parameter_list {
+        let hook_start = hook.span().start.offset;
         seed_params(
             &mut scope,
             params.parameters.iter(),
-            hook.span().start.offset,
+            hook_start,
             None,
             false,
             false,
             ctx,
         );
+        if let Some(property) = property {
+            seed_set_param_from_property(&mut scope, params, hook_start, property, ctx);
+        }
     } else if hook.name.value.eq_ignore_ascii_case(b"set") {
-        seed_implicit_set_value(&mut scope, property_hint, ctx);
+        let declared = property.and_then(|p| p.type_hint.clone()).or_else(|| {
+            property_hint.map(|hint| ctx.written_names().resolve_hint(&extract_hint_type(hint)))
+        });
+        match declared {
+            Some(declared) => scope.seed("$value", ctx.resolved_types_for(declared)),
+            None => scope.set_empty("$value"),
+        }
     }
 
     seed_superglobals(&mut scope);
     scope
 }
 
-/// Seed the `$value` a `set` hook receives when it declares no parameter
-/// list.  Its type is the property's own declared type.
-fn seed_implicit_set_value(
+/// Give a `set` hook's declared parameter the property's docblock type.
+///
+/// `set (array $val)` on a `@var array<string>` property takes the same
+/// values the property holds, so the parameter reads as `array<string>`.
+/// That holds only while the parameter's native hint is the property's
+/// own: a hook that widens it (`set (int|string $val)` on an `int`) takes
+/// values the property's type does not describe.  A `@param` on the hook
+/// itself has already been applied and wins.
+fn seed_set_param_from_property(
     scope: &mut ScopeState,
-    property_hint: Option<&Hint<'_>>,
+    params: &FunctionLikeParameterList<'_>,
+    hook_start: u32,
+    property: &crate::types::PropertyInfo,
     ctx: &ForwardWalkCtx<'_>,
 ) {
-    let Some(hint) = property_hint else {
-        scope.set_empty("$value");
+    let [param] = params.parameters.as_slice() else {
         return;
     };
-
-    let hint_type = ctx.written_names().resolve_hint(&extract_hint_type(hint));
-
-    scope.seed("$value", ctx.resolved_types_for(hint_type));
+    let (Some(declared), Some(native)) = (&property.type_hint, &property.native_type_hint) else {
+        return;
+    };
+    if declared == native {
+        return;
+    }
+    let Some(hint) = &param.hint else {
+        return;
+    };
+    let pname = bytes_to_str(param.variable.name);
+    if super::super::resolution::declared_param_docblock_type(
+        ctx.file.content,
+        hook_start as usize,
+        pname,
+    )
+    .is_some()
+    {
+        return;
+    }
+    let param_native = ctx.written_names().resolve_hint(&extract_hint_type(hint));
+    if !param_native.equivalent(native) {
+        return;
+    }
+    scope.seed(pname, ctx.resolved_types_for(declared.clone()));
 }
 
 /// Finish the type operators a declared type reads through a constant, or

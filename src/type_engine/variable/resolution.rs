@@ -547,6 +547,7 @@ fn resolve_variable_in_members<'b>(
                 continue;
             }
             return resolve_variable_in_property_hooks(
+                bytes_to_str(hooked.item.variable().name),
                 hooked.hint.as_ref(),
                 &hooked.hook_list,
                 ctx,
@@ -566,7 +567,12 @@ fn resolve_variable_in_members<'b>(
                 {
                     continue;
                 }
-                return resolve_variable_in_property_hooks(param.hint.as_ref(), hooks, ctx);
+                return resolve_variable_in_property_hooks(
+                    bytes_to_str(param.variable.name),
+                    param.hint.as_ref(),
+                    hooks,
+                    ctx,
+                );
             }
 
             // ── Concrete method: delegate entirely to the forward walker ──
@@ -616,6 +622,7 @@ fn resolve_variable_in_members<'b>(
 /// and a block-bodied hook can assign locals of its own.  The forward
 /// walker answers all three, the same way it does for a method body.
 fn resolve_variable_in_property_hooks(
+    property_name: &str,
     property_hint: Option<&Hint<'_>>,
     hook_list: &PropertyHookList<'_>,
     ctx: &VarResolutionCtx<'_>,
@@ -636,13 +643,46 @@ fn resolve_variable_in_property_hooks(
             ..super::forward_walk::ForwardWalkCtx::fresh_from_var_ctx(ctx, &flow)
         };
 
-        let mut scope = super::forward_walk::seed_property_hook_scope(property_hint, hook, &fw_ctx);
-        if let PropertyHookConcreteBody::Block(block) = body {
-            // Suspend snapshot recording for the same reason
-            // `resolve_in_method_body` does: this is a transient lookup,
-            // not the authoritative scope build.
-            let _suspend = super::forward_walk::suspend_snapshot_recording();
-            super::forward_walk::walk_body_forward(block.statements.iter(), &mut scope, &fw_ctx);
+        let mut scope = super::forward_walk::seed_property_hook_scope(
+            property_name,
+            property_hint,
+            hook,
+            &fw_ctx,
+        );
+        // Suspend snapshot recording for the same reason
+        // `resolve_in_method_body` does: this is a transient lookup, not
+        // the authoritative scope build.
+        let _suspend = super::forward_walk::suspend_snapshot_recording();
+        match body {
+            PropertyHookConcreteBody::Block(block) => {
+                super::forward_walk::walk_body_forward(
+                    block.statements.iter(),
+                    &mut scope,
+                    &fw_ctx,
+                );
+            }
+            // A short hook's expression can assign as much as a statement
+            // can (`set => $this->x = $value`), and can hold a closure the
+            // cursor is in.  Walked the way an arrow function's body is.
+            PropertyHookConcreteBody::Expression(expr_body) => {
+                let at_cursor = super::forward_walk::CursorScope::default();
+                let mut walked = scope.clone();
+                super::forward_walk::process_assignment_expr(
+                    expr_body.expression,
+                    &mut walked,
+                    &fw_ctx.with_cursor_scope(Some(&at_cursor)),
+                );
+                scope = at_cursor.take().unwrap_or(walked);
+                let mut nested = scope.clone();
+                if super::forward_walk::try_enter_closure_expr(
+                    expr_body.expression,
+                    &mut nested,
+                    &fw_ctx,
+                    None,
+                ) {
+                    scope = nested;
+                }
+            }
         }
 
         return scope.get(ctx.var_name).to_vec();

@@ -388,6 +388,7 @@ pub(crate) fn walk_class_member_body<'b>(
             for param in method.parameter_list.parameters.iter() {
                 if let Some(hooks) = &param.hooks {
                     walk_property_hook_bodies(
+                        bytes_to_str(param.variable.name),
                         param.hint.as_ref(),
                         hooks,
                         enclosing_class,
@@ -411,6 +412,7 @@ pub(crate) fn walk_class_member_body<'b>(
         }
         ClassLikeMember::Property(Property::Hooked(hooked)) => {
             walk_property_hook_bodies(
+                bytes_to_str(hooked.item.variable().name),
                 hooked.hint.as_ref(),
                 &hooked.hook_list,
                 enclosing_class,
@@ -428,6 +430,7 @@ pub(crate) fn walk_class_member_body<'b>(
 /// previously walked body left behind, so `$this` resolves to that body's
 /// class and every `$this->member` in the hook is flagged as unknown.
 fn walk_property_hook_bodies(
+    property_name: &str,
     property_hint: Option<&Hint<'_>>,
     hook_list: &PropertyHookList<'_>,
     enclosing_class: &ClassInfo,
@@ -443,7 +446,7 @@ fn walk_property_hook_bodies(
             continue;
         }
 
-        let mut scope = seed_property_hook_scope(property_hint, hook, &ctx);
+        let mut scope = seed_property_hook_scope(property_name, property_hint, hook, &ctx);
         diag_ctx.mark_walked(hook.span());
         record_scope_snapshot(hook.span().start.offset, &scope);
 

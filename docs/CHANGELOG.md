@@ -41,6 +41,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Claude Code no longer sees outdated diagnostics after an edit.** Results from before an edit, at line numbers that no longer match the file, are not reported to the agent as new findings.
 - **Claude Code follows files changed by shell commands.** A file rewritten or deleted by a command the agent runs, such as a formatter or `git checkout`, is picked up within a second instead of keeping its old contents until the agent next edits it.
+- **A property hook's `set` value has the property's type.** In `set { … }`, `set => …` and `set (array $val)`, the value is typed by the property's `@var` (or a promoted parameter's `@param`), so `array<string>` instead of plain `array`. Short `set =>` hooks now type their value at all.
 - **Bitwise operators on strings with an untyped operand give a string.** `$string & $mixed` and `$mixed | $string` are `string`, and when both operands may be strings, such as `int|string ^ string`, the result is `int|string` instead of `int`.
 - **`is_callable()` keeps a string a string.** Inside `if (is_callable($name))` a string variable is a `callable-string`, and after the `if` it is a plain `string` again instead of `callable|string`.
 - **Missing properties on the left of `??` are no longer reported.** `$this->label ?? ''` and `$this->cache ??= []` read the property the way `isset()` does, so a property the class does not declare is not an error there. A missing method on that side is still reported.
