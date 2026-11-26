@@ -1321,17 +1321,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#l49-unguarded-eloquent-mass-assignment-diagnostic" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        L49. Unguarded Eloquent mass assignment diagnostic
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#l72-unknown-eloquent-columns-and-relations-in-query-strings" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1984,17 +1973,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#l49-unguarded-eloquent-mass-assignment-diagnostic" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        L49. Unguarded Eloquent mass assignment diagnostic
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#l72-unknown-eloquent-columns-and-relations-in-query-strings" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2637,24 +2615,6 @@ translation keys. Surface as an opt-in workspace report
 always-on diagnostics — dynamic construction (<code>view("emails.$type")</code>)
 makes "unused" inherently a heuristic, so it must read as "no static
 reference found," never as an error.</p>
-<h4 id="l49-unguarded-eloquent-mass-assignment-diagnostic">L49. Unguarded Eloquent mass assignment diagnostic<a class="headerlink" href="#l49-unguarded-eloquent-mass-assignment-diagnostic" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<p>A model that declares neither <code>$fillable</code> nor <code>$guarded</code> is totally
-guarded: <code>Model::create($request-&gt;all())</code> (and <code>fill()</code>/<code>update()</code>)
-throws <code>MassAssignmentException</code> for any attribute at all, a common
-first-app footgun with no signal today. (Silently dropping unknown keys
-only happens once <code>$fillable</code> is declared.) Flag a call whose
-attribute-array argument is not a literal (so its keys can't be checked
-individually) and whose target model declares neither <code>$fillable</code> nor
-<code>$guarded</code>, nor the <code>#[Fillable]</code>/<code>#[Guarded]</code>/<code>#[Unguarded]</code> model
-attributes, and the project never calls <code>Model::unguard()</code>, on <code>create()</code>, <code>fill()</code>, <code>update()</code>,
-<code>updateOrCreate()</code>, <code>firstOrCreate()</code>, and <code>firstOrNew()</code>. The model
-resolution and column-source machinery used by attribute-array key
-completion shares the same receiver-typing path as the diagnostic's
-model-argument matching, so reuse it.</p>
-<p><strong>Where to look:</strong> <code>virtual_members/laravel/model_extraction/</code> for
-existing <code>$fillable</code>/<code>$guarded</code> reads; <code>diagnostics/</code> for the
-call-site diagnostic pattern used by similarly-shaped checks.</p>
 <h4 id="l72-unknown-eloquent-columns-and-relations-in-query-strings">L72. Unknown Eloquent columns and relations in query strings<a class="headerlink" href="#l72-unknown-eloquent-columns-and-relations-in-query-strings" title="Permanent link">&para;</a></h4>
 <p><strong>Impact: Medium-High · Complexity: Medium</strong></p>
 <p>Relation and column names passed as strings to a model's query builder
