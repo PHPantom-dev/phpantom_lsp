@@ -2254,17 +2254,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b896-a-property-hooks-set-parameter-does-not-take-the-propertys-type" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B896. A property hook's <code>set</code> parameter does not take the property's type
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -4135,17 +4124,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b896-a-property-hooks-set-parameter-does-not-take-the-propertys-type" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B896. A property hook's <code>set</code> parameter does not take the property's type
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -5703,21 +5681,6 @@ completion goes through the same path. <code>// SKIP</code> lines in
 <li><code>new $class</code> has no type when <code>$class</code> is a plain string or an intersection with <code>class-string</code></li>
 </ul>
 <p><strong>Cases</strong> (PHPStan <code>nsrt/</code>, 9 assertions): <code>generic-class-string.php</code> (6), <code>bug-4579.php</code> (2), <code>bug-7374.php</code>.</p>
-<h3 id="b896-a-property-hooks-set-parameter-does-not-take-the-propertys-type">B896. A property hook's <code>set</code> parameter does not take the property's type<a class="headerlink" href="#b896-a-property-hooks-set-parameter-does-not-take-the-propertys-type" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-108-1" name="__codelineno-108-1" href="#__codelineno-108-1"></a><span class="x">/** @var array&lt;string&gt; */</span>
-<a id="__codelineno-108-2" name="__codelineno-108-2" href="#__codelineno-108-2"></a><span class="x">public array $l {</span>
-<a id="__codelineno-108-3" name="__codelineno-108-3" href="#__codelineno-108-3"></a><span class="x">    set { $value; }             // array, should be array&lt;string&gt;</span>
-<a id="__codelineno-108-4" name="__codelineno-108-4" href="#__codelineno-108-4"></a><span class="x">}</span>
-<a id="__codelineno-108-5" name="__codelineno-108-5" href="#__codelineno-108-5"></a><span class="x">/** @var array&lt;T&gt; */</span>
-<a id="__codelineno-108-6" name="__codelineno-108-6" href="#__codelineno-108-6"></a><span class="x">public array $m { set (array $val) { $val; } }   // array, should be array&lt;T&gt;</span>
-</code></pre></div>
-<p>The implicit $value and an explicit <code>set (array $val)</code> parameter use only the native type; the property's @var (or promoted constructor @param) type is not applied.</p>
-<p>It also shows as:</p>
-<ul>
-<li>A short <code>set =&gt; expr</code> property hook's parameter has no type</li>
-</ul>
-<p><strong>Cases</strong> (PHPStan <code>nsrt/</code>, 19 assertions): <code>property-hooks.php</code> (19).</p>
 
 
 
