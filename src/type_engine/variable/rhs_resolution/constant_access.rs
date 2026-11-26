@@ -33,7 +33,7 @@ pub(super) fn resolve_rhs_constant_access(
     if let Some(ts) = global_constant_type(name, ca.name.span().start.offset, ctx) {
         return vec![ResolvedType::from_type_string(ts)];
     }
-    crate::resolution::unversioned_php_version_constant_type(
+    crate::resolution::environment_constant_type(
         name_clean,
         ctx.file.backend.map(|backend| backend.php_version()),
     )

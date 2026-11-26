@@ -82,7 +82,7 @@ mod loaders;
 pub(crate) mod project_scope;
 
 pub(crate) use classes::{ClassLoadHooks, needs_linking};
-pub(crate) use constants::{DefineSearch, unversioned_php_version_constant_type};
+pub(crate) use constants::{DefineSearch, environment_constant_type};
 pub(crate) use include_paths::include_sites;
 pub(crate) use inflight::ParseInflight;
 pub(crate) use loaders::FileLoaders;

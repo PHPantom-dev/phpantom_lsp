@@ -6228,6 +6228,50 @@ function probe(): void {
     );
 }
 
+/// `E_ALL` follows from the configured version: `E_STRICT` left it in 8.4,
+/// so the stubs' value is wrong for older versions.
+#[test]
+fn hover_e_all_follows_the_configured_version() {
+    let backend = create_test_backend_with_full_stubs();
+    backend.set_php_version(phpantom_lsp::types::PhpVersion::new(8, 3));
+    let uri = "file:///e_all.php";
+    let content = r#"<?php
+function probe(): void {
+    $all = E_ALL;
+    $all;
+}
+"#;
+    let all = hover_text(&hover_at(&backend, uri, content, 3, 6).expect("hover $all")).to_string();
+    assert!(all.contains("32767"), "E_ALL on PHP 8.3: {all}");
+}
+
+/// A constant whose value depends on the platform or the install is typed
+/// by what every build agrees on, not by the stubs' sample value.
+#[test]
+fn hover_environment_constants_are_not_the_stubs_sample_value() {
+    let backend = create_test_backend_with_full_stubs();
+    let uri = "file:///environment_constants.php";
+    let content = r#"<?php
+function probe(): void {
+    $os = PHP_OS;
+    $separator = DIRECTORY_SEPARATOR;
+    $os;
+    $separator;
+}
+"#;
+    let os = hover_text(&hover_at(&backend, uri, content, 4, 6).expect("hover $os")).to_string();
+    assert!(
+        os.contains("non-falsy-string") && !os.contains("Linux"),
+        "PHP_OS depends on the platform: {os}"
+    );
+    let separator =
+        hover_text(&hover_at(&backend, uri, content, 5, 6).expect("hover $separator")).to_string();
+    assert!(
+        separator.contains(r"'/'|'\\'"),
+        "DIRECTORY_SEPARATOR is either separator: {separator}"
+    );
+}
+
 /// A parameter typed by a `@phpstan-type` alias is seeded with what the
 /// alias stands for, so narrowing sees its members.
 #[test]

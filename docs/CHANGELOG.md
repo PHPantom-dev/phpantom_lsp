@@ -37,6 +37,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Sorting renumbers every kind of array.** `sort()`, `shuffle()` and the other renumbering sorts turn a union of shapes, a bare `array` or an untyped variable into a list.
 - **A `??` fallback compared away narrows its left side.** After `($x ?? '') !== ''`, `$x` is a non-empty string rather than still possibly `null`, and `max($n, 1)` of a nullable `$n` is at least 1.
 - **Reading an offset of a `non-empty-array` is `mixed`.** It used to have no type at all, so a check on the offset narrowed nothing.
+- **Platform-dependent constants are no longer typed as one machine's value.** `PHP_OS`, `DIRECTORY_SEPARATOR`, `PHP_EOL`, the install paths and the library versions have the type every build agrees on (`DIRECTORY_SEPARATOR` is `'/'|'\\'`) instead of the value they had where the stubs were generated, and `E_ALL` matches the configured PHP version.
 - **Bitwise compound assignments keep a known value.** `$flags |= PREG_SPLIT_NO_EMPTY` on a known integer leaves the combined value, as `$flags | PREG_SPLIT_NO_EMPTY` does, instead of `int`.
 - **`settype()` changes its variable's type.** After `settype($x, 'int')`, `$x` has the type `(int) $x` would give.
 - **Casts are more precise.** `(int)` and `(float)` of a non-numeric string fold to the value PHP gives (`(int) 'abc'` is `0`, `(int) '12abc'` is `12`), `(bool)` of an object or a non-empty array is `true`, and `(float)` of a `bool` or an array is `0.0|1.0`.

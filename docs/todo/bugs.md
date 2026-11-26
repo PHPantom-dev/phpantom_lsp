@@ -2298,23 +2298,3 @@ It also shows as:
 
 **Cases** (PHPStan `nsrt/`, 5 assertions): `foreach-object-type.php` (3), `bug-4267.php` (2).
 
-### B901. Environment-dependent predefined constants take the stubs' placeholder value
-
-**Impact: Medium · Complexity: Low**
-
-```php
-PHP_OS;                 // got "Linux", should be non-falsy-string
-DEFAULT_INCLUDE_PATH;   // got ".:/usr/share/php:/usr/share/pear", should be string
-DIRECTORY_SEPARATOR;    // got "/", should be '/'|'\\'
-PHP_WINDOWS_VERSION_MAJOR; // got 0, should be int<4, max>
-```
-
-Constants whose value depends on the build, OS or install (paths, PHP_OS, PHP_SAPI, PHP_ZTS, PHP_MAXPATHLEN, PHP_SHLIB_SUFFIX, library versions, PHP_BUILD_DATE, __COMPILER_HALT_OFFSET__, the Windows constants) are read from the stub's sample value. They should get the type the stub's value has, not the value itself. Version constants matching the configured PHP version and PHP_INT_SIZE are fine and were left out.
-
-It also shows as:
-
-- Platform-dependent predefined constants are typed as the analysing machine's value
-
-**Fix:** type `PHP_OS`, path and platform constants by their declared type rather than the stub's sample value; keep folding only the constants whose value the configured PHP version fixes.
-
-**Cases** (PHPStan `nsrt/`, 34 assertions): `predefined-constants.php` (31), `predefined-constants-php72.php` (2), `predefined-constants-php85.php`.

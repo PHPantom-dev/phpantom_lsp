@@ -186,7 +186,7 @@ impl Backend {
                 ) {
                 None => None,
                 Some(Some(value)) => super::global_constant_value_type(trimmed, &value, ctx),
-                Some(None) => crate::resolution::unversioned_php_version_constant_type(
+                Some(None) => crate::resolution::environment_constant_type(
                     trimmed,
                     Some(backend.php_version()),
                 ),

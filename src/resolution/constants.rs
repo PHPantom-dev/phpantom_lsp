@@ -170,11 +170,11 @@ impl Backend {
         candidates: &[&str],
         search: DefineSearch,
     ) -> Option<Option<String>> {
-        // The stubs record the version of the PHP build they were generated
-        // on (`PHP_VERSION_ID` 50306); the one the project runs on is the
-        // configured version, down to the minor.
+        // The stubs record the PHP build they were generated on
+        // (`PHP_VERSION_ID` 50306, `PHP_OS` "Linux"); the one the project runs
+        // on is the configured version, down to the minor, on any platform.
         for name in candidates {
-            if let Some(value) = self.php_version_constant(name) {
+            if let Some(value) = self.environment_constant(name) {
                 return Some(value);
             }
         }
@@ -240,7 +240,7 @@ impl Backend {
     fn declared_constant_name<'c>(&self, candidates: &[&'c str]) -> Option<&'c str> {
         if let Some(&name) = candidates
             .iter()
-            .find(|name| self.php_version_constant(name).is_some())
+            .find(|name| self.environment_constant(name).is_some())
         {
             return Some(name);
         }
@@ -260,18 +260,29 @@ impl Backend {
             .find(|name| stubs.contains_key(name))
     }
 
-    /// The value of a constant that describes the running PHP version, or
-    /// `None` when `name` is not one.
+    /// The value of a predefined constant that describes the PHP build the
+    /// code runs on, or `None` when `name` is not one.
     ///
-    /// The major and minor versions are the configured ones.  The rest
-    /// depend on the patch release, which nothing configures, so they exist
-    /// with an unknown value (`Some(None)`).
-    fn php_version_constant(&self, name: &str) -> Option<Option<String>> {
+    /// The major and minor versions are the configured ones, and so is
+    /// whatever follows from them (`E_ALL`).  The rest depend on the patch
+    /// release, the OS or the install, which nothing configures, so they
+    /// exist with an unknown value (`Some(None)`) and are typed by
+    /// [`environment_constant_type`].
+    fn environment_constant(&self, name: &str) -> Option<Option<String>> {
         let version = || self.php_version();
         match name {
             "PHP_MAJOR_VERSION" => Some(Some(version().major.to_string())),
             "PHP_MINOR_VERSION" => Some(Some(version().minor.to_string())),
-            _ if unversioned_php_version_constant_type(name, None).is_some() => Some(None),
+            // `E_STRICT` left `E_ALL` in PHP 8.4.
+            "E_ALL" => Some(Some(
+                if version() >= PhpVersion::new(8, 4) {
+                    "30719"
+                } else {
+                    "32767"
+                }
+                .to_owned(),
+            )),
+            _ if environment_constant_type(name, None).is_some() => Some(None),
             _ => None,
         }
     }
@@ -292,23 +303,73 @@ impl Backend {
     }
 }
 
-/// The type of a PHP version constant whose value depends on the patch
-/// release (see `Backend::php_version_constant`), or `None` for any other
-/// name.
+/// The type of a predefined constant whose value the configured PHP version
+/// does not fix, or `None` for any other name.
 ///
-/// `PHP_VERSION_ID` is still pinned down to the configured minor version's
-/// range (`int<80500, 80599>` on PHP 8.5) when `version` is known.
-pub(crate) fn unversioned_php_version_constant_type(
+/// The stubs give these constants the value they had on the machine the
+/// stubs were generated on (`PHP_OS` is `"Linux"`, `DIRECTORY_SEPARATOR` is
+/// `"/"`), which says nothing about the one the code will run on. What every
+/// build agrees on is the type. `PHP_VERSION_ID` is still pinned down to the
+/// configured minor version's range (`int<80500, 80599>` on PHP 8.5) when
+/// `version` is known.
+pub(crate) fn environment_constant_type(
     name: &str,
     version: Option<PhpVersion>,
 ) -> Option<PhpType> {
-    match name {
-        "PHP_VERSION_ID" => Some(version.map_or_else(PhpType::int, |version| {
-            let base = u32::from(version.major) * 10_000 + u32::from(version.minor) * 100;
-            PhpType::int_range(base.to_string(), (base + 99).to_string())
-        })),
-        "PHP_RELEASE_VERSION" => Some(PhpType::int()),
-        "PHP_VERSION" | "PHP_EXTRA_VERSION" => Some(PhpType::string()),
-        _ => None,
-    }
+    let ty = match name {
+        "PHP_VERSION_ID" => {
+            return Some(version.map_or_else(PhpType::int, |version| {
+                let base = u32::from(version.major) * 10_000 + u32::from(version.minor) * 100;
+                PhpType::int_range(base.to_string(), (base + 99).to_string())
+            }));
+        }
+        "PHP_EOL" => {
+            return Some(PhpType::union(vec![
+                PhpType::literal_string_raw(r#""\n""#),
+                PhpType::literal_string_raw(r#""\r\n""#),
+            ]));
+        }
+        "PHP_RELEASE_VERSION" | "PHP_WINDOWS_VERSION_MINOR" => "int<0, max>",
+        "PHP_MAXPATHLEN"
+        | "PHP_FD_SETSIZE"
+        | "__COMPILER_HALT_OFFSET__"
+        | "PHP_WINDOWS_VERSION_BUILD"
+        | "LIBXML_VERSION"
+        | "OPENSSL_VERSION_NUMBER" => "int<1, max>",
+        "PHP_WINDOWS_VERSION_MAJOR" => "int<4, max>",
+        "PHP_ZTS" | "PHP_DEBUG" => "0|1",
+        "PHP_VERSION"
+        | "PHP_BUILD_DATE"
+        | "PHP_OS"
+        | "PHP_EXTENSION_DIR"
+        | "PHP_PREFIX"
+        | "PHP_BINDIR"
+        | "PHP_BINARY"
+        | "PHP_MANDIR"
+        | "PHP_LIBDIR"
+        | "PHP_DATADIR"
+        | "PHP_SYSCONFDIR"
+        | "PHP_LOCALSTATEDIR"
+        | "PHP_CONFIG_FILE_PATH"
+        | "ICONV_IMPL"
+        | "LIBXML_DOTTED_VERSION"
+        | "PCRE_VERSION" => "non-falsy-string",
+        "PHP_EXTRA_VERSION"
+        | "DEFAULT_INCLUDE_PATH"
+        | "PEAR_INSTALL_DIR"
+        | "PEAR_EXTENSION_DIR"
+        | "PHP_CONFIG_FILE_SCAN_DIR" => "string",
+        "PHP_OS_FAMILY" => "'Windows'|'BSD'|'Darwin'|'Solaris'|'Linux'|'Unknown'",
+        "PHP_SAPI" => {
+            "'apache'|'apache2handler'|'cgi'|'cli'|'cli-server'|'embed'|'fpm-fcgi'|'litespeed'|'phpdbg'|non-falsy-string"
+        }
+        "PHP_SHLIB_SUFFIX" => "'so'|'dll'",
+        "DIRECTORY_SEPARATOR" => "'/'|'\\\\'",
+        "PATH_SEPARATOR" => "':'|';'",
+        // The stubs write these rounded to fewer digits than a double holds,
+        // so their literal is not the value PHP has.
+        "PHP_FLOAT_EPSILON" | "PHP_FLOAT_MIN" | "PHP_FLOAT_MAX" => "float",
+        _ => return None,
+    };
+    Some(PhpType::parse(ty))
 }
