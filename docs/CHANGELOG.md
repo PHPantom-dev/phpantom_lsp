@@ -15,7 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **Project tools only run in a trusted workspace.** PHPStan, PHP_CodeSniffer, PHPMD, Mago and external formatters execute the project's code, so the language server now runs them only once the workspace is trusted. VS Code and Zed already ask before starting the server, other editors ask once per project, and `phpantom_lsp trust` covers editors that cannot show the question. See [Project tools and workspace trust](configuration.md#project-tools-and-workspace-trust).
+- **Project tools only run in a trusted workspace.** PHPStan, PHP_CodeSniffer, PHPMD, Mago and external formatters execute the project's code, so the language server now runs them only once the workspace is trusted. VS Code and Zed already ask before starting the server, other editors ask once per project, and `phpantom_lsp trust` covers editors that cannot show the question. See [Project tools and workspace trust](configuration.md#project-tools-and-workspace-trust). Reported by @bhavyamalhotra2210.
 
 ### Fixed
 
@@ -23,7 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`$app` is defined in every Blade template.** Laravel shares the application with all views, so `{{ $app->getLocale() }}` is no longer reported as an undefined variable and its members complete.
 - **No unknown-component report for a bare tag a package path answers.** `<x-badge>` reaches a template a package registered with `Blade::anonymousComponentPath()` under a prefix, as Laravel resolves it, so it is no longer reported as unknown.
 - **A Laravel application in a subdirectory of the workspace is read from its own directory.** When the workspace is a monorepo opened at its top, with the application in a folder such as `backend/`, its views, config, routes, translations, `.env`, assets and auth model are found there, so `view()` names and `Auth::user()` resolve instead of being reported.
-- **Creating a missing Inertia page stays inside the page directory.** A page name with `..` segments, such as `Inertia::render('../../x')`, is reported as unknown but no longer offers to create a file outside the project.
+- **Creating a missing Inertia page stays inside the page directory.** A page name with `..` segments, such as `Inertia::render('../../x')`, is reported as unknown but no longer offers to create a file outside the project. Reported by @bhavyamalhotra2210.
 
 - **Claude Code no longer sees outdated diagnostics after an edit.** Results from before an edit, at line numbers that no longer match the file, are not reported to the agent as new findings.
 - **Claude Code follows files changed by shell commands.** A file rewritten or deleted by a command the agent runs, such as a formatter or `git checkout`, is picked up within a second instead of keeping its old contents until the agent next edits it.
@@ -101,7 +101,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`throw` as an expression is `never`.** `fn () => throw new Exception()` returns `never`.
 - **`base64_decode()` returns `false` only in strict mode.** Without `$strict` it is typed `string`.
 - **`pathinfo()` may leave out `dirname`.** The empty path has no directory part, so the array's `dirname` key is optional.
-- **A corrupt `.phar` no longer crashes the server.** An archive whose header claims more files than it holds is skipped during indexing instead of aborting the process.
+- **A corrupt `.phar` no longer crashes the server.** An archive whose header claims more files than it holds is skipped during indexing instead of aborting the process. Reported by @bhavyamalhotra2210.
 
 ## [1.1.0] - 2026-11-24
 
