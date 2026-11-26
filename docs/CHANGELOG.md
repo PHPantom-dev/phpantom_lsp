@@ -94,6 +94,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`throw` as an expression is `never`.** `fn () => throw new Exception()` returns `never`.
 - **`base64_decode()` returns `false` only in strict mode.** Without `$strict` it is typed `string`.
 - **`pathinfo()` may leave out `dirname`.** The empty path has no directory part, so the array's `dirname` key is optional.
+- **A corrupt `.phar` no longer crashes the server.** An archive whose header claims more files than it holds is skipped during indexing instead of aborting the process.
 
 ## [1.1.0] - 2026-11-24
 

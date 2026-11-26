@@ -27,6 +27,10 @@ const HALT_COMPILER_MARKER: &[u8] = b"__HALT_COMPILER(); ?>";
 /// Compression flag mask (bits 12–15).
 const COMPRESSION_MASK: u32 = 0xF000;
 
+/// The smallest manifest entry: name length, uncompressed size,
+/// timestamp, compressed size, CRC32, flags and metadata length.
+const MIN_ENTRY_LEN: usize = 7 * 4;
+
 /// A parsed phar archive with random-access file extraction.
 pub(crate) struct PharArchive {
     /// Where the archive lives, so file contents can be read on demand.
@@ -114,6 +118,13 @@ impl PharArchive {
             return None;
         }
         cursor += metadata_len;
+
+        // Every entry takes at least `MIN_ENTRY_LEN` bytes of the manifest, so a count the manifest cannot
+        // hold is corrupt.  Rejecting it here also keeps the capacity
+        // reservations below from trusting an attacker-sized number.
+        if file_count > manifest_end.saturating_sub(cursor) / MIN_ENTRY_LEN {
+            return None;
+        }
 
         // 3. Parse each file entry and build the index.
         //    We collect entries first, then compute offsets into the data area.
@@ -451,6 +462,23 @@ mod tests {
     fn parse_returns_none_for_garbage() {
         assert!(parse_test_phar(&[0, 1, 2, 3]).is_none());
         assert!(parse_test_phar(&[]).is_none());
+    }
+
+    #[test]
+    fn file_count_larger_than_the_manifest_is_rejected() {
+        // A count of 0xFFFFFFFF once went straight into `Vec::with_capacity`
+        // and aborted the process on a 171 GB allocation.
+        let mut bytes = build_test_phar(&[("src/Foo.php", b"<?php class Foo {}")]);
+        let count_pos = memmem::find(&bytes, HALT_COMPILER_MARKER).expect("marker")
+            + HALT_COMPILER_MARKER.len()
+            + 1 // `\n`
+            + 4; // manifest length
+        bytes[count_pos..count_pos + 4].copy_from_slice(&u32::MAX.to_le_bytes());
+        assert!(parse_test_phar(&bytes).is_none());
+
+        // One more entry than the manifest holds is rejected too.
+        bytes[count_pos..count_pos + 4].copy_from_slice(&2u32.to_le_bytes());
+        assert!(parse_test_phar(&bytes).is_none());
     }
 
     #[test]
