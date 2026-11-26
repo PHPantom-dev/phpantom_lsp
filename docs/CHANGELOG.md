@@ -25,7 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### Doctrine
 
-- **Navigate Doctrine XML fields.** Go to a mapped property from its field or association name. References and rename include the XML mapping alongside PHP usages. Contributed by @shuvroroy.
+- **Navigate Doctrine XML fields.** A field or association name in an XML mapping goes to the property it maps and shows its hover, and find references and rename on the property include the mapping. Contributed by @shuvroroy.
 
 ### Changed
 

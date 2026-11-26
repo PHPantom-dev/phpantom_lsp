@@ -9,12 +9,12 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 
-use crate::symbol_map::SymbolSpan;
 use parking_lot::RwLock;
 
 use crate::framework::{
     leading_spaces, line_offsets, normalize_framework_fqn, strip_yaml_quotes, xml_attr_value,
 };
+use crate::symbol_map::SymbolSpan;
 
 /// A class a mapping file maps, and the fields it maps on it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -40,6 +40,8 @@ pub(crate) fn new_mapping_file_index() -> MappingFileIndex {
 
 /// Record the classes `content` maps under `uri`, or forget the document
 /// when it maps none.  Returns whether that changed what the index holds.
+/// When `spans` is given, the spans of the PHP properties an XML mapping
+/// names are added to it.
 pub(crate) fn index_mapping_file(
     index: &MappingFileIndex,
     uri: &str,
@@ -260,6 +262,21 @@ fn scan_xml(content: &str, mut spans: Option<&mut Vec<SymbolSpan>>) -> Vec<Mappe
             if attr == "field" {
                 let target = xml_attr_value(tag, 0, &["target-entity"])
                     .map(|(target, _, _)| qualify_target(&class.fqn, &target));
+                // The other side of a bidirectional association names its
+                // property on the target entity, so a rename must reach it.
+                if let (Some(out), Some(target)) = (spans.as_deref_mut(), target.as_deref()) {
+                    for side in ["mapped-by", "inversed-by"] {
+                        if let Some((property, property_start, _)) =
+                            xml_attr_value(tag, start + 1, &[side])
+                        {
+                            out.push(crate::resource_navigation::property_span(
+                                target,
+                                &property,
+                                property_start,
+                            ));
+                        }
+                    }
+                }
                 class.associations.push((field.clone(), target));
             }
             class.fields.push(field);
@@ -467,6 +484,55 @@ App\\Entity\\User:
                     ("owner".into(), None),
                 ],
             }]
+        );
+    }
+
+    #[test]
+    fn xml_mapping_names_the_properties_of_both_association_sides() {
+        let xml = r#"<doctrine-mapping>
+  <entity name="App\Entity\User">
+    <field name="email"/>
+    <many-to-one field="team" target-entity="Team" inversed-by="members"/>
+  </entity>
+  <entity name="App\Entity\Team">
+    <one-to-many field="members" target-entity="User" mapped-by="team"/>
+  </entity>
+</doctrine-mapping>"#;
+        let mut spans = Vec::new();
+        scan_mapping_file(
+            "file:///p/config/doctrine/User.orm.xml",
+            xml,
+            Some(&mut spans),
+        );
+        let named: Vec<(String, String)> = spans
+            .iter()
+            .map(|span| {
+                let crate::symbol_map::SymbolKind::MemberAccess {
+                    subject_text,
+                    member_name,
+                    ..
+                } = &span.kind
+                else {
+                    panic!("not a property: {span:?}");
+                };
+                let text = &xml[span.start as usize..span.end as usize];
+                assert_eq!(text, member_name.as_str());
+                (
+                    subject_text.synthesised().unwrap().to_string(),
+                    text.to_string(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            named,
+            [
+                ("App\\Entity\\User", "email"),
+                ("App\\Entity\\User", "team"),
+                ("App\\Entity\\Team", "members"),
+                ("App\\Entity\\Team", "members"),
+                ("App\\Entity\\User", "team"),
+            ]
+            .map(|(class, property)| (class.to_string(), property.to_string()))
         );
     }
 

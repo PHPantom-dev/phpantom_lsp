@@ -6,8 +6,6 @@ catalogues together, the way a real Symfony project does.
 
 ## What to try
 
-- In `config/doctrine/User.orm.xml`, navigate from `displayName` or `team` to the property on `User`, or rename the property across PHP and XML.
-
 - Open `config/services.yaml`, `config/routes.yaml`,
   `config/doctrine/User.orm.xml`, or `config/validator/User.yaml` and use
   go-to-definition on a PHP class name, or on the `Class::method` in a route's
@@ -136,6 +134,9 @@ catalogues together, the way a real Symfony project does.
   `findBy<Field>()`, `findOneBy<Field>()`, and `countBy<Field>()` for each
   field `config/doctrine/User.orm.xml` maps, and the keys of `findBy()`
   complete those fields and jump to their properties.
+- In `config/doctrine/User.orm.xml`, go to the definition of `displayName`
+  or `team` to reach the property on `User`, or hover it. Find references
+  and rename on the property include the mapping, from either file.
 - In `UserRepository::named()`, complete after `u.` in the query builder
   or the DQL string. The fields of the entity the variable stands for
   complete and jump to their properties, the entity class in `FROM` jumps
