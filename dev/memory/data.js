@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795724173201,
+  "lastUpdate": 1795725080674,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -18009,6 +18009,65 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_yii_action",
             "value": 107,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "e6f3982ca27380581ccec02a93fa2fd7754ea2c8",
+          "message": "`new $class` always builds an object",
+          "timestamp": "2026-11-26T21:24:21+01:00",
+          "tree_id": "79bc3030dbf4abc1d3979fb2176cee42113f1cec",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/e6f3982ca27380581ccec02a93fa2fd7754ea2c8"
+        },
+        "date": 1795725067233,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_drupal_module",
+            "value": 275.9,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_hello_world",
+            "value": 44.4,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 77.4,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_symfony_controller",
+            "value": 81,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_tempest_view",
+            "value": 78.6,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_wordpress_plugin",
+            "value": 75.6,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_yii_action",
+            "value": 101.1,
             "unit": "MiB"
           }
         ]
