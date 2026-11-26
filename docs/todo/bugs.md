@@ -38,20 +38,21 @@ No outstanding items.
 **Impact: Low · Complexity: Low-Medium**
 
 ```php
-'foo'[0];   // string, should be 'f'
+mb_strlen('école', $unknownEncoding);   // int<1, max>, should be 1|3|5|6
 ```
 
 The string functions that rewrite a literal, the numeric conversions
 (`intval()` and friends, `abs()`, `pow()`), `str_increment()`,
 `str_decrement()`, `strlen()`/`mb_strlen()`, `implode()`,
-`array_sum()`/`array_product()` and `date()` fold, but an offset into a
-literal string and the rest below do not. `mb_strlen()` with an encoding other than UTF-8 is not
-measured either (`// SKIP` lines in `tests/phpstan_nsrt/mb-strlen-php83.php`).
+`array_sum()`/`array_product()`, `date()`, `range()` and an offset into a
+literal string fold, but the rest below do not. `mb_strlen()` with an
+encoding other than UTF-8 is not measured either (`// SKIP` lines in
+`tests/phpstan_nsrt/mb-strlen-php83.php`).
 
 **Fix:** fold each function over its literal arguments, one at a time; each
 upstream fixture is the spec for its function.
 
-**Upstream cases** (PHPStan `nsrt/`): `range-function.php` (11), `constantTypes.php` (8), `string-offsets.php` (8), 19 more.
+**Upstream cases** (PHPStan `nsrt/`): `constantTypes.php` (8), 19 more.
 
 ### B910. `**` with an operand PHP rejects is not an error type
 

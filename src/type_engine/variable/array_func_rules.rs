@@ -24,6 +24,8 @@ use crate::php_type::{
 
 use super::{ARRAY_ELEMENT_FUNCS, ARRAY_PRESERVING_FUNCS};
 
+mod range;
+
 /// Argument access needed by the array-function return-type rules.
 pub(in crate::type_engine) trait ArrayFuncArgs {
     /// The unflattened type of the argument at `index` (e.g.
@@ -435,7 +437,7 @@ pub(in crate::type_engine) fn array_func_raw_type(
     // fractional. That is a question about every argument at once, which the
     // conditional return type in `stub_patches` cannot ask.
     if func_name.eq_ignore_ascii_case("range") {
-        return range_type(args);
+        return range::range_type(args);
     }
 
     // Splitting a string always leaves at least one piece, so the pointer
@@ -845,72 +847,6 @@ pub(in crate::type_engine) fn callable_string_function_name(text: &str) -> Optio
             .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '\\');
     is_name.then_some(name)
 }
-
-/// The list a numeric `range()` builds.
-///
-/// PHP walks from `$start` to `$end` in `$step`s, and the result is integral
-/// only when all three are: one fractional bound (or step) makes every element
-/// a float. So the answer is decided by the bounds *together*, and a single
-/// argument that cannot be typed leaves the whole call undecided.
-///
-/// Declining hands the call back to the stub's own
-/// `($start is string ? list<string> : list<int|float>)`, which is the right
-/// answer both for a character range and for a numeric one whose bounds are
-/// not known — so this rule only has to recognise the two it can prove.
-///
-/// `int` is a subtype of `float` here (PHP widens it silently), so the
-/// integral case has to be tested first: `list<int>` would otherwise read as
-/// an all-float range.
-fn range_type(args: &dyn ArrayFuncArgs) -> Option<PhpType> {
-    let mut bounds = vec![args.arg_raw_type(0)?, args.arg_raw_type(1)?];
-    if args.has_arg(2) {
-        bounds.push(args.arg_raw_type(2)?);
-    }
-    // Integer bounds and step give the values themselves: PHP counts from
-    // the start towards the end by the step's size, whichever way that is.
-    let literals: Option<Vec<i64>> = bounds
-        .iter()
-        .map(|b| b.as_literal().and_then(LiteralValue::parse_i64))
-        .collect();
-    if let Some(literals) = literals {
-        let (start, end) = (literals[0], literals[1]);
-        let step = literals.get(2).copied().unwrap_or(1).unsigned_abs();
-        if step == 0 {
-            return None;
-        }
-        let count = start.abs_diff(end) / step + 1;
-        if count <= MAX_RANGE_ENTRIES {
-            let entries = (0..count as i64)
-                .map(|i| {
-                    let value = if start <= end {
-                        start + i * step as i64
-                    } else {
-                        start - i * step as i64
-                    };
-                    ShapeEntry {
-                        key: None,
-                        value_type: PhpType::literal_int(value.to_string()),
-                        optional: false,
-                    }
-                })
-                .collect();
-            return Some(PhpType::array_shape(entries));
-        }
-    }
-    // A range always holds at least its start.
-    let int_ty = PhpType::int();
-    if bounds.iter().all(|b| b.is_subtype_of(&int_ty)) {
-        return Some(PhpType::list(int_ty).non_empty_array_form());
-    }
-    let float_ty = PhpType::float();
-    bounds
-        .iter()
-        .all(|b| b.is_subtype_of(&float_ty))
-        .then(|| PhpType::list(float_ty).non_empty_array_form())
-}
-
-/// How many values a literal `range()` builds into a shape.
-const MAX_RANGE_ENTRIES: u64 = 64;
 
 /// The type `array_merge` builds from its arguments.
 ///

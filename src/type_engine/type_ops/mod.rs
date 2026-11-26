@@ -16,6 +16,8 @@
 //!   compute for it, so a constant defined from other constants is readable
 //! - **int_interval**: the bounds of an integer type, which arithmetic on
 //!   `int<a, b>` operands and a loop's widening of a growing counter use
+//! - **string_offset**: the one-character string an offset read of a string
+//!   yields, worked out from a literal string and the offset's range
 
 pub mod aliases;
 pub mod call_site_returns;
@@ -25,3 +27,4 @@ pub mod const_fold;
 pub mod docblock_narrowing;
 pub(crate) mod int_interval;
 pub mod resolution;
+pub(crate) mod string_offset;

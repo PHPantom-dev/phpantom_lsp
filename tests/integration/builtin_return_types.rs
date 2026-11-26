@@ -429,19 +429,35 @@ function probe(string $text, string $format, $stream): void {
     );
 }
 
-/// A `range()` of integers stays integral, and one fractional bound makes
-/// every element a float. A bound that cannot be typed keeps the union both
-/// answers live in, and a string bound still walks the character range.
+/// `range()` over literal arguments builds the values PHP builds: integers
+/// stay integral, a fractional bound or step makes every value a float, two
+/// strings that are not numbers (or are single digits) count through their
+/// first bytes, and a combination PHP rejects builds nothing. A long range,
+/// or bounds that are not literals, still decide what the values are.
 #[test]
 fn range_elements_follow_all_of_its_bounds() {
     let content = r#"<?php
-function probe(string $text, mixed $unknown): void {
+/** @param int<1, 9> $digit */
+function probe(mixed $unknown, int $digit, string $text): void {
     $ints = range(1, 10);
     $steppedInts = range(0, 10, 2);
+    $down = range(5, 1, -2);
+    $wholeFloatStep = range(1, 3, 2.0);
     $floats = range(1.0, 2.0);
     $fractionalStep = range(0, 1, 0.25);
-    $chars = range('a', 'z');
-    $either = range($unknown, $unknown);
+    $fractionalString = range('1.5', 3);
+    $chars = range('a', 'e', 2);
+    $digits = range('1', '3');
+    $multiByte = range('aa', 'cc');
+    $charAndNumber = range('A', 3);
+    $empty = range(2, '', 2);
+    $fractionalStepOverInts = range(1, 4, 1.5);
+    $oneOrTwo = range(1, $unknown ? 1 : 2);
+    $long = range(0, 100);
+    $longChars = range('!', '~');
+    $bounded = range($digit, 20);
+    $fromText = range($text, 'z');
+    $rejected = range(1, 5, -1);
 }
 "#;
     assert_assigned_types(
@@ -449,10 +465,23 @@ function probe(string $text, mixed $unknown): void {
         &[
             ("$ints", "array{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}"),
             ("$steppedInts", "array{0, 2, 4, 6, 8, 10}"),
-            ("$floats", "non-empty-list<float>"),
-            ("$fractionalStep", "non-empty-list<float>"),
-            ("$chars", "list<string>"),
-            ("$either", "list<string>|list<int|float>"),
+            ("$down", "array{5, 3, 1}"),
+            ("$wholeFloatStep", "array{1, 3}"),
+            ("$floats", "array{1.0, 2.0}"),
+            ("$fractionalStep", "array{0.0, 0.25, 0.5, 0.75, 1.0}"),
+            ("$fractionalString", "array{1.5, 2.5}"),
+            ("$chars", "array{'a', 'c', 'e'}"),
+            ("$digits", "array{'1', '2', '3'}"),
+            ("$multiByte", "array{'a', 'b', 'c'}"),
+            ("$charAndNumber", "array{0, 1, 2, 3}"),
+            ("$empty", "array{2, 0}"),
+            ("$fractionalStepOverInts", "array{1.0, 2.5, 4.0}"),
+            ("$oneOrTwo", "array{0: 1, 1?: 2}"),
+            ("$long", "non-empty-list<int<0, 100>>"),
+            ("$longChars", "non-empty-list<non-empty-string>"),
+            ("$bounded", "non-empty-list<int<1, 20>>"),
+            ("$fromText", "non-empty-list<int|float|string>"),
+            ("$rejected", "non-empty-list<int<1, 5>>"),
         ],
     );
 }

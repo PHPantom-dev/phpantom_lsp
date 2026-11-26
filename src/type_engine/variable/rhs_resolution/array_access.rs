@@ -127,7 +127,22 @@ pub(super) fn resolve_rhs_array_access<'b>(
                 None
             };
         let seg = literal_seg.as_ref().unwrap_or(seg);
-        let Some(element) = index_segment(&current, seg, &ctx.as_resolution_ctx()) else {
+        // A string offset reads the characters the offset's range lands on,
+        // so a variable offset is typed only when there is a string to read.
+        let offset_type = (matches!(seg, ArrayBracketSegment::ElementAccess)
+            && current
+                .union_members()
+                .iter()
+                .any(|member| member.is_string_subtype()))
+        .then(|| resolve_rhs_expression(index, ctx))
+        .filter(|resolved| !resolved.is_empty())
+        .map(|resolved| ResolvedType::types_joined(&resolved));
+        let Some(element) = index_segment(
+            &current,
+            seg,
+            offset_type.as_ref(),
+            &ctx.as_resolution_ctx(),
+        ) else {
             return vec![];
         };
         current = element;
@@ -225,9 +240,13 @@ fn literal_variable_index(
 /// answer. Beside a sibling array that *does* name an element type it is
 /// the same alternative spelled vaguer, though, so letting it through
 /// would drown the sibling's answer out of the join.
+///
+/// `offset` is the type of a variable offset (`ElementAccess`), when known;
+/// only an offset read of a string uses it.
 fn index_segment(
     base: &PhpType,
     seg: &ArrayBracketSegment,
+    offset: Option<&PhpType>,
     ctx: &ResolutionCtx<'_>,
 ) -> Option<PhpType> {
     match base.kind() {
@@ -235,7 +254,8 @@ fn index_segment(
             let indexed: Vec<(bool, PhpType)> = members
                 .iter()
                 .map(|member| {
-                    let value = index_segment(member, seg, ctx).unwrap_or_else(PhpType::mixed);
+                    let value =
+                        index_segment(member, seg, offset, ctx).unwrap_or_else(PhpType::mixed);
                     (member.is_array_like(), value)
                 })
                 .collect();
@@ -251,7 +271,7 @@ fn index_segment(
         }
         // `?T` is `T|null`, and the `null` half yields `null`.
         TypeKind::Nullable(inner) => {
-            let indexed = index_segment(inner, seg, ctx).unwrap_or_else(PhpType::mixed);
+            let indexed = index_segment(inner, seg, offset, ctx).unwrap_or_else(PhpType::mixed);
             return Some(PhpType::join_runtime_value_types(vec![
                 indexed,
                 PhpType::null(),
@@ -264,7 +284,7 @@ fn index_segment(
             let mut answers: Vec<PhpType> = Vec::with_capacity(members.len());
             let mut any_mixed = false;
             for member in members.iter() {
-                match index_segment(member, seg, ctx) {
+                match index_segment(member, seg, offset, ctx) {
                     Some(value) if value.is_mixed() => any_mixed = true,
                     Some(value) if !answers.contains(&value) => answers.push(value),
                     _ => {}
@@ -354,12 +374,22 @@ fn index_segment(
     // names no offset reads nothing: the read throws, so a string member
     // of a union adds nothing to what the others hold.
     if base.is_string_subtype() {
-        if let ArrayBracketSegment::StringKey(key) = seg
-            && !crate::php_type::may_read_string_offset(key)
-        {
-            return Some(PhpType::never());
-        }
-        return Some(PhpType::string());
+        let literal_offset = match seg {
+            ArrayBracketSegment::StringKey(key)
+                if !crate::php_type::may_read_string_offset(key) =>
+            {
+                return Some(PhpType::never());
+            }
+            ArrayBracketSegment::StringKey(key) | ArrayBracketSegment::IntKey(key) => {
+                crate::php_type::canonical_int_key(key).map(|k| PhpType::literal_int(k.to_string()))
+            }
+            ArrayBracketSegment::ElementAccess => None,
+        };
+        let offset = match seg {
+            ArrayBracketSegment::ElementAccess => offset,
+            _ => literal_offset.as_ref(),
+        };
+        return Some(crate::type_engine::type_ops::string_offset::string_offset_read(base, offset));
     }
     // Reading an offset off anything else that is not an object yields
     // `null` at runtime (with a warning), rather than being untypeable.
@@ -381,7 +411,7 @@ pub(crate) fn offset_read_type(
         Some(key) => ArrayBracketSegment::StringKey(key.to_string()),
         None => ArrayBracketSegment::ElementAccess,
     };
-    index_segment(base, &seg, ctx)
+    index_segment(base, &seg, None, ctx)
 }
 
 /// Classification of an array access index expression.

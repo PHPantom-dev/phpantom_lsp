@@ -7,7 +7,8 @@
 namespace PsalmTest_return_type_provider_dirname_1 {
     $dir = dirname(implode("", range("a", "c")));
 
-    assertType('string', $dir);
+    // PHPantom folds the literal path `'abc'`, where Psalm's assertion widens it to `string`.
+    assertType("'.'", $dir);
 }
 
 // Test: dirnameOfEmptyShouldBeString
