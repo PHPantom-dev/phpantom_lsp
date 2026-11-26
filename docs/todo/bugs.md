@@ -2246,15 +2246,19 @@ It also shows as:
 
 **Cases** (PHPStan `nsrt/`, 7 assertions): `bug-12875.php` (5), `bug-12398.php` (2).
 
-### B899. First-class callable syntax on an invokable object drops `__invoke`'s parameters
+### B910. `is_callable()` on a string narrows to `callable` and widens it after the branch
 
-**Impact: Low · Complexity: Low**
+**Impact: Low · Complexity: Low-Medium**
 
 ```php
-C::u()(...);   // u(): A&E where A has __invoke(B $b): int
-               // Closure(): int, should be Closure(B): int
+function f(string $c): void {
+    if (is_callable($c)) {
+        $c;   // callable, should be callable-string
+    }
+    $c;       // callable|string, should be string
+}
 ```
 
-The return type of `__invoke` is kept but its parameter list is not copied into the closure type (here through an intersection return type).
+The true branch drops the string half of the type, and merging the branches back keeps the narrowed `callable` beside the original `string`. Once fixed, a union holding a `Closure(B): int` member also hovers with `B` unqualified, since each union member is shortened on its own line with no namespace for the closure's parameter types.
 
-**Cases** (PHPStan `nsrt/`, 4 assertions): `bug-14362.php` (4).
+**Cases** (PHPStan `nsrt/`, 1 assertion): `bug-14362.php` (1).

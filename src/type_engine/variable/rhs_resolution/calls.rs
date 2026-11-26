@@ -564,10 +564,10 @@ pub(crate) fn infer_closure_literal_type(
     ctx: &VarResolutionCtx<'_>,
 ) -> PhpType {
     // `$fn(...)` wraps a callable value rather than naming a function.
-    if let Expression::PartialApplication(PartialApplication::Function(fpa)) = expr
+    if let Expression::PartialApplication(pa @ PartialApplication::Function(fpa)) = expr
         && !matches!(fpa.function, Expression::Identifier(_))
     {
-        return closure_from_callable(fpa.function, ctx);
+        return closure_from_value(fpa.function, pa.is_first_class_callable(), ctx);
     }
 
     // The declared `: ReturnType`, else the `Generator` the body's yields
@@ -720,8 +720,21 @@ pub(crate) fn first_class_callable_return_type<'b>(
 /// the callable `value`: a closure literal unchanged, a value whose type
 /// carries a callable signature with that signature, and otherwise a
 /// closure returning what invoking the value does (an array callable, a
-/// callable string, an object with `__invoke()`).
+/// callable string, an object with `__invoke()`), taking the parameters
+/// `__invoke()` declares.
 pub(crate) fn closure_from_callable(value: &Expression<'_>, ctx: &VarResolutionCtx<'_>) -> PhpType {
+    closure_from_value(value, true, ctx)
+}
+
+/// [`closure_from_callable`], for a closure that takes every parameter
+/// calling `value` does when `all_params` is set.  `$obj(1, ?)` binds some
+/// of them, which an object's `__invoke()` signature does not show, so it
+/// gets no parameter list.
+fn closure_from_value(
+    value: &Expression<'_>,
+    all_params: bool,
+    ctx: &VarResolutionCtx<'_>,
+) -> PhpType {
     let value = crate::parser::unwrap_parens(value);
     if matches!(
         value,
@@ -745,9 +758,16 @@ pub(crate) fn closure_from_callable(value: &Expression<'_>, ctx: &VarResolutionC
     if returned.is_empty() {
         PhpType::closure()
     } else {
+        let params = if all_params {
+            invoke_parameters(&resolved, &ctx.as_resolution_ctx())
+                .map(|params| params.iter().map(callable_param).collect())
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        };
         PhpType::callable_spec(
             "Closure",
-            Vec::new(),
+            params,
             Some(ResolvedType::types_joined(&returned)),
         )
     }
@@ -800,13 +820,8 @@ fn partial_application_params(
     let Some(declared) = declared else {
         return Vec::new();
     };
-    let to_param = |param: &crate::types::ParameterInfo| CallableParam {
-        type_hint: param.type_hint.clone().unwrap_or_else(PhpType::mixed),
-        optional: !param.is_required,
-        variadic: param.is_variadic,
-    };
     if pa.is_first_class_callable() {
-        return declared.iter().map(to_param).collect();
+        return declared.iter().map(callable_param).collect();
     }
     let list = pa.get_argument_list();
     let bound = ctx
@@ -818,8 +833,34 @@ fn partial_application_params(
         .unwrap_or("");
     crate::call_args::partial_application_params(&declared, bound)
         .iter()
-        .map(to_param)
+        .map(callable_param)
         .collect()
+}
+
+/// A declared parameter as a callable-signature parameter.
+fn callable_param(param: &crate::types::ParameterInfo) -> CallableParam {
+    CallableParam {
+        type_hint: param.type_hint.clone().unwrap_or_else(PhpType::mixed),
+        optional: !param.is_required,
+        variadic: param.is_variadic,
+    }
+}
+
+/// The parameters calling an object of one of `types` takes through its
+/// class's `__invoke()`.
+///
+/// When several classes declare one (`A&E`, `A|E`), the longest parameter
+/// list wins: the extra parameters of `__invoke(B $b, bool $option = true)`
+/// are optional, so it accepts every call `__invoke(B $b)` does.
+fn invoke_parameters(
+    types: &[ResolvedType],
+    rctx: &crate::type_engine::resolver::ResolutionCtx<'_>,
+) -> Option<crate::types::SharedVec<crate::types::ParameterInfo>> {
+    types
+        .iter()
+        .filter_map(|rt| Backend::method_target_on_receiver(rt, "__invoke", rctx, None))
+        .map(|target| target.parameters)
+        .max_by_key(|params| params.len())
 }
 
 /// The type a closure parameter's hint gives it, qualified against the
