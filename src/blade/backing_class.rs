@@ -333,7 +333,7 @@ impl Backend {
     pub(crate) fn livewire_class_namespace(&self) -> String {
         use crate::virtual_members::laravel::config_values::{ConfigValue, parse_config_tree};
 
-        let Some(root) = self.workspace_root().read().clone() else {
+        let Some(root) = self.laravel_root() else {
             return LIVEWIRE_DEFAULT_NAMESPACE.to_string();
         };
         let path = root.join("config").join("livewire.php");

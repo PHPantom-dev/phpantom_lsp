@@ -367,7 +367,7 @@ Set `lint` or `analyze` explicitly to override all of this in either direction.
 | Key       | Type     | Default              | Description |
 | --------- | -------- | -------------------- | ----------- |
 | `enabled` | bool     | `true`               | Enable Laravel schema dump scanning for Eloquent model property inference. |
-| `paths`   | string[] | `["database/schema"]` | Schema dump files or directories to scan, relative to the workspace root. |
+| `paths`   | string[] | `["database/schema"]` | Schema dump files or directories to scan, relative to the workspace root. The default is the Laravel application's own `database/schema`, which in a monorepo is inside the application's directory. |
 
 #### `[laravel.migrations]`
 

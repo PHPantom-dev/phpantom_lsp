@@ -667,3 +667,90 @@ async fn an_update_inside_a_bin_namespace_is_picked_up() {
     );
     assert_eq!(backend.phpunit_major(), Some(10));
 }
+
+/// A Composer project requiring Laravel, its dependencies installed.
+fn write_laravel_project(dir: &Path, artisan: bool) {
+    write(
+        &dir.join("composer.json"),
+        r#"{ "require": { "laravel/framework": "^13.0" } }"#,
+    );
+    write(
+        &dir.join("vendor/composer/installed.json"),
+        r#"{ "packages": [] }"#,
+    );
+    if artisan {
+        write(&dir.join("artisan"), "#!/usr/bin/env php\n<?php\n");
+    }
+}
+
+/// Index `root` the way startup does when it has a `composer.json`.
+async fn index_project(root: &Path) -> Backend {
+    let backend = Backend::new_test();
+    *backend.workspace.workspace_root.write() = Some(root.to_path_buf());
+    let package = crate::composer::read_composer_package(root);
+    assert!(package.is_some(), "the root must be a Composer project");
+    backend
+        .discover_workspace_symbols(root, Default::default(), package, None)
+        .await;
+    backend
+}
+
+#[tokio::test]
+async fn the_laravel_root_of_a_monorepo_is_its_application() {
+    let dir = tempfile::tempdir().unwrap();
+    // A package requiring the framework sorts first, but the project with
+    // `artisan` is the application.
+    write_laravel_project(&dir.path().join("a-package"), false);
+    write_laravel_project(&dir.path().join("backend"), true);
+    write(&dir.path().join("frontend/package.json"), "{}\n");
+
+    let backend = index_workspace(dir.path()).await;
+
+    assert_eq!(backend.laravel_root(), Some(dir.path().join("backend")));
+}
+
+#[tokio::test]
+async fn a_monorepo_of_framework_dependents_takes_the_first() {
+    let dir = tempfile::tempdir().unwrap();
+    write_laravel_project(&dir.path().join("api"), false);
+    write_subproject(&dir.path().join("tools"), &[]);
+
+    let backend = index_workspace(dir.path()).await;
+
+    assert_eq!(backend.laravel_root(), Some(dir.path().join("api")));
+}
+
+#[tokio::test]
+async fn a_monorepo_without_laravel_keeps_the_workspace_root() {
+    let dir = tempfile::tempdir().unwrap();
+    write_subproject(&dir.path().join("app"), &[]);
+
+    let backend = index_workspace(dir.path()).await;
+
+    assert_eq!(backend.laravel_root(), Some(dir.path().to_path_buf()));
+}
+
+#[tokio::test]
+async fn a_non_laravel_root_finds_the_application_nested_in_it() {
+    let dir = tempfile::tempdir().unwrap();
+    write(
+        &dir.path().join("composer.json"),
+        r#"{ "require-dev": {} }"#,
+    );
+    write_laravel_project(&dir.path().join("backend"), true);
+
+    let backend = index_project(dir.path()).await;
+
+    assert_eq!(backend.laravel_root(), Some(dir.path().join("backend")));
+}
+
+#[tokio::test]
+async fn a_laravel_root_stays_the_application_over_a_nested_one() {
+    let dir = tempfile::tempdir().unwrap();
+    write_laravel_project(dir.path(), false);
+    write_laravel_project(&dir.path().join("tests/fixtures/app"), true);
+
+    let backend = index_project(dir.path()).await;
+
+    assert_eq!(backend.laravel_root(), Some(dir.path().to_path_buf()));
+}

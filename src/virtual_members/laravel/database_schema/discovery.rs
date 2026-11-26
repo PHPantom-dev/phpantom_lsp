@@ -12,8 +12,8 @@ pub(super) struct DatabaseConfig {
     pub(super) connection_drivers: HashMap<String, String>,
 }
 
-pub(super) fn read_database_config(workspace_root: &Path) -> Option<DatabaseConfig> {
-    let content = std::fs::read_to_string(workspace_root.join("config/database.php")).ok()?;
+pub(super) fn read_database_config(app_root: &Path) -> Option<DatabaseConfig> {
+    let content = std::fs::read_to_string(app_root.join("config/database.php")).ok()?;
     let tree = parse_config_tree(&content)?;
     let default_connection = tree
         .value_at(&["default"])
@@ -38,11 +38,11 @@ pub(super) fn read_database_config(workspace_root: &Path) -> Option<DatabaseConf
 
 pub(super) fn discover_schema_files(
     workspace_root: &Path,
+    app_root: &Path,
     config: &LaravelSchemaConfig,
 ) -> std::io::Result<Vec<PathBuf>> {
     let mut files = Vec::new();
-    for configured in schema_paths(config) {
-        let path = resolve_path(workspace_root, &configured);
+    for path in schema_paths(workspace_root, app_root, config) {
         if path.is_file() {
             if is_schema_sql_file(&path) {
                 files.push(path);
@@ -270,11 +270,22 @@ impl MigrationDiscovery {
     }
 }
 
-pub(super) fn schema_paths(config: &LaravelSchemaConfig) -> Vec<String> {
+/// The schema dump files and directories to read: the configured ones,
+/// relative to the workspace root where `.phpantom.toml` sits, or else
+/// Laravel's own `database/schema` under the application's base path.
+pub(super) fn schema_paths(
+    workspace_root: &Path,
+    app_root: &Path,
+    config: &LaravelSchemaConfig,
+) -> Vec<PathBuf> {
     if config.paths.is_empty() {
-        vec!["database/schema".to_string()]
+        vec![app_root.join("database/schema")]
     } else {
-        config.paths.clone()
+        config
+            .paths
+            .iter()
+            .map(|configured| resolve_path(workspace_root, configured))
+            .collect()
     }
 }
 

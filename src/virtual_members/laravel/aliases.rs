@@ -426,7 +426,7 @@ fn read_source_by_fqn(backend: &Backend, fqn: &str) -> Option<String> {
 /// Read a `config/*.php` file, preferring an open editor buffer over disk.
 /// Mirrors the auth-config reader so in-editor edits take effect immediately.
 fn read_project_config(backend: &Backend, file_name: &str) -> Option<String> {
-    let root = backend.workspace.workspace_root.read().clone()?;
+    let root = backend.laravel_root()?;
     let path = root.join("config").join(file_name);
     if !path.is_file() {
         return None;

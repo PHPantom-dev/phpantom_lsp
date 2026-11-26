@@ -23,7 +23,7 @@ impl Backend {
         if let Some(uri) = self.resolve_class_uri(MIDDLEWARE_CONFIGURATION_FQN) {
             candidates.push(uri);
         }
-        if let Some(root) = self.workspace.workspace_root.read().clone() {
+        if let Some(root) = self.laravel_root() {
             candidates.push(crate::util::path_to_uri(&root.join("bootstrap/app.php")));
         }
         {

@@ -73,7 +73,7 @@ pub(crate) struct FolioMount {
 /// framework default when none are found but the project appears to use
 /// Folio.
 pub(crate) fn discover_folio_mounts(backend: &Backend) -> Vec<FolioMount> {
-    let Some(workspace_root) = backend.workspace.workspace_root.read().clone() else {
+    let Some(workspace_root) = backend.laravel_root() else {
         return Vec::new();
     };
 

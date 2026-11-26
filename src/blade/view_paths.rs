@@ -81,7 +81,7 @@ impl crate::Backend {
         // The workspace root is not known before `initialize` sets it. Don't
         // cache this answer: caching it would freeze the roots at "none"
         // for the rest of the session once the real root becomes known.
-        let Some(root) = self.workspace.workspace_root.read().clone() else {
+        let Some(root) = self.laravel_root() else {
             return std::sync::Arc::new(Vec::new());
         };
         self.cached_laravel_enumeration(

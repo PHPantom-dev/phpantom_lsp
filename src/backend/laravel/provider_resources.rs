@@ -75,12 +75,7 @@ impl Backend {
             }
         };
         let file_path = crate::util::uri_to_path(uri)?;
-        let workspace_root = self
-            .workspace
-            .workspace_root
-            .read()
-            .clone()
-            .unwrap_or_default();
+        let workspace_root = self.laravel_root().unwrap_or_default();
 
         let identity = std::sync::Arc::new(crate::virtual_members::laravel::ProviderIdentity {
             ancestors: self.provider_ancestors(fqn),

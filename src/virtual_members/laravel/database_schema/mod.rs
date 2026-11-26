@@ -94,10 +94,11 @@ impl SchemaIndex {
 
     pub fn watched_path_affects_schema(
         workspace_root: &Path,
+        app_root: &Path,
         config: &LaravelConfig,
         path: &Path,
     ) -> bool {
-        if path == workspace_root.join("config/database.php")
+        if path == app_root.join("config/database.php")
             || path == workspace_root.join(".phpantom.toml")
         {
             return true;
@@ -117,8 +118,7 @@ impl SchemaIndex {
             return false;
         }
 
-        for configured in schema_paths(&config.schema) {
-            let schema_path = resolve_path(workspace_root, &configured);
+        for schema_path in schema_paths(workspace_root, app_root, &config.schema) {
             if schema_path.is_file() || is_schema_sql_file(&schema_path) {
                 if path == schema_path {
                     return true;
@@ -368,8 +368,13 @@ impl SchemaTable {
     }
 }
 
+/// Load the schema from the dumps and migrations.  `app_root` is the
+/// Laravel application's base path, which holds `config/database.php` and
+/// the default dump directory; configured paths are relative to
+/// `workspace_root`.
 pub fn load_schema_index(
     workspace_root: &Path,
+    app_root: &Path,
     config: &LaravelConfig,
     blueprint_macros: &HashMap<String, String>,
 ) -> std::io::Result<SchemaIndex> {
@@ -377,7 +382,7 @@ pub fn load_schema_index(
         return Ok(SchemaIndex::default());
     }
 
-    let database_config = read_database_config(workspace_root);
+    let database_config = read_database_config(app_root);
     let default_connection = database_config
         .as_ref()
         .and_then(|c| c.default_connection.clone());
@@ -398,7 +403,7 @@ pub fn load_schema_index(
     };
 
     if config.schema.enabled() {
-        let schema_files = discover_schema_files(workspace_root, &config.schema)?;
+        let schema_files = discover_schema_files(workspace_root, app_root, &config.schema)?;
 
         for path in schema_files {
             let connection = connection_name_from_schema_path(&path);

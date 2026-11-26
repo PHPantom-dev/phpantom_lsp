@@ -16,8 +16,10 @@ impl Backend {
         let laravel_config = self.config().laravel;
         let index = if laravel_config.schema.enabled() || laravel_config.migrations.enabled() {
             let bp_macros = self.laravel.macros.read().blueprint_macro_closures();
+            let app_root = self.laravel_root().unwrap_or_else(|| root.to_path_buf());
             match crate::virtual_members::laravel::database_schema::load_schema_index(
                 root,
+                &app_root,
                 &laravel_config,
                 &bp_macros,
             ) {

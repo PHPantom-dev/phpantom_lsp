@@ -44,6 +44,7 @@ Schema::table('users', function ($table) { $table->index('id'); });
     *backend.laravel.schema_index.write() =
         super::super::super::database_schema::load_schema_index(
             root.path(),
+            root.path(),
             &crate::config::LaravelConfig::default(),
             &std::collections::HashMap::new(),
         )
@@ -293,6 +294,7 @@ fn validation_schema_sources_reuse_the_discovery_plan() {
     )
     .unwrap();
     let index = load_schema_index(
+        dir.path(),
         dir.path(),
         &crate::config::LaravelConfig::default(),
         &std::collections::HashMap::new(),

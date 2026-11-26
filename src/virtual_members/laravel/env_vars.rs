@@ -46,7 +46,7 @@ fn dotenv_file_names(root: &Path) -> Vec<String> {
 /// missing from `.env` is usually one that belongs there, and opening the
 /// file says more than refusing to navigate.
 pub(crate) fn resolve_env_definitions(backend: &Backend, key: &str) -> Vec<Location> {
-    let Some(root) = backend.workspace.workspace_root.read().clone() else {
+    let Some(root) = backend.laravel_root() else {
         return Vec::new();
     };
     let mut fallback = None;
@@ -91,7 +91,7 @@ pub(crate) struct EnvDeclaration {
 /// Separate from [`resolve_env_definitions`], which points at a file even
 /// when nothing in it declares the name: hover has to tell the two apart.
 pub(crate) fn env_declaration(backend: &Backend, key: &str) -> Option<EnvDeclaration> {
-    let root = backend.workspace.workspace_root.read().clone()?;
+    let root = backend.laravel_root()?;
     dotenv_file_names(&root).into_iter().find_map(|file| {
         let content = std::fs::read_to_string(root.join(&file)).ok()?;
         let value = declared_env_value(&content, key)?;
@@ -126,7 +126,7 @@ pub(crate) fn env_name_is_sensitive(key: &str) -> bool {
 /// handful of dotenv files, and an edit to `.env` has to show up in the next
 /// completion.
 pub(crate) fn enumerate_env_keys(backend: &Backend) -> Vec<String> {
-    let Some(root) = backend.workspace.workspace_root.read().clone() else {
+    let Some(root) = backend.laravel_root() else {
         return Vec::new();
     };
     let mut keys: Vec<String> = dotenv_file_names(&root)

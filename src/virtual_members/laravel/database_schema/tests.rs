@@ -230,7 +230,13 @@ fn loads_laravel_schema_directory_and_database_config() {
     )
     .unwrap();
 
-    let index = load_schema_index(dir.path(), &LaravelConfig::default(), &HashMap::new()).unwrap();
+    let index = load_schema_index(
+        dir.path(),
+        dir.path(),
+        &LaravelConfig::default(),
+        &HashMap::new(),
+    )
+    .unwrap();
     assert_eq!(index.default_connection.as_deref(), Some("primary"));
     assert_eq!(
         index.connection_drivers.get("primary").map(String::as_str),
@@ -248,20 +254,24 @@ fn watched_paths_detect_schema_inputs() {
 
     assert!(SchemaIndex::watched_path_affects_schema(
         root,
+        root,
         &default_config,
         &root.join("database/schema/primary-schema.sql"),
     ));
     assert!(SchemaIndex::watched_path_affects_schema(
+        root,
         root,
         &default_config,
         &root.join("config/database.php"),
     ));
     assert!(SchemaIndex::watched_path_affects_schema(
         root,
+        root,
         &default_config,
         &root.join(".phpantom.toml"),
     ));
     assert!(!SchemaIndex::watched_path_affects_schema(
+        root,
         root,
         &default_config,
         &root.join("storage/debug.sql"),
@@ -276,18 +286,69 @@ fn watched_paths_detect_schema_inputs() {
     };
     assert!(SchemaIndex::watched_path_affects_schema(
         root,
+        root,
         &custom_config,
         &root.join("extra/schema.sql"),
     ));
     assert!(SchemaIndex::watched_path_affects_schema(
+        root,
         root,
         &custom_config,
         &root.join("tenant/schema/eagle-schema.sql"),
     ));
     assert!(!SchemaIndex::watched_path_affects_schema(
         root,
+        root,
         &custom_config,
         &root.join("database/schema/primary-schema.sql"),
+    ));
+}
+
+#[test]
+fn watched_paths_of_an_app_in_a_subproject() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let app = root.join("backend");
+    let default_config = LaravelConfig::default();
+
+    // The app's own files are under its base path.
+    assert!(SchemaIndex::watched_path_affects_schema(
+        root,
+        &app,
+        &default_config,
+        &app.join("database/schema/primary-schema.sql"),
+    ));
+    assert!(SchemaIndex::watched_path_affects_schema(
+        root,
+        &app,
+        &default_config,
+        &app.join("config/database.php"),
+    ));
+    assert!(!SchemaIndex::watched_path_affects_schema(
+        root,
+        &app,
+        &default_config,
+        &root.join("config/database.php"),
+    ));
+    // The configuration file, and the paths it names, are the workspace's.
+    assert!(SchemaIndex::watched_path_affects_schema(
+        root,
+        &app,
+        &default_config,
+        &root.join(".phpantom.toml"),
+    ));
+    let custom_config = LaravelConfig {
+        schema: LaravelSchemaConfig {
+            paths: vec!["backend/dumps".to_string()],
+            ..LaravelSchemaConfig::default()
+        },
+        ..LaravelConfig::default()
+    };
+    assert!(SchemaIndex::watched_path_affects_schema(
+        root,
+        &app,
+        &custom_config,
+        &app.join("dumps/primary-schema.sql"),
     ));
 }
 
@@ -319,7 +380,7 @@ fn applies_laravel_migrations_over_schema_dump() {
     )
     .unwrap();
 
-    let index = load_schema_index(root, &LaravelConfig::default(), &HashMap::new()).unwrap();
+    let index = load_schema_index(root, root, &LaravelConfig::default(), &HashMap::new()).unwrap();
     assert!(index.column_source("default", "users", "id").is_some());
     assert!(index.column_source("default", "users", "email").is_some());
     assert!(index.column_source("default", "users", "name").is_some());
@@ -373,7 +434,7 @@ fn discovers_direct_non_vendor_migrations_only() {
     )
     .unwrap();
 
-    let index = load_schema_index(root, &LaravelConfig::default(), &HashMap::new()).unwrap();
+    let index = load_schema_index(root, root, &LaravelConfig::default(), &HashMap::new()).unwrap();
     assert!(index.column_source("default", "posts", "title").is_some());
     assert!(index.column_source("default", "comments", "id").is_some());
     assert!(
@@ -447,7 +508,7 @@ fn applies_migrations_by_basename_across_directories() {
     )
     .unwrap();
 
-    let index = load_schema_index(root, &LaravelConfig::default(), &HashMap::new()).unwrap();
+    let index = load_schema_index(root, root, &LaravelConfig::default(), &HashMap::new()).unwrap();
     assert!(index.column_source("default", "users", "id").is_some());
     assert!(index.column_source("default", "users", "name").is_none());
 }
@@ -480,7 +541,7 @@ fn applies_migration_table_drop_rename_and_connections() {
     )
     .unwrap();
 
-    let index = load_schema_index(root, &LaravelConfig::default(), &HashMap::new()).unwrap();
+    let index = load_schema_index(root, root, &LaravelConfig::default(), &HashMap::new()).unwrap();
     assert!(index.column_source("tenant", "drafts", "id").is_none());
     assert!(
         index
@@ -507,7 +568,7 @@ fn records_the_migrations_that_shape_each_table() {
         std::fs::write(root.join("database/migrations").join(name), content).unwrap();
     }
 
-    let index = load_schema_index(root, &LaravelConfig::default(), &HashMap::new()).unwrap();
+    let index = load_schema_index(root, root, &LaravelConfig::default(), &HashMap::new()).unwrap();
     let sites: Vec<(String, &str)> = index
         .table_migrations("default", "ARTICLES")
         .map(|(path, content, offset)| {
@@ -537,7 +598,8 @@ fn records_the_migrations_that_shape_each_table() {
 #[test]
 fn loads_checked_in_laravel_migration_fixtures() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/laravel_migrations");
-    let index = load_schema_index(&root, &LaravelConfig::default(), &HashMap::new()).unwrap();
+    let index =
+        load_schema_index(&root, &root, &LaravelConfig::default(), &HashMap::new()).unwrap();
 
     assert_schema_column(&index, "default", "users", "id", "BIGINT", false, None);
     assert_schema_column(&index, "default", "users", "name", "VARCHAR", false, None);
@@ -655,7 +717,8 @@ fn incremental_migration_update_replays_from_base() {
     )
     .unwrap();
 
-    let mut index = load_schema_index(root, &LaravelConfig::default(), &HashMap::new()).unwrap();
+    let mut index =
+        load_schema_index(root, root, &LaravelConfig::default(), &HashMap::new()).unwrap();
     assert!(index.column_source("default", "users", "id").is_some());
     assert!(index.column_source("default", "users", "email").is_some());
     assert!(index.column_source("default", "users", "name").is_some());
@@ -714,7 +777,7 @@ fn expands_blueprint_macros_during_migration() {
         .to_string(),
     );
 
-    let index = load_schema_index(root, &LaravelConfig::default(), &macros).unwrap();
+    let index = load_schema_index(root, root, &LaravelConfig::default(), &macros).unwrap();
     assert_schema_column(&index, "default", "orders", "id", "BIGINT", false, None);
     assert_schema_column(
         &index, "default", "orders", "status", "VARCHAR", false, None,
@@ -760,7 +823,8 @@ fn expands_blueprint_macros_during_migration() {
 #[test]
 fn loads_checked_in_schema_dump_fixtures() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/schema_dumps");
-    let index = load_schema_index(&root, &LaravelConfig::default(), &HashMap::new()).unwrap();
+    let index =
+        load_schema_index(&root, &root, &LaravelConfig::default(), &HashMap::new()).unwrap();
 
     assert_eq!(index.default_connection.as_deref(), Some("primary"));
     assert_eq!(

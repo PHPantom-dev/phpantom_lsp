@@ -18,6 +18,20 @@ impl Backend {
         &self.workspace.workspace_root
     }
 
+    /// The Laravel application's base path, the directory `base_path()`
+    /// returns at runtime: the Laravel subproject a monorepo workspace
+    /// holds, or the workspace root otherwise.
+    ///
+    /// Every lookup of an application file by its conventional location
+    /// (`config/`, `resources/views/`, `routes/`, `lang/`, `.env`, …) goes
+    /// through this rather than [`workspace_root`](Self::workspace_root).
+    pub(crate) fn laravel_root(&self) -> Option<PathBuf> {
+        if let Some(app_root) = self.workspace.laravel_app_root.read().as_ref() {
+            return Some(app_root.clone());
+        }
+        self.workspace.workspace_root.read().clone()
+    }
+
     /// Borrow the global functions mutex (used by integration tests to
     /// inject user-defined functions or inspect the cache).
     pub fn global_functions(&self) -> &Arc<RwLock<CiMap<(String, FunctionInfo)>>> {

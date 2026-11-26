@@ -166,7 +166,7 @@ fn path_helper_root(backend: &Backend, content: &str) -> Option<PathBuf> {
     if !backend.resolved_class_cache.read().laravel().is_enabled() {
         return None;
     }
-    backend.workspace.workspace_root.read().clone()
+    backend.laravel_root()
 }
 
 /// The helper name and first string argument of a path helper call, with the

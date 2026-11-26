@@ -627,7 +627,7 @@ pub(crate) fn enumerate_all_routes(backend: &Backend) -> RouteDiscovery {
     let mut collector = RouteCollector::default();
     let mut scanned: HashSet<PathBuf> = HashSet::new();
     let snapshot = backend.user_file_symbol_maps();
-    let workspace_root = backend.workspace.workspace_root.read().clone();
+    let workspace_root = backend.laravel_root();
     let macros = MacroScope::for_backend(backend);
     let mut subdirectory_files = Vec::new();
 

@@ -229,7 +229,7 @@ fn project_auth_implementors(
 /// Read the project's `config/auth.php`, preferring an open editor buffer over
 /// the on-disk copy.
 fn read_auth_config(backend: &Backend) -> Option<String> {
-    let root = backend.workspace.workspace_root.read().clone()?;
+    let root = backend.laravel_root()?;
     let path = root.join("config").join("auth.php");
     backend
         .open_buffer_at_path(&path)

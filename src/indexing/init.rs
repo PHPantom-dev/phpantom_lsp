@@ -168,6 +168,21 @@ impl Backend {
             .write()
             .laravel_mut()
             .set_enabled(is_laravel);
+        // A root that is no Laravel project of its own can still hold the
+        // application in a nested project with its own dependencies.
+        let root_is_laravel = root.join("artisan").is_file()
+            || composer_json
+                .as_ref()
+                .is_some_and(composer::is_laravel_project);
+        *self.workspace.laravel_app_root.write() = if root_is_laravel {
+            None
+        } else {
+            composer::laravel_app_subproject(
+                subprojects
+                    .iter()
+                    .map(|(sub_root, package)| (sub_root.as_path(), package.as_ref())),
+            )
+        };
 
         // A library's configuration is declared by whatever application
         // installs it, so the keys it reads cannot be judged.  An `artisan`
@@ -634,6 +649,9 @@ impl Backend {
         let mut any_tempest = false;
         let mut any_tempest_database = false;
         let mut phpunit_major: Option<u8> = None;
+        // Each subproject's `composer.json`, in `subprojects` order.
+        let mut packages: Vec<Option<composer::ComposerPackage>> =
+            Vec::with_capacity(subprojects.len());
         self.clear_drupal_web_roots();
         // Marked before any walk compiles the filters, so every walk sees
         // Drupal's `.module`, `.install`, … files as PHP.
@@ -698,12 +716,19 @@ impl Backend {
                 (sub_lo, sub_hi),
                 progress,
             );
+            packages.push(composer_json);
         }
 
         self.resolved_class_cache
             .write()
             .laravel_mut()
             .set_enabled(any_laravel);
+        *self.workspace.laravel_app_root.write() = composer::laravel_app_subproject(
+            subprojects
+                .iter()
+                .zip(&packages)
+                .map(|((sub_root, _), package)| (sub_root.as_path(), package.as_ref())),
+        );
         self.set_is_application(any_application);
         self.set_is_doctrine(any_doctrine);
         self.set_is_symfony(any_symfony);
@@ -786,6 +811,7 @@ impl Backend {
             .write()
             .laravel_mut()
             .set_enabled(false);
+        *self.workspace.laravel_app_root.write() = None;
 
         // Marked before the filters are read, as for a Composer project,
         // so the walk sees Drupal's `.module`, `.install`, … files as PHP.

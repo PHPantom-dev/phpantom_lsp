@@ -151,7 +151,7 @@ fn discover(backend: &Backend) -> RateLimiterCatalog {
     // (`bootstrap/app.php`'s `booted()` and `withRouting(then:)` callbacks)
     // and from route files, which the route scan already knows.
     let mut boot_files = Vec::new();
-    if let Some(root) = backend.workspace.workspace_root.read().clone() {
+    if let Some(root) = backend.laravel_root() {
         boot_files.push(crate::util::path_to_uri(&root.join("bootstrap/app.php")));
     }
     boot_files.extend(

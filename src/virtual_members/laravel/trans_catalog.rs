@@ -221,8 +221,8 @@ impl Backend {
 
     fn build_translation_catalog(&self) -> TranslationCatalog {
         let mut roots = self.laravel.provider_resources.read().trans_dirs.clone();
-        let workspace_root = self.workspace.workspace_root.read().clone();
-        if let Some(root) = &workspace_root {
+        let app_root = self.laravel_root();
+        if let Some(root) = &app_root {
             let overrides: Vec<_> = roots
                 .iter()
                 .filter(|resource| !resource.namespace.is_empty())
@@ -274,7 +274,7 @@ impl Backend {
         }
         // A new language file can be open before it exists on disk. The
         // nonblocking snapshot is safe while the workspace index resolves types.
-        if let Some(root) = workspace_root {
+        if let Some(root) = app_root {
             let root_uri = crate::util::path_to_uri(&root);
             for (uri, _) in self.user_file_symbol_maps_nonblocking() {
                 let Some((locale, group)) = app_lang_locale_and_group(&root_uri, &uri) else {

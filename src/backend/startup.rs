@@ -357,10 +357,12 @@ impl Backend {
                 if laravel_config.schema.enabled() || laravel_config.migrations.enabled() {
                     let bp_macros = self.laravel.macros.read().blueprint_macro_closures();
                     let schema_root = root.clone();
+                    let app_root = self.laravel_root().unwrap_or_else(|| root.clone());
                     let schema_config = laravel_config.clone();
                     let loaded = run_blocking_cancel_safe("load_schema_index", move || {
                         crate::virtual_members::laravel::database_schema::load_schema_index(
                             &schema_root,
+                            &app_root,
                             &schema_config,
                             &bp_macros,
                         )

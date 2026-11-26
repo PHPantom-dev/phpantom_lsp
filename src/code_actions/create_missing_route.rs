@@ -32,7 +32,7 @@ impl Backend {
         if diagnostics.is_empty() {
             return;
         }
-        let Some(root) = self.workspace.workspace_root.read().clone() else {
+        let Some(root) = self.laravel_root() else {
             return;
         };
         let Some(source_path) =

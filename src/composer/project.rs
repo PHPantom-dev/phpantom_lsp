@@ -102,6 +102,29 @@ pub(crate) fn has_laravel_aware_phpstan(package: &ComposerPackage) -> bool {
         })
 }
 
+/// The Laravel application among a workspace's nested Composer projects,
+/// for a workspace whose own root is not one.
+///
+/// A project with an `artisan` file is an application by Laravel's own
+/// convention, so it is preferred over one that only depends on the
+/// framework (see [`is_laravel_application`]).  Among equals the first
+/// wins, which is the shallowest since that is the order the projects are
+/// discovered in.
+pub(crate) fn laravel_app_subproject<'a>(
+    subprojects: impl IntoIterator<Item = (&'a Path, Option<&'a ComposerPackage>)> + Clone,
+) -> Option<PathBuf> {
+    subprojects
+        .clone()
+        .into_iter()
+        .find(|(dir, _)| dir.join("artisan").is_file())
+        .or_else(|| {
+            subprojects
+                .into_iter()
+                .find(|(_, package)| package.is_some_and(is_laravel_application))
+        })
+        .map(|(dir, _)| dir.to_path_buf())
+}
+
 /// Detect whether the project depends on Laravel or a standalone
 /// Illuminate component.
 ///

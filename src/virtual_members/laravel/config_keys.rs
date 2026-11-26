@@ -200,9 +200,9 @@ impl Backend {
         &self,
         mut visit: impl FnMut(&str, ConfigSourceKind, &str),
     ) {
-        let workspace_root = self.workspace.workspace_root.read().clone();
+        let app_root = self.laravel_root();
         let mut config_uris: Vec<String> = Vec::new();
-        if let Some(root) = &workspace_root {
+        if let Some(root) = &app_root {
             let vendor_dir_paths = self.workspace.vendor_dir_paths.lock().clone();
             let filters = self.index_filters();
             for path in crate::classmap_scanner::collect_php_files_gitignore(
@@ -241,7 +241,7 @@ impl Backend {
             }
         }
 
-        let Some(root) = workspace_root else {
+        let Some(root) = app_root else {
             return;
         };
         let Ok(entries) = std::fs::read_dir(framework_config_dir(&root)) else {
@@ -357,7 +357,7 @@ fn resolve_config_key_declaration_inner(
     allow_file_fallback: bool,
 ) -> Option<Location> {
     let parts: Vec<&str> = key.split('.').collect();
-    let root = backend.workspace.workspace_root.read().clone()?;
+    let root = backend.laravel_root()?;
 
     let mut candidates: Vec<(String, std::path::PathBuf)> = Vec::new();
     let config_dir = root.join("config");

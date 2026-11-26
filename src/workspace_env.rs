@@ -25,6 +25,12 @@ use crate::types::PhpVersion;
 pub(crate) struct WorkspaceEnv {
     /// The root directory of the workspace (set during `initialize`).
     pub(crate) workspace_root: Arc<RwLock<Option<PathBuf>>>,
+    /// The base path of the Laravel application, when it is a Composer
+    /// subproject of the workspace rather than the workspace root itself
+    /// (a monorepo opened at its top with the app in `backend/`).  `None`
+    /// means the app, if any, lives at `workspace_root`.  Read through
+    /// [`Backend::laravel_root`](crate::Backend::laravel_root).
+    pub(crate) laravel_app_root: Arc<RwLock<Option<PathBuf>>>,
     /// PSR-4 autoload mappings parsed from `composer.json`.
     pub(crate) psr4_mappings: Arc<RwLock<Vec<composer::Psr4Mapping>>>,
     /// `file://` URI prefixes for all known vendor directories.
@@ -216,6 +222,7 @@ impl WorkspaceEnv {
     fn with_global_config(global_config_path: Option<PathBuf>) -> Self {
         Self {
             workspace_root: Arc::new(RwLock::new(None)),
+            laravel_app_root: Arc::new(RwLock::new(None)),
             psr4_mappings: Arc::new(RwLock::new(Vec::new())),
             vendor_uri_prefixes: Mutex::new(Vec::new()),
             vendor_dir_paths: Mutex::new(Vec::new()),
@@ -266,6 +273,7 @@ impl Clone for WorkspaceEnv {
     fn clone(&self) -> Self {
         Self {
             workspace_root: Arc::clone(&self.workspace_root),
+            laravel_app_root: Arc::clone(&self.laravel_app_root),
             psr4_mappings: Arc::clone(&self.psr4_mappings),
             vendor_uri_prefixes: Mutex::new(self.vendor_uri_prefixes.lock().clone()),
             vendor_dir_paths: Mutex::new(self.vendor_dir_paths.lock().clone()),

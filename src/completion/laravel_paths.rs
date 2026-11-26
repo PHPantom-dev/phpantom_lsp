@@ -73,7 +73,7 @@ fn detect_context(
         return None;
     }
 
-    let root = backend.workspace.workspace_root.read().clone()?;
+    let root = backend.laravel_root()?;
     let base = path_helper_base(&root, helper)?;
 
     Some(PathHelperContext::new(

@@ -158,7 +158,7 @@ impl Backend {
     /// `config/livewire.php` changes or the provider scan that locates
     /// Livewire's own config is published again.
     pub(crate) fn livewire_views(&self) -> Arc<LivewireViews> {
-        let Some(root) = self.workspace.workspace_root.read().clone() else {
+        let Some(root) = self.laravel_root() else {
             return Arc::new(LivewireViews::default());
         };
         self.cached_laravel_enumeration(

@@ -240,6 +240,7 @@ impl Backend {
         let mut migration_discovery =
             crate::virtual_members::laravel::database_schema::MigrationDiscovery::default();
         let config_path = root.join(crate::config::CONFIG_FILE_NAME);
+        let app_root = self.laravel_root().unwrap_or_else(|| root.to_path_buf());
         // The index guards are taken per check, not across the loop:
         // migration discovery walks directories.
         let is_open = |uri: &str| self.open_files.read().contains_key(uri);
@@ -299,6 +300,7 @@ impl Backend {
                 && let Some(file_path) = crate::util::url_to_path(&change.uri)
                 && crate::virtual_members::laravel::database_schema::SchemaIndex::watched_path_affects_schema(
                     root,
+                    &app_root,
                     &laravel_config,
                     &file_path,
                 )

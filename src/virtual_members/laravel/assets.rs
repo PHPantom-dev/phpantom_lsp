@@ -401,7 +401,7 @@ fn has_vite_config(root: &Path) -> bool {
 impl Backend {
     /// Read what the asset keys of `kinds` are judged against.
     pub(crate) fn asset_world(&self, kinds: impl Fn(StringKeyKind) -> bool) -> AssetWorld {
-        let Some(root) = self.workspace.workspace_root.read().clone() else {
+        let Some(root) = self.laravel_root() else {
             return AssetWorld::default();
         };
         let public = root.join("public");
@@ -419,7 +419,7 @@ impl Backend {
     /// Where Inertia looks for pages, cached until `config/inertia.php`
     /// changes.
     pub(crate) fn inertia_pages(&self) -> Arc<InertiaPages> {
-        let Some(root) = self.workspace.workspace_root.read().clone() else {
+        let Some(root) = self.laravel_root() else {
             return Arc::default();
         };
         self.cached_laravel_enumeration(
@@ -440,7 +440,7 @@ impl Backend {
     /// The directory an asset path of `kind` is typed relative to, for the
     /// kinds completed a directory at a time.
     pub(crate) fn asset_completion_base(&self, kind: StringKeyKind) -> Option<PathBuf> {
-        let root = self.workspace.workspace_root.read().clone()?;
+        let root = self.laravel_root()?;
         match kind {
             StringKeyKind::Asset => Some(root.join("public")),
             StringKeyKind::ViteAsset => Some(root),
@@ -452,7 +452,7 @@ impl Backend {
     /// them: with the leading slash the manifest writes, or without it, the
     /// way `mix()` is usually called.
     pub(crate) fn mix_manifest_keys(&self, typed_prefix: &str) -> Vec<String> {
-        let Some(root) = self.workspace.workspace_root.read().clone() else {
+        let Some(root) = self.laravel_root() else {
             return Vec::new();
         };
         let Some(manifest) = MixManifest::read(&root) else {
@@ -476,7 +476,7 @@ impl Backend {
 
     /// The file an asset key of `kind` names, when it exists.
     pub(crate) fn asset_file(&self, kind: StringKeyKind, key: &str) -> Option<PathBuf> {
-        let root = self.workspace.workspace_root.read().clone()?;
+        let root = self.laravel_root()?;
         let file = match kind {
             StringKeyKind::Asset => {
                 normalize_path(&root.join("public").join(public_relative_path(key)?))

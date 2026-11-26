@@ -202,7 +202,7 @@ impl Backend {
     /// The URIs of the app's provider registration files
     /// ([`PROVIDER_LIST_FILES`]), or none outside a workspace.
     fn laravel_provider_list_uris(&self) -> Option<[String; 2]> {
-        let root = self.workspace.workspace_root.read().clone()?;
+        let root = self.laravel_root()?;
         Some(PROVIDER_LIST_FILES.map(|rel| crate::util::path_to_uri(&root.join(rel))))
     }
 
