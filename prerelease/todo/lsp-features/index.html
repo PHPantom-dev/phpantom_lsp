@@ -2528,19 +2528,24 @@ subscribers, which are not read.</p>
 side table to mirror), and <code>references/symfony-language-tools</code>
 (<code>docs/features/events.rst</code>).</p>
 <hr />
-<h2 id="f46-symfony-listener-methods-a-tag-or-a-default-names">F46. Symfony listener methods a tag or a default names<a class="headerlink" href="#f46-symfony-listener-methods-a-tag-or-a-default-names" title="Permanent link">&para;</a></h2>
+<h2 id="f77-symfony-listener-methods-chosen-by-convention">F77. Symfony listener methods chosen by convention<a class="headerlink" href="#f77-symfony-listener-methods-chosen-by-convention" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Complexity: Low-Medium</strong></p>
-<p>The method an <code>#[AsEventListener(method: …)]</code> or a subscriber's map names
-navigates to the listener's method, and one that does not exist is
-reported. Two other ways of naming it do not: the <code>method</code> of a
-<code>kernel.event_listener</code> tag in YAML or XML, which names a method of the
-tagged service's class, and no method at all, where Symfony calls
-<code>on</code> followed by the event name in camel case, else <code>__invoke()</code>. The
-second also leaves a listener whose method name is never written
-anywhere looking unused.</p>
-<p><strong>Where to look:</strong> <code>src/symfony/tags.rs</code> (the tag scan, which already
-reads the <code>event</code> beside the <code>method</code>), <code>src/resource_navigation.rs</code> (the
-<code>Class::member</code> spans a resource map already holds).</p>
+<p>When no listener method is written, Symfony tries <code>on</code> followed by the
+camel-cased event name and then <code>__invoke()</code>. Track the method Symfony
+chooses so its registration counts as a use. Report a missing listener
+method, including an explicit method on a YAML or XML tag.</p>
+<hr />
+<h2 id="f78-symfony-named-arguments-and-bindings-in-xml-service-files">F78. Symfony named arguments and bindings in XML service files<a class="headerlink" href="#f78-symfony-named-arguments-and-bindings-in-xml-service-files" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
+<p>In YAML, a named argument (<code>$inner:</code> under <code>arguments:</code>) and a default
+binding (<code>$queryBus:</code> under <code>_defaults: bind:</code>) lead to the constructor
+or factory parameter they fill, and Find References on that parameter
+lists them. The XML spellings, <code>&lt;argument key="$inner"&gt;</code> and
+<code>&lt;bind key="$queryBus"&gt;</code> under <code>&lt;defaults&gt;</code>, do neither. A binding there
+reaches every service the file configures, including the classes a
+<code>&lt;prototype namespace="…" resource="…"&gt;</code> loads.</p>
+<p><strong>Where to look:</strong> <code>src/symfony/service_calls.rs</code> (<code>xml_call_sites</code>) and
+<code>src/symfony/service_arguments.rs</code> (the targets the YAML scan builds).</p>
 <hr />
 <h2 id="f47-symfony-messenger-transports">F47. Symfony Messenger transports<a class="headerlink" href="#f47-symfony-messenger-transports" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>

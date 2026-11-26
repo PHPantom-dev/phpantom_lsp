@@ -1308,6 +1308,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#symfony" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Symfony
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1531,7 +1542,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#symfony" class="md-nav__link">
+  <a href="#symfony_1" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
         Symfony
@@ -3839,6 +3850,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#symfony" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Symfony
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -4062,7 +4084,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#symfony" class="md-nav__link">
+  <a href="#symfony_1" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
         Symfony
@@ -6322,6 +6344,10 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 <ul>
 <li><strong>Flux and Filament components.</strong> Flux's <code>&lt;flux:button&gt;</code> tags complete, offer the attributes the component declares, jump to its template in the package, and are reported when no component has the name. Components a package registers by directory, such as Flux's, now work under their <code>&lt;x-prefix::…&gt;</code> spelling too.</li>
 </ul>
+<h4 id="symfony">Symfony<a class="headerlink" href="#symfony" title="Permanent link">&para;</a></h4>
+<ul>
+<li><strong>Service arguments, bindings, listener methods and factories navigate.</strong> In Symfony service configuration, go to definition on a named argument or a <code>_defaults</code> binding opens the constructor or factory parameter it fills, and on a listener tag's <code>method</code> or a factory's method opens that method. Find references on the PHP side lists them. Contributed by @shuvroroy.</li>
+</ul>
 <h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
 <ul>
 <li><strong>Project tools only run in a trusted workspace.</strong> PHPStan, PHP_CodeSniffer, PHPMD, Mago and external formatters execute the project's code, so the language server now runs them only once the workspace is trusted. VS Code and Zed already ask before starting the server, other editors ask once per project, and <code>phpantom_lsp trust</code> covers editors that cannot show the question. See <a href="../configuration/#project-tools-and-workspace-trust">Project tools and workspace trust</a>. Reported by @bhavyamalhotra2210.</li>
@@ -6543,7 +6569,7 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 <li><strong>Config key hover shows the value.</strong> Hovering a key in <code>config('app.name')</code> now shows what it holds: the value as written in the config file, or for an <code>env()</code> read, the environment variable, its default, and what <code>.env</code> sets it to. Values of variables whose names look like credentials stay hidden.</li>
 <li><strong>Unknown methods on Eloquent models and builders.</strong> A method call that a model or its query builder does not answer, like <code>$order-&gt;getTotl()</code> or <code>Order::query()-&gt;paidd()</code>, is now reported, since Eloquent throws for it at runtime. Dynamic <code>where{Column}()</code> calls, scopes, and macros are still accepted. In an app that turns on <code>Model::preventAccessingMissingAttributes()</code> or <code>Model::shouldBeStrict()</code>, an unknown attribute on a model whose table the migrations declare is reported too.</li>
 </ul>
-<h4 id="symfony">Symfony<a class="headerlink" href="#symfony" title="Permanent link">&para;</a></h4>
+<h4 id="symfony_1">Symfony<a class="headerlink" href="#symfony_1" title="Permanent link">&para;</a></h4>
 <ul>
 <li><strong>Symfony form options.</strong> The keys of the options array a form builder's <code>add()</code>, a form factory's <code>create()</code>, or a controller's <code>createForm()</code> passes complete from the options the form type accepts, its parent types and the installed type extensions included, and jump to where each is declared. An option the type does not accept, such as <code>'requird'</code>, is reported.</li>
 <li><strong>Symfony constraint options in validation mappings.</strong> The options a YAML or XML validation mapping gives a constraint, such as <code>min</code> in <code>- Length: { min: 2 }</code> or an XML <code>&lt;option name="min"&gt;</code>, complete from the options the constraint takes. An option it does not take, such as <code>mni</code>, is reported.</li>
