@@ -2572,26 +2572,6 @@ not reported.</p>
 <p><strong>Where to look:</strong> <code>src/symfony/messenger.rs</code>, and
 <code>references/symfony-language-tools</code> (<code>docs/features/messenger.rst</code>).</p>
 <hr />
-<h2 id="f48-symfony-environment-variables">F48. Symfony environment variables<a class="headerlink" href="#f48-symfony-environment-variables" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Medium · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="nt">parameters</span><span class="p">:</span>
-<a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a><span class="w">    </span><span class="nt">app.secret</span><span class="p">:</span><span class="w"> </span><span class="s">'%env(APP_SECRET)%'</span>
-<a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a><span class="w">    </span><span class="nt">app.port</span><span class="p">:</span><span class="w"> </span><span class="s">'%env(int:DATABASE_PORT)%'</span>
-</code></pre></div>
-<p>A Laravel <code>env('APP_NAME')</code> completes, jumps to the line of <code>.env</code> that
-declares it, and lists its references. The <code>%env(…)%</code> placeholders a
-Symfony project reads its environment through, in YAML, XML, PHP, and
-Twig configuration, do none of this: the <code>ContainerParameter</code> scan skips
-them. The name is the last segment after the processors (<code>int:</code>,
-<code>json:</code>, <code>default:fallback:</code>), and Symfony also reads <code>.env.local</code>,
-<code>.env.&lt;environment&gt;</code>, and <code>.env.&lt;environment&gt;.local</code>.</p>
-<p>Reuse the <code>Env</code> string-key kind and its <code>.env</code> reader rather than adding
-a second one.</p>
-<p><strong>Where to look:</strong> <code>src/symfony/resources.rs</code>
-(<code>scan_parameter_placeholders</code>), <code>src/virtual_members/laravel/</code> (the
-<code>.env</code> reader), and <code>references/symfony-language-tools</code>
-(<code>docs/features/environment.rst</code>).</p>
-<hr />
 <h2 id="f49-symfony-security-names">F49. Symfony security names<a class="headerlink" href="#f49-symfony-security-names" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
 <p>The firewalls and user providers <code>security.yaml</code> declares, the provider a
@@ -2607,8 +2587,8 @@ them.</p>
 <hr />
 <h2 id="f51-class-names-in-twigs-constant-and-enum">F51. Class names in Twig's <code>constant()</code> and <code>enum()</code><a class="headerlink" href="#f51-class-names-in-twigs-constant-and-enum" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a><span class="cp">{%</span> <span class="k">if</span> <span class="nv">user.status</span> <span class="o">==</span> <span class="nv">constant</span><span class="o">(</span><span class="s1">'App\\Entity\\User::ACTIVE'</span><span class="o">)</span> <span class="cp">%}</span>
-<a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a><span class="cp">{%</span> <span class="k">for</span> <span class="nv">case</span> <span class="k">in</span> <span class="nv">enum_cases</span><span class="o">(</span><span class="s1">'App\\Enum\\Status'</span><span class="o">)</span> <span class="cp">%}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="cp">{%</span> <span class="k">if</span> <span class="nv">user.status</span> <span class="o">==</span> <span class="nv">constant</span><span class="o">(</span><span class="s1">'App\\Entity\\User::ACTIVE'</span><span class="o">)</span> <span class="cp">%}</span>
+<a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a><span class="cp">{%</span> <span class="k">for</span> <span class="nv">case</span> <span class="k">in</span> <span class="nv">enum_cases</span><span class="o">(</span><span class="s1">'App\\Enum\\Status'</span><span class="o">)</span> <span class="cp">%}</span>
 </code></pre></div>
 <p>The class, constant, and enum case Twig's <code>constant()</code>, <code>enum()</code>, and
 <code>enum_cases()</code> name as strings neither complete nor navigate. They are
@@ -2642,8 +2622,8 @@ or XML, so it needs a scan of the controller files' class members.</p>
 <hr />
 <h2 id="f55-symfony-expressionlanguage-strings">F55. Symfony ExpressionLanguage strings<a class="headerlink" href="#f55-symfony-expressionlanguage-strings" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low · Complexity: Medium-High</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a><span class="x">#[IsGranted(new Expression('is_granted("ROLE_ADMIN") or user.isOwner(subject)'))]</span>
-<a id="__codelineno-18-2" name="__codelineno-18-2" href="#__codelineno-18-2"></a><span class="x">#[Route('/admin', condition: "request.headers.get('X-Admin') == '1'")]</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a><span class="x">#[IsGranted(new Expression('is_granted("ROLE_ADMIN") or user.isOwner(subject)'))]</span>
+<a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a><span class="x">#[Route('/admin', condition: "request.headers.get('X-Admin') == '1'")]</span>
 </code></pre></div>
 <p>An ExpressionLanguage string is a small language of its own, with
 variables Symfony binds per site: <code>user</code>, <code>subject</code>, <code>token</code>, and
@@ -2661,20 +2641,20 @@ nothing for a project until someone writes its rules.</p>
 <hr />
 <h2 id="f56-live-components">F56. Live components<a class="headerlink" href="#f56-live-components" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Complexity: Medium-High</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a><span class="x">#[AsLiveComponent]</span>
-<a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a><span class="x">final class SearchBox</span>
-<a id="__codelineno-19-3" name="__codelineno-19-3" href="#__codelineno-19-3"></a><span class="x">{</span>
-<a id="__codelineno-19-4" name="__codelineno-19-4" href="#__codelineno-19-4"></a><span class="x">    use DefaultActionTrait;</span>
-<a id="__codelineno-19-5" name="__codelineno-19-5" href="#__codelineno-19-5"></a>
-<a id="__codelineno-19-6" name="__codelineno-19-6" href="#__codelineno-19-6"></a><span class="x">    #[LiveProp(writable: true)]</span>
-<a id="__codelineno-19-7" name="__codelineno-19-7" href="#__codelineno-19-7"></a><span class="x">    public string $query = '';</span>
-<a id="__codelineno-19-8" name="__codelineno-19-8" href="#__codelineno-19-8"></a>
-<a id="__codelineno-19-9" name="__codelineno-19-9" href="#__codelineno-19-9"></a><span class="x">    #[LiveAction]</span>
-<a id="__codelineno-19-10" name="__codelineno-19-10" href="#__codelineno-19-10"></a><span class="x">    public function clear(): void { … }</span>
-<a id="__codelineno-19-11" name="__codelineno-19-11" href="#__codelineno-19-11"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a><span class="x">#[AsLiveComponent]</span>
+<a id="__codelineno-18-2" name="__codelineno-18-2" href="#__codelineno-18-2"></a><span class="x">final class SearchBox</span>
+<a id="__codelineno-18-3" name="__codelineno-18-3" href="#__codelineno-18-3"></a><span class="x">{</span>
+<a id="__codelineno-18-4" name="__codelineno-18-4" href="#__codelineno-18-4"></a><span class="x">    use DefaultActionTrait;</span>
+<a id="__codelineno-18-5" name="__codelineno-18-5" href="#__codelineno-18-5"></a>
+<a id="__codelineno-18-6" name="__codelineno-18-6" href="#__codelineno-18-6"></a><span class="x">    #[LiveProp(writable: true)]</span>
+<a id="__codelineno-18-7" name="__codelineno-18-7" href="#__codelineno-18-7"></a><span class="x">    public string $query = '';</span>
+<a id="__codelineno-18-8" name="__codelineno-18-8" href="#__codelineno-18-8"></a>
+<a id="__codelineno-18-9" name="__codelineno-18-9" href="#__codelineno-18-9"></a><span class="x">    #[LiveAction]</span>
+<a id="__codelineno-18-10" name="__codelineno-18-10" href="#__codelineno-18-10"></a><span class="x">    public function clear(): void { … }</span>
+<a id="__codelineno-18-11" name="__codelineno-18-11" href="#__codelineno-18-11"></a><span class="x">}</span>
 </code></pre></div>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a><span class="x">&lt;input data-model="query"&gt;</span>
-<a id="__codelineno-20-2" name="__codelineno-20-2" href="#__codelineno-20-2"></a><span class="x">&lt;button data-action="live#action" data-live-action-param="clear"&gt;Clear&lt;/button&gt;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a><span class="x">&lt;input data-model="query"&gt;</span>
+<a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a><span class="x">&lt;button data-action="live#action" data-live-action-param="clear"&gt;Clear&lt;/button&gt;</span>
 </code></pre></div>
 <p>With <code>symfony/ux-live-component</code>, a component's template names its class's
 <code>#[LiveProp]</code> properties in <code>data-model</code> (and <code>data-model="on(change)|query"</code>),
@@ -2691,7 +2671,7 @@ link between a component class and its template.</p>
 <hr />
 <h2 id="f57-add-translation-quick-fix-for-an-undeclared-symfony-key">F57. "Add translation" quick fix for an undeclared Symfony key<a class="headerlink" href="#f57-add-translation-quick-fix-for-an-undeclared-symfony-key" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a><span class="x">$translator-&gt;trans('checkout.confirm'); // not in any catalogue</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a><span class="x">$translator-&gt;trans('checkout.confirm'); // not in any catalogue</span>
 </code></pre></div>
 <p>Laravel offers to add a missing translation to each locale's language file
 (<code>insert_translation_key.rs</code>). Symfony keys get no such fix. For an
@@ -2708,8 +2688,8 @@ When the domain has no catalogue yet, offer to create
 <hr />
 <h2 id="f70-a-label-at-a-call-of-a-closure-value-binds-nothing">F70. A label at a call of a closure value binds nothing<a class="headerlink" href="#f70-a-label-at-a-call-of-a-closure-value-binds-nothing" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-22-1" name="__codelineno-22-1" href="#__codelineno-22-1"></a><span class="x">$render = function (string $field): string { return $field; };</span>
-<a id="__codelineno-22-2" name="__codelineno-22-2" href="#__codelineno-22-2"></a><span class="x">$render(field: 'x');</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a><span class="x">$render = function (string $field): string { return $field; };</span>
+<a id="__codelineno-21-2" name="__codelineno-21-2" href="#__codelineno-21-2"></a><span class="x">$render(field: 'x');</span>
 </code></pre></div>
 <p>A named-argument label navigates, highlights, and renames with the parameter
 it fills by resolving the call's callee to the parameter's declaration token.
@@ -2802,12 +2782,12 @@ parser, <code>src/hover/member.rs</code> (<code>hover_for_property</code>). The 
 <h2 id="f76-php-86-parameter-doc-comments-are-not-read">F76. PHP 8.6 parameter doc comments are not read<a class="headerlink" href="#f76-php-86-parameter-doc-comments-are-not-read" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
 <p>PHP 8.6 lets a parameter carry its own doc comment:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-23-1" name="__codelineno-23-1" href="#__codelineno-23-1"></a><span class="x">function handle(</span>
-<a id="__codelineno-23-2" name="__codelineno-23-2" href="#__codelineno-23-2"></a><span class="x">    /** The request ID. */</span>
-<a id="__codelineno-23-3" name="__codelineno-23-3" href="#__codelineno-23-3"></a><span class="x">    string $id,</span>
-<a id="__codelineno-23-4" name="__codelineno-23-4" href="#__codelineno-23-4"></a><span class="x">    /** @var Logger */</span>
-<a id="__codelineno-23-5" name="__codelineno-23-5" href="#__codelineno-23-5"></a><span class="x">    $log,</span>
-<a id="__codelineno-23-6" name="__codelineno-23-6" href="#__codelineno-23-6"></a><span class="x">): void {}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-22-1" name="__codelineno-22-1" href="#__codelineno-22-1"></a><span class="x">function handle(</span>
+<a id="__codelineno-22-2" name="__codelineno-22-2" href="#__codelineno-22-2"></a><span class="x">    /** The request ID. */</span>
+<a id="__codelineno-22-3" name="__codelineno-22-3" href="#__codelineno-22-3"></a><span class="x">    string $id,</span>
+<a id="__codelineno-22-4" name="__codelineno-22-4" href="#__codelineno-22-4"></a><span class="x">    /** @var Logger */</span>
+<a id="__codelineno-22-5" name="__codelineno-22-5" href="#__codelineno-22-5"></a><span class="x">    $log,</span>
+<a id="__codelineno-22-6" name="__codelineno-22-6" href="#__codelineno-22-6"></a><span class="x">): void {}</span>
 </code></pre></div>
 <p>Hovering <code>$id</code> should show the description, and an <code>@var</code> there should type
 an untyped parameter. Today both are ignored.</p>
