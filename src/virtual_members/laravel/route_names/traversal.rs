@@ -87,7 +87,7 @@ pub(super) fn read_route_source(buffers: Option<&Backend>, path: &Path) -> Optio
     if let Some(content) = buffers.and_then(|backend| backend.open_buffer_at_path(path)) {
         return Some(content);
     }
-    std::fs::read_to_string(path).ok().map(Arc::new)
+    crate::util::read_file_to_string(path).ok().map(Arc::new)
 }
 
 // ─── Router macros ───────────────────────────────────────────────────────────

@@ -875,7 +875,7 @@ impl Backend {
     pub(super) fn twig_template_text(&self, uri: &str) -> Option<Arc<String>> {
         self.get_file_content_arc(uri).or_else(|| {
             crate::util::uri_to_path(uri)
-                .and_then(|path| std::fs::read_to_string(path).ok())
+                .and_then(|path| crate::util::read_file_to_string(path).ok())
                 .map(Arc::new)
         })
     }

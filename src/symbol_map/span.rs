@@ -562,6 +562,12 @@ pub(crate) enum SymbolKind {
         /// allocation per label for information the file already stores.
         call_args_start: u32,
     },
+    /// A service argument or binding and the constructors or factories it can fill.
+    ServiceArgument {
+        name: Atom,
+        native_type: Option<Atom>,
+        targets: crate::symfony::service_arguments::Targets,
+    },
 
     /// A namespace name at its declaration site (`namespace App\Models;`).
     /// Used by the rename handler to support namespace renaming.
@@ -651,6 +657,9 @@ impl SymbolKind {
             | Self::NamespaceDeclaration { .. } => 0,
             Self::LaravelMacroString { name, .. } | Self::CommandOwnParam { name, .. } => {
                 name.capacity()
+            }
+            Self::ServiceArgument { targets, .. } => {
+                std::mem::size_of_val(targets.as_ref()) / Arc::strong_count(targets)
             }
             Self::MemberAccess { subject_text, .. } => subject_text.heap_bytes(),
             Self::StringKey { key, .. } => key.capacity(),

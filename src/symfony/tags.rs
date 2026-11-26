@@ -13,7 +13,7 @@
 use super::NameSlot;
 use crate::symbol_map::StringKeyKind;
 
-const EVENT_LISTENER_TAG: &str = "kernel.event_listener";
+pub(super) const EVENT_LISTENER_TAG: &str = "kernel.event_listener";
 const MESSAGE_HANDLER_TAG: &str = "messenger.message_handler";
 
 /// The attribute of a tag named `tag` that names an event or a bus, with
@@ -54,7 +54,7 @@ pub(crate) fn tags_twig_loader(content: &str) -> bool {
 pub(crate) fn tag_slots(uri: &str, content: &str) -> Vec<NameSlot> {
     let mut slots = Vec::new();
     match super::config_format(uri) {
-        Some(super::ConfigFormat::Yaml) => scan_yaml(content, &mut slots),
+        Some(super::ConfigFormat::Yaml) => scan_yaml(content, &mut |tag| tag.finish(&mut slots)),
         Some(super::ConfigFormat::Xml) => scan_xml(content, &mut slots),
         None => {}
     }
@@ -80,14 +80,17 @@ struct Tag<'c> {
 }
 
 impl<'c> Tag<'c> {
-    fn finish(self, slots: &mut Vec<NameSlot>) {
-        let name = self.name.or_else(|| {
+    fn name(&self) -> Option<&str> {
+        self.name.or_else(|| {
             self.pairs
                 .iter()
                 .find(|pair| pair.key == "name")
                 .map(|pair| pair.value)
-        });
-        let Some((attribute, kind, is_write)) = name.and_then(named_attribute) else {
+        })
+    }
+
+    fn finish(self, slots: &mut Vec<NameSlot>) {
+        let Some((attribute, kind, is_write)) = self.name().and_then(named_attribute) else {
             return;
         };
         for pair in self.pairs.iter().filter(|pair| pair.key == attribute) {
@@ -132,7 +135,18 @@ fn pair(text: &str, offset: usize) -> Option<Pair<'_>> {
     })
 }
 
-fn scan_yaml(content: &str, slots: &mut Vec<NameSlot>) {
+/// Method names relative to the start of one service's tags property.
+pub(super) fn listener_methods(content: &str, start: usize, names: &mut Vec<(usize, usize)>) {
+    scan_yaml(content, &mut |tag| {
+        if tag.name() == Some(EVENT_LISTENER_TAG) {
+            for method in tag.pairs.iter().filter(|pair| pair.key == "method") {
+                names.push((start + method.start, start + method.end));
+            }
+        }
+    });
+}
+
+fn scan_yaml(content: &str, visit: &mut impl FnMut(Tag<'_>)) {
     let mut open: Option<BlockTag<'_>> = None;
     for (line_start, line) in crate::framework::line_offsets(content) {
         let semantic = super::resources::yaml_content_before_comment(line);
@@ -148,11 +162,11 @@ fn scan_yaml(content: &str, slots: &mut Vec<NameSlot>) {
             && (indent <= block.dash_indent || block.indent.is_some_and(|at| indent < at))
             && let Some(block) = open.take()
         {
-            block.tag.finish(slots);
+            visit(block.tag);
         }
 
         if let Some(brace) = semantic.find('{') {
-            scan_flow_mappings(semantic, line_start, brace, slots);
+            scan_flow_mappings(semantic, line_start, brace, visit);
             continue;
         }
 
@@ -188,14 +202,19 @@ fn scan_yaml(content: &str, slots: &mut Vec<NameSlot>) {
         }
     }
     if let Some(block) = open {
-        block.tag.finish(slots);
+        visit(block.tag);
     }
 }
 
 /// The tags written as flow mappings on one line, the first `{` at
 /// `brace`.  A mapping keyed by a tag's name (`kernel.event_listener: {…}`)
 /// takes that name.
-fn scan_flow_mappings(line: &str, line_start: usize, brace: usize, slots: &mut Vec<NameSlot>) {
+fn scan_flow_mappings(
+    line: &str,
+    line_start: usize,
+    brace: usize,
+    visit: &mut impl FnMut(Tag<'_>),
+) {
     let mut cursor = brace;
     while let Some(open) = line[cursor..].find('{').map(|at| cursor + at) {
         let close = line[open..].find('}').map_or(line.len(), |at| open + at);
@@ -213,7 +232,7 @@ fn scan_flow_mappings(line: &str, line_start: usize, brace: usize, slots: &mut V
             }
             item_start += item.len() + 1;
         }
-        tag.finish(slots);
+        visit(tag);
         cursor = close.min(line.len().saturating_sub(1)) + 1;
         if cursor >= line.len() {
             break;

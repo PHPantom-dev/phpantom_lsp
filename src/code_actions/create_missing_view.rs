@@ -14,7 +14,7 @@
 //! Inertia page (`invalid_inertia_page`) under the first page directory,
 //! with the extension the project's other pages use.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use tower_lsp_server::gen_lsp_types::*;
@@ -236,7 +236,11 @@ impl Backend {
             None => view_key,
         }
         .replace('.', "/");
-        Some(target_dir.join(format!("{rel}.blade.php")))
+        // `Path::join` replaces the base with an absolute or drive-prefixed
+        // name, so `view('/tmp/x')` would otherwise point outside the
+        // view directory.
+        crate::util::is_contained_relative_path(Path::new(&rel))
+            .then(|| target_dir.join(format!("{rel}.blade.php")))
     }
 
     /// Where a missing view named `view_key` should be created.

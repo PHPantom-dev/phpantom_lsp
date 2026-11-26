@@ -591,7 +591,7 @@ pub(crate) fn symfony_env(root: &Path, name: &str) -> Option<String> {
     [".env.dev.local", ".env.dev", ".env.local", ".env"]
         .iter()
         .find_map(|file| {
-            let content = std::fs::read_to_string(root.join(file)).ok()?;
+            let content = crate::util::read_file_to_string(root.join(file)).ok()?;
             crate::virtual_members::laravel::declared_env_value(&content, name)
         })
 }

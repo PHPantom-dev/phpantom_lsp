@@ -16,10 +16,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 #### Laravel
 
 - **Mass assignment on totally guarded models.** PHPantom warns when a call such as `Post::create($attributes)` can throw `MassAssignmentException` because the model uses Eloquent's default guards. Contributed by @shuvroroy.
+#### Symfony
+
+- **Service arguments, bindings, listener methods and factories navigate.** In Symfony service configuration, go to definition on a named argument or a `_defaults` binding opens the constructor or factory parameter it fills, and on a listener tag's `method` or a factory's method opens that method. Find references on the PHP side lists them. Contributed by @shuvroroy.
 
 ### Changed
 
-- **Project tools only run in a trusted workspace.** PHPStan, PHP_CodeSniffer, PHPMD, Mago and external formatters execute the project's code, so the language server now runs them only once the workspace is trusted. VS Code and Zed already ask before starting the server, other editors ask once per project, and `phpantom_lsp trust` covers editors that cannot show the question. See [Project tools and workspace trust](configuration.md#project-tools-and-workspace-trust).
+- **Project tools only run in a trusted workspace.** PHPStan, PHP_CodeSniffer, PHPMD, Mago and external formatters execute the project's code, so the language server now runs them only once the workspace is trusted. VS Code and Zed already ask before starting the server, other editors ask once per project, and `phpantom_lsp trust` covers editors that cannot show the question. See [Project tools and workspace trust](configuration.md#project-tools-and-workspace-trust). Reported by @bhavyamalhotra2210.
 
 ### Fixed
 
@@ -27,13 +30,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`$app` is defined in every Blade template.** Laravel shares the application with all views, so `{{ $app->getLocale() }}` is no longer reported as an undefined variable and its members complete.
 - **No unknown-component report for a bare tag a package path answers.** `<x-badge>` reaches a template a package registered with `Blade::anonymousComponentPath()` under a prefix, as Laravel resolves it, so it is no longer reported as unknown.
 - **A Laravel application in a subdirectory of the workspace is read from its own directory.** When the workspace is a monorepo opened at its top, with the application in a folder such as `backend/`, its views, config, routes, translations, `.env`, assets and auth model are found there, so `view()` names and `Auth::user()` resolve instead of being reported.
-- **Creating a missing Inertia page stays inside the page directory.** A page name with `..` segments, such as `Inertia::render('../../x')`, is reported as unknown but no longer offers to create a file outside the project.
+- **Creating a missing Inertia page stays inside the page directory.** A page name with `..` segments, such as `Inertia::render('../../x')`, is reported as unknown but no longer offers to create a file outside the project. Reported by @bhavyamalhotra2210.
 
 - **Claude Code no longer sees outdated diagnostics after an edit.** Results from before an edit, at line numbers that no longer match the file, are not reported to the agent as new findings.
 - **Claude Code follows files changed by shell commands.** A file rewritten or deleted by a command the agent runs, such as a formatter or `git checkout`, is picked up within a second instead of keeping its old contents until the agent next edits it.
+- **Bitwise operators on strings with an untyped operand give a string.** `$string & $mixed` and `$mixed | $string` are `string`, and when both operands may be strings, such as `int|string ^ string`, the result is `int|string` instead of `int`.
 - **`is_callable()` keeps a string a string.** Inside `if (is_callable($name))` a string variable is a `callable-string`, and after the `if` it is a plain `string` again instead of `callable|string`.
 - **Missing properties on the left of `??` are no longer reported.** `$this->label ?? ''` and `$this->cache ??= []` read the property the way `isset()` does, so a property the class does not declare is not an error there. A missing method on that side is still reported.
 - **Undefined variables in a dynamic class constant fetch.** An undefined `$name` in `Foo::{$name}` is reported like any other read of it.
+- **Members and variables named by known strings resolve.** `$obj->{$name}()`, `$obj->$name`, `Foo::$name()` and `$$name` with a name typed `'foo'|'bar'` give what any of the named members or variables can, instead of `mixed`.
 - **Hover shows `readonly` properties.** A property declared `readonly`, promoted as one, or belonging to a `readonly` class shows the keyword in its hover.
 - **DNF types are spelled as PHP writes them.** A union holding an intersection shows as `(A&B)|null` in hover and anywhere else a type is written out, instead of `A&B|null`, which is not valid PHP.
 - **Parentheses around an assigned value no longer change its type.** `$last = (array_pop($items));` is typed like `$last = array_pop($items);`, instead of reading the array as if it had already been popped.
@@ -105,7 +110,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`throw` as an expression is `never`.** `fn () => throw new Exception()` returns `never`.
 - **`base64_decode()` returns `false` only in strict mode.** Without `$strict` it is typed `string`.
 - **`pathinfo()` may leave out `dirname`.** The empty path has no directory part, so the array's `dirname` key is optional.
-- **A corrupt `.phar` no longer crashes the server.** An archive whose header claims more files than it holds is skipped during indexing instead of aborting the process.
+- **A corrupt `.phar` no longer crashes the server.** An archive whose header claims more files than it holds is skipped during indexing instead of aborting the process. Reported by @bhavyamalhotra2210.
+- **A project file that leads to a device no longer hangs or crashes the server.** A symlink, or an entry in Composer's generated autoload files, that points at something like `/dev/zero` or a pipe is skipped instead of read.
+- **Created views and moved classes stay inside the project.** On Windows, a view name with a drive letter no longer offers to create a file outside the view directory, and `phpantom_lsp move` refuses a destination that a `..` in the autoload paths would take outside the project.
 
 ## [1.1.0] - 2026-11-24
 

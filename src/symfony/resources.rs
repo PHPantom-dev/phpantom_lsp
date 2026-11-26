@@ -82,7 +82,7 @@ fn key_span(kind: StringKeyKind, key: &str, start: usize, is_write: bool) -> Sym
 
 /// Whether `name` can be a service ID or parameter name, and is not a class
 /// name (which the class reference over the same text answers for).
-fn is_container_key(name: &str) -> bool {
+pub(super) fn is_container_key(name: &str) -> bool {
     !name.is_empty()
         && name
             .bytes()
@@ -412,7 +412,7 @@ fn xml_service_id(text: &str) -> Option<crate::atom::Atom> {
 }
 
 /// The offset of `part`, a slice of `whole`, within it.
-fn offset_within(whole: &str, part: &str) -> usize {
+pub(super) fn offset_within(whole: &str, part: &str) -> usize {
     part.as_ptr() as usize - whole.as_ptr() as usize
 }
 

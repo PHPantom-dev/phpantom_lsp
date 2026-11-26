@@ -236,7 +236,7 @@ impl Backend {
         // Copied out so the lock is not held across the file reads.
         let provider_config_files = self.laravel.provider_resources.read().config_files.clone();
         for res in &provider_config_files {
-            if let Ok(content) = std::fs::read_to_string(&res.path) {
+            if let Ok(content) = crate::util::read_file_to_string(&res.path) {
                 visit(&res.namespace, ConfigSourceKind::Package, &content);
             }
         }
@@ -255,7 +255,7 @@ impl Backend {
             let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
                 continue;
             };
-            if let Ok(content) = std::fs::read_to_string(&path) {
+            if let Ok(content) = crate::util::read_file_to_string(&path) {
                 visit(stem, ConfigSourceKind::Framework, &content);
             }
         }

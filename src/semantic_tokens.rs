@@ -481,7 +481,7 @@ impl Backend {
                     }
                 }
 
-                SymbolKind::NamedArgument { .. } => {
+                SymbolKind::NamedArgument { .. } | SymbolKind::ServiceArgument { .. } => {
                     // A label always names a parameter; whether that parameter
                     // also promotes a property takes the type engine, which
                     // tokens do not run.  A file whose editor has a PHP

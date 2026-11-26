@@ -407,7 +407,7 @@ pub fn load_schema_index(
 
         for path in schema_files {
             let connection = connection_name_from_schema_path(&path);
-            let content = std::fs::read_to_string(&path)?;
+            let content = crate::util::read_file_to_string(&path)?;
             let driver = index.connection_drivers.get(connection).map(String::as_str);
             for mut table in parse_schema_dump_with_driver(connection, driver, &content) {
                 table.connection = connection.to_string();

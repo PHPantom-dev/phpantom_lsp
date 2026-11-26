@@ -314,7 +314,7 @@ fn format_one(context: &Context<'_>, path: &Path) -> Outcome {
         .to_string_lossy()
         .into_owned();
 
-    let content = match std::fs::read_to_string(path) {
+    let content = match crate::util::read_file_to_string(path) {
         Ok(content) => content,
         Err(e) => {
             return Outcome::Failed(Failure {

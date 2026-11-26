@@ -54,7 +54,7 @@ impl Aliases {
         files.sort_unstable();
         let mut aliases = Self::default();
         for file in files {
-            let Ok(content) = std::fs::read_to_string(&file) else {
+            let Ok(content) = crate::util::read_file_to_string(&file) else {
                 continue;
             };
             if !content.contains(ALIASES_PARAM) {
@@ -161,7 +161,7 @@ impl Aliases {
                 required
             });
         if let Some(required) = required
-            && let Ok(content) = std::fs::read_to_string(&required)
+            && let Ok(content) = crate::util::read_file_to_string(&required)
         {
             crate::parser::with_parsed_program(&content, "yii_aliases", |program, content| {
                 for returned in crate::virtual_members::laravel::array_file::returned_exprs(program)

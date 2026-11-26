@@ -264,7 +264,7 @@ fn read_message_file(locale: &str, path: PathBuf) -> MessageFile {
         messages: Vec::new(),
         open: true,
     };
-    let Ok(content) = std::fs::read_to_string(&file.path) else {
+    let Ok(content) = crate::util::read_file_to_string(&file.path) else {
         return file;
     };
     crate::parser::with_parsed_program(&content, "yii_messages", |program, content| {
@@ -312,7 +312,7 @@ fn read_message_file(locale: &str, path: PathBuf) -> MessageFile {
 /// The directories the `MessageSource`s the PHP file at `path` constructs
 /// read, with `aliases` resolving a path that starts with one.
 fn message_source_dirs(path: &Path, aliases: &super::aliases::Aliases, out: &mut Vec<PathBuf>) {
-    let Ok(content) = std::fs::read_to_string(path) else {
+    let Ok(content) = crate::util::read_file_to_string(path) else {
         return;
     };
     if !content.contains("MessageSource") {

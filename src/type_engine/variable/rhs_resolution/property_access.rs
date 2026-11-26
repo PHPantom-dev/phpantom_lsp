@@ -51,13 +51,25 @@ pub(super) fn resolve_rhs_property_access(
         })
         | Access::NullSafeProperty(NullSafePropertyAccess {
             object, property, ..
-        }) => match property {
-            ClassLikeMemberSelector::Identifier(ident) => {
-                let nullsafe = matches!(access, Access::NullSafeProperty(_));
-                instance_property_type(object, bytes_to_str(ident.value), nullsafe, ctx)
+        }) => {
+            let nullsafe = matches!(access, Access::NullSafeProperty(_));
+            if let ClassLikeMemberSelector::Identifier(ident) = property {
+                return instance_property_type(object, bytes_to_str(ident.value), nullsafe, ctx);
             }
-            _ => super::runtime_named_member_type(),
-        },
+            // A name holding known strings reads whichever property it
+            // holds, so the read is any of them.
+            let names = super::method_calls::selected_member_names(property, ctx);
+            if names.is_empty() {
+                return super::runtime_named_member_type();
+            }
+            let mut results: Vec<ResolvedType> = Vec::new();
+            for name in &names {
+                for rt in instance_property_type(object, name, nullsafe, ctx) {
+                    ResolvedType::push_unique(&mut results, rt);
+                }
+            }
+            results
+        }
     }
 }
 

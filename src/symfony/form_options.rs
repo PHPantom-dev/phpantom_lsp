@@ -894,7 +894,7 @@ impl Backend {
             .into_iter()
             .filter(|(_, uri)| {
                 crate::util::uri_to_path(uri)
-                    .and_then(|path| std::fs::read(path).ok())
+                    .and_then(|path| crate::util::read_file(path).ok())
                     .is_some_and(|content| finder.find(&content).is_some())
             })
             .map(|(fqn, _)| fqn)

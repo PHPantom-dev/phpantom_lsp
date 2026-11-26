@@ -184,7 +184,7 @@ impl Backend {
         let Some(package_config) = package_config else {
             return LivewireViews::default();
         };
-        let Ok(package_content) = std::fs::read_to_string(&package_config) else {
+        let Ok(package_content) = crate::util::read_file_to_string(&package_config) else {
             return LivewireViews::default();
         };
         if !package_content.contains(LOCATIONS_KEY) {
@@ -199,7 +199,7 @@ impl Backend {
         let project_path = root.join("config").join("livewire.php");
         let project_content = crate::util::path_to_url(&project_path)
             .and_then(|uri| self.get_file_content(uri.as_str()))
-            .or_else(|| std::fs::read_to_string(&project_path).ok());
+            .or_else(|| crate::util::read_file_to_string(&project_path).ok());
         let project = project_content
             .map(|content| read_config(&content, project_path.parent().unwrap_or(root), root));
         merge_settings(project, Some(package))

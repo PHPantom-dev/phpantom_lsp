@@ -469,7 +469,7 @@ impl Backend {
                 continue;
             }
 
-            if let Ok(content) = std::fs::read(&canonical) {
+            if let Ok(content) = crate::util::read_file(&canonical) {
                 // Lightweight byte-level scan: extract symbol names
                 // without building a full AST.  The classes go into
                 // `fqn_uri_index` so find_or_load_class can lazily parse

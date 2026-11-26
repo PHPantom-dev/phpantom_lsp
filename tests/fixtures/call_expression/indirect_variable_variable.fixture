@@ -1,0 +1,15 @@
+// test: a variable variable named by literal strings reads the variables it names
+// feature: hover
+// expect_hover: $result => Brush
+// expect_hover: $result => Pencil
+---
+<?php
+
+class Brush {}
+class Pencil {}
+
+/** @param 'brush'|'pencil' $which */
+function pick(Brush $brush, Pencil $pencil, string $which): void {
+    $result = ${$which};
+    echo $res<>ult;
+}

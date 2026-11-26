@@ -274,7 +274,7 @@ pub(crate) struct PackageListenerFile {
 fn read_package_listener_files(paths: &[PathBuf]) -> Vec<PackageListenerFile> {
     let mut files = Vec::new();
     for path in paths {
-        let Ok(content) = std::fs::read_to_string(path) else {
+        let Ok(content) = crate::util::read_file_to_string(path) else {
             continue;
         };
         if !content.contains("::class") {
@@ -382,7 +382,7 @@ impl Backend {
             let uri = crate::util::path_to_uri(path);
             let content = match self.get_file_content_arc(&uri) {
                 Some(content) => content,
-                None => match std::fs::read_to_string(path) {
+                None => match crate::util::read_file_to_string(path) {
                     Ok(content) => Arc::new(content),
                     Err(_) => continue,
                 },

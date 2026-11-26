@@ -77,6 +77,6 @@ impl Backend {
         // view paths are relative whenever the project root is (the analyse
         // CLI passes `--project-root` through as given).  Nothing is open in
         // that case either, so reading the file directly loses nothing.
-        std::fs::read_to_string(&path).ok()
+        crate::util::read_file_to_string(&path).ok()
     }
 }

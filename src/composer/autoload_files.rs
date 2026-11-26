@@ -428,7 +428,7 @@ pub fn scan_composer_bootstrap_classes(
         {
             continue;
         }
-        if let Ok(content) = fs::read(&path) {
+        if let Ok(content) = crate::util::read_file(&path) {
             for fqn in crate::classmap_scanner::find_classes(&content) {
                 classmap.entry(fqn).or_insert_with(|| path.clone());
             }
@@ -457,7 +457,7 @@ fn scan_directory_for_classes(dir: &Path, classmap: &mut HashMap<String, PathBuf
         if file_type.is_dir() {
             scan_directory_for_classes(&path, classmap);
         } else if path.extension().is_some_and(|ext| ext == "php")
-            && let Ok(content) = fs::read(&path)
+            && let Ok(content) = crate::util::read_file(&path)
         {
             let classes = crate::classmap_scanner::find_classes(&content);
             for fqn in classes {

@@ -157,6 +157,22 @@ impl Backend {
         };
         for &index in indices {
             let span = &symbol_map.spans[index];
+            if let SymbolKind::ServiceArgument {
+                targets,
+                native_type,
+                ..
+            } = &span.kind
+            {
+                if self
+                    .service_argument_declarations(file.uri(), name, targets, *native_type)
+                    .iter()
+                    .any(&keep)
+                    && let Some(location) = file.location(span.start, span.end)
+                {
+                    locations.push(location);
+                }
+                continue;
+            }
             let SymbolKind::NamedArgument {
                 call_args_start, ..
             } = &span.kind
