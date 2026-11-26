@@ -2314,17 +2314,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b902-parentheses-around-an-assignments-right-side-change-its-type" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B902. Parentheses around an assignment's right side change its type
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -4255,17 +4244,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b902-parentheses-around-an-assignments-right-side-change-its-type" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B902. Parentheses around an assignment's right side change its type
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -5885,24 +5863,6 @@ completion goes through the same path. <code>// SKIP</code> lines in
 </ul>
 <p><strong>Fix:</strong> type <code>PHP_OS</code>, path and platform constants by their declared type rather than the stub's sample value; keep folding only the constants whose value the configured PHP version fixes.</p>
 <p><strong>Cases</strong> (PHPStan <code>nsrt/</code>, 34 assertions): <code>predefined-constants.php</code> (31), <code>predefined-constants-php72.php</code> (2), <code>predefined-constants-php85.php</code>.</p>
-<h3 id="b902-parentheses-around-an-assignments-right-side-change-its-type">B902. Parentheses around an assignment's right side change its type<a class="headerlink" href="#b902-parentheses-around-an-assignments-right-side-change-its-type" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-115-1" name="__codelineno-115-1" href="#__codelineno-115-1"></a><span class="x">/** @param list&lt;string&gt; $arr */</span>
-<a id="__codelineno-115-2" name="__codelineno-115-2" href="#__codelineno-115-2"></a><span class="x">function f(array $arr): void {</span>
-<a id="__codelineno-115-3" name="__codelineno-115-3" href="#__codelineno-115-3"></a><span class="x">    $a = array_pop($arr);     // string|null, and $arr is popped once</span>
-<a id="__codelineno-115-4" name="__codelineno-115-4" href="#__codelineno-115-4"></a><span class="x">    $b = (array_pop($arr));   // differs: the by-reference effect on $arr is applied differently</span>
-<a id="__codelineno-115-5" name="__codelineno-115-5" href="#__codelineno-115-5"></a><span class="x">    $c = voidFunction();      // void</span>
-<a id="__codelineno-115-6" name="__codelineno-115-6" href="#__codelineno-115-6"></a><span class="x">    $d = (voidFunction());    // null</span>
-<a id="__codelineno-115-7" name="__codelineno-115-7" href="#__codelineno-115-7"></a><span class="x">}</span>
-</code></pre></div>
-<p>The assignment handler special-cases the shape of its right side (a call
-with by-reference arguments, a <code>void</code> result), and a parenthesised right side
-does not match those cases, so the same value gets a different type.</p>
-<p><strong>Fix:</strong> unwrap parentheses before the assignment handler looks at its right
-side. Wrapping every expression in <code>tests/assert_type_runner.rs</code> in
-parentheses reproduces the cases (<code>array-pop.php</code>, <code>array-shift.php</code>,
-<code>bug-10122.php</code>, <code>bug-4499.php</code>, the <code>functionPhpDocs*</code>/<code>methodPhpDocs*</code>
-<code>void</code> assertions, and the WordPress <code>output-constants.php</code>).</p>
 
 
 
