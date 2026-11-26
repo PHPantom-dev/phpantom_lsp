@@ -101,6 +101,30 @@ fn not_offered_when_the_view_already_resolves() {
 }
 
 #[test]
+fn an_absolute_looking_name_is_created_inside_the_view_root() {
+    let controller = CONTROLLER.replace("missing.page", "/tmp/phpantom-escape");
+    let (backend, dir) =
+        create_psr4_workspace(COMPOSER, &[("app/HomeController.php", &controller)]);
+
+    let uri_path = dir.path().join("app/HomeController.php");
+    let uri = Uri::from_file_path(&uri_path).unwrap();
+    backend.update_ast(uri.as_str(), &controller);
+
+    let actions = actions_on_line(&backend, uri.as_str(), &controller, 7);
+    let action = find_action(&actions, "Create missing view").expect("should offer the action");
+    let edit = action.edit.as_ref().expect("action should carry an edit");
+    let ops = edit.document_changes.as_ref().expect("document_changes");
+    let DocumentChange::CreateFile(cf) = &ops[0] else {
+        panic!("expected a CreateFile operation");
+    };
+    assert_eq!(
+        cf.uri.to_file_path().unwrap(),
+        dir.path()
+            .join("resources/views/tmp/phpantom-escape.blade.php")
+    );
+}
+
+#[test]
 fn not_offered_when_cursor_is_elsewhere() {
     let (backend, dir) = create_psr4_workspace(COMPOSER, &[("app/HomeController.php", CONTROLLER)]);
 

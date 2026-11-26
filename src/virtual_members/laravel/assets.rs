@@ -77,8 +77,12 @@ impl InertiaPages {
     /// tell.
     fn has_page(&self, name: &str) -> Option<bool> {
         self.existing_roots().next()?;
-        let name = page_name(name)?;
-        Some(self.page_file(name).is_some())
+        if name.trim_matches('/').is_empty() {
+            return None;
+        }
+        // A name that leaves the page directories is never a page: the
+        // client-side resolver looks pages up among the files under them.
+        Some(page_name(name).is_some_and(|name| self.page_file(name).is_some()))
     }
 
     /// Every page name the page directories hold, sorted.
@@ -129,10 +133,11 @@ impl InertiaPages {
 }
 
 /// A page name with any surrounding separators dropped, or `None` when
-/// nothing is left.
+/// nothing is left or the name would leave the page directory it is
+/// joined onto.
 fn page_name(name: &str) -> Option<&str> {
     let name = name.trim_matches('/');
-    (!name.is_empty()).then_some(name)
+    (!name.is_empty() && crate::util::is_contained_relative_path(Path::new(name))).then_some(name)
 }
 
 /// Collect every page under `directory` as its name and extension.

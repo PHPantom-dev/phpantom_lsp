@@ -180,6 +180,20 @@ fn an_inertia_page_is_judged_against_the_page_directories() {
 }
 
 #[test]
+fn an_inertia_page_name_cannot_leave_the_page_directories() {
+    let dir = tempfile::tempdir().unwrap();
+    write(dir.path(), "resources/js/Pages/Users/Index.vue", "");
+    write(dir.path(), "resources/js/Outside.vue", "");
+    let pages = inertia_pages_from_config(None, dir.path());
+
+    for name in ["../Outside", "Users/../../Outside", "./Users/Index"] {
+        assert_eq!(pages.has_page(name), Some(false), "{name}");
+        assert_eq!(pages.page_file(name), None, "{name}");
+        assert_eq!(pages.new_page_file(name), None, "{name}");
+    }
+}
+
+#[test]
 fn an_inertia_page_is_not_judged_without_a_page_directory() {
     let dir = tempfile::tempdir().unwrap();
     let pages = inertia_pages_from_config(None, dir.path());

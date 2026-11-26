@@ -66,11 +66,8 @@ pub(crate) fn slash_path(path: &Path) -> Option<String> {
 /// and no way out of the root it is resolved against.
 pub(crate) fn plain_relative(name: &str) -> Option<&Path> {
     let relative = Path::new(name);
-    (!name.starts_with('@')
-        && relative
-            .components()
-            .all(|component| matches!(component, Component::Normal(_))))
-    .then_some(relative)
+    (!name.starts_with('@') && crate::util::is_contained_relative_path(relative))
+        .then_some(relative)
 }
 
 /// The roots a project's templates are loaded from, and the extensions its

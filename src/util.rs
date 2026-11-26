@@ -189,6 +189,16 @@ pub(crate) fn dir_uri_prefix(dir: &Path) -> String {
     format!("{}/", path_to_uri(dir))
 }
 
+/// Whether `relative`, joined onto a directory, stays inside it: no root,
+/// drive prefix, `.` or `..` component.  A name taken from source code
+/// must pass this before it becomes a file path, or `../../x` and `/x`
+/// point outside the directory it is resolved against.
+pub(crate) fn is_contained_relative_path(relative: &Path) -> bool {
+    relative
+        .components()
+        .all(|component| matches!(component, std::path::Component::Normal(_)))
+}
+
 /// The canonical spelling of `path`, for comparing against paths recorded
 /// canonically.
 ///

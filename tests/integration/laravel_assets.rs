@@ -224,6 +224,38 @@ async fn a_missing_inertia_page_can_be_created() {
 }
 
 #[tokio::test]
+async fn a_page_name_that_leaves_the_page_directory_is_not_created() {
+    let (backend, _dir, uri, caller) = workspace(
+        "return Inertia::render('../../../../tmp/phpantom-escape');",
+        &[(
+            "resources/js/Pages/Users/Index.vue",
+            "<template></template>\n",
+        )],
+    )
+    .await;
+
+    assert_eq!(
+        diagnostics(&backend, &uri, &caller, "invalid_inertia_page").len(),
+        1,
+        "a name outside the page directories is not a page"
+    );
+    let line = caller
+        .lines()
+        .position(|line| line.contains("phpantom-escape"))
+        .unwrap() as u32;
+    let actions = get_code_actions_in_range(
+        &backend,
+        uri.as_str(),
+        &caller,
+        Range::new(Position::new(line, 0), Position::new(line, 200)),
+    );
+    assert!(
+        find_action(&actions, "Create missing Inertia page").is_none(),
+        "must not create a file outside the page directory, got {actions:?}"
+    );
+}
+
+#[tokio::test]
 async fn asset_paths_complete_a_directory_at_a_time() {
     let content = "<?php\nasset('css/');\n";
     let (backend, _dir) = create_psr4_workspace(
