@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795686315985,
+  "lastUpdate": 1795686522751,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -17006,6 +17006,65 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_yii_action",
             "value": 97.9,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "f2bbd9bc2df9cfc4ce5e45c35ec49ce6381d1248",
+          "message": "Creating a missing Inertia page stays inside the page directory",
+          "timestamp": "2026-11-26T10:40:46+01:00",
+          "tree_id": "4bf4814ac07c3206f7c2436c278157db12363e86",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/f2bbd9bc2df9cfc4ce5e45c35ec49ce6381d1248"
+        },
+        "date": 1795686504617,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_drupal_module",
+            "value": 273.1,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_hello_world",
+            "value": 44,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 79.7,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_symfony_controller",
+            "value": 80,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_tempest_view",
+            "value": 74.5,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_wordpress_plugin",
+            "value": 75.3,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_yii_action",
+            "value": 101.8,
             "unit": "MiB"
           }
         ]
