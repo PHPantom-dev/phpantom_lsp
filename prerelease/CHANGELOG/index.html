@@ -6324,7 +6324,7 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 </ul>
 <h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
 <ul>
-<li><strong>Project tools only run in a trusted workspace.</strong> PHPStan, PHP_CodeSniffer, PHPMD, Mago and external formatters execute the project's code, so the language server now runs them only once the workspace is trusted. VS Code and Zed already ask before starting the server, other editors ask once per project, and <code>phpantom_lsp trust</code> covers editors that cannot show the question. See <a href="../configuration/#project-tools-and-workspace-trust">Project tools and workspace trust</a>.</li>
+<li><strong>Project tools only run in a trusted workspace.</strong> PHPStan, PHP_CodeSniffer, PHPMD, Mago and external formatters execute the project's code, so the language server now runs them only once the workspace is trusted. VS Code and Zed already ask before starting the server, other editors ask once per project, and <code>phpantom_lsp trust</code> covers editors that cannot show the question. See <a href="../configuration/#project-tools-and-workspace-trust">Project tools and workspace trust</a>. Reported by @bhavyamalhotra2210.</li>
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
@@ -6333,7 +6333,7 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 <li><strong>No unknown-component report for a bare tag a package path answers.</strong> <code>&lt;x-badge&gt;</code> reaches a template a package registered with <code>Blade::anonymousComponentPath()</code> under a prefix, as Laravel resolves it, so it is no longer reported as unknown.</li>
 <li><strong>A Laravel application in a subdirectory of the workspace is read from its own directory.</strong> When the workspace is a monorepo opened at its top, with the application in a folder such as <code>backend/</code>, its views, config, routes, translations, <code>.env</code>, assets and auth model are found there, so <code>view()</code> names and <code>Auth::user()</code> resolve instead of being reported.</li>
 <li>
-<p><strong>Creating a missing Inertia page stays inside the page directory.</strong> A page name with <code>..</code> segments, such as <code>Inertia::render('../../x')</code>, is reported as unknown but no longer offers to create a file outside the project.</p>
+<p><strong>Creating a missing Inertia page stays inside the page directory.</strong> A page name with <code>..</code> segments, such as <code>Inertia::render('../../x')</code>, is reported as unknown but no longer offers to create a file outside the project. Reported by @bhavyamalhotra2210.</p>
 </li>
 <li>
 <p><strong>Claude Code no longer sees outdated diagnostics after an edit.</strong> Results from before an edit, at line numbers that no longer match the file, are not reported to the agent as new findings.</p>
@@ -6413,7 +6413,7 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 <li><strong><code>throw</code> as an expression is <code>never</code>.</strong> <code>fn () =&gt; throw new Exception()</code> returns <code>never</code>.</li>
 <li><strong><code>base64_decode()</code> returns <code>false</code> only in strict mode.</strong> Without <code>$strict</code> it is typed <code>string</code>.</li>
 <li><strong><code>pathinfo()</code> may leave out <code>dirname</code>.</strong> The empty path has no directory part, so the array's <code>dirname</code> key is optional.</li>
-<li><strong>A corrupt <code>.phar</code> no longer crashes the server.</strong> An archive whose header claims more files than it holds is skipped during indexing instead of aborting the process.</li>
+<li><strong>A corrupt <code>.phar</code> no longer crashes the server.</strong> An archive whose header claims more files than it holds is skipped during indexing instead of aborting the process. Reported by @bhavyamalhotra2210.</li>
 </ul>
 <h2 id="110-2026-11-24"><a href="https://github.com/PHPantom-dev/phpantom_lsp/compare/1.0.0...1.1.0">1.1.0</a> - 2026-11-24<a class="headerlink" href="#110-2026-11-24" title="Permanent link">&para;</a></h2>
 <h3 id="added_1">Added<a class="headerlink" href="#added_1" title="Permanent link">&para;</a></h3>
