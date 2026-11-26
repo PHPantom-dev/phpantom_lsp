@@ -13,6 +13,7 @@ use crate::class_lookup::{Fqn, ResolvedClassLoader, is_subtype_of_named};
 use crate::inheritance::find_declaring_ancestor;
 use crate::parser::{array_literal_elements, unwrap_parens, with_parsed_program};
 use crate::php_type::TypeKind;
+use crate::resolution::FileLoaders;
 use crate::symbol_map::SymbolMap;
 use crate::type_engine::resolver::resolve_target_classes;
 use crate::types::{AccessKind, ClassInfo, ResolvedType, model_declaration as decl};
@@ -184,11 +185,29 @@ impl Backend {
         let loaders = self.file_loaders(&ctx.file);
         let unguarded = std::cell::LazyCell::new(|| self.project_unguards_models(uri));
         with_parsed_program(content, "eloquent_mass_assignment", |program, content| {
+            // Argument spans of `Model::unguarded(...)` calls. The walk is
+            // pre-order, so an enclosing call is recorded before the calls
+            // its callback makes.
+            let mut unguarded_spans: Vec<(u32, u32)> = Vec::new();
             visit_method_calls(program, |object, method, access, args| {
+                let span = object.span();
+                if access == AccessKind::DoubleColon && method.eq_ignore_ascii_case("unguarded") {
+                    if is_model_class(&loaders, content, object, access) {
+                        let args = args.span();
+                        unguarded_spans.push((args.start.offset, args.end.offset));
+                    }
+                    return;
+                }
                 let Some(value) = dynamic_attributes(method, args) else {
                     return;
                 };
-                let span = object.span();
+                let at = span.start.offset;
+                if unguarded_spans
+                    .iter()
+                    .any(|&(start, end)| start <= at && at < end)
+                {
+                    return;
+                }
                 let subject = &content[span.start.offset as usize..span.end.offset as usize];
                 let rctx = loaders.resolution_ctx_at(content, span.start.offset);
                 let targets = resolve_target_classes(subject, access, &rctx);
@@ -257,22 +276,32 @@ impl Backend {
                 {
                     return;
                 }
-                let span = object.span();
-                let subject = &content[span.start.offset as usize..span.end.offset as usize];
-                let rctx = loaders.resolution_ctx_at(content, span.start.offset);
-                found = resolve_target_classes(subject, access, &rctx)
-                    .iter()
-                    .any(|r| {
-                        is_subtype_of_named(
-                            &r.type_string,
-                            ELOQUENT_MODEL_FQN,
-                            loaders.resolved_class_loader(),
-                        )
-                    });
+                found = is_model_class(&loaders, content, object, access);
             });
             found
         })
     }
+}
+
+/// Whether the class a static call is made on is an Eloquent model.
+fn is_model_class(
+    loaders: &FileLoaders<'_>,
+    content: &str,
+    object: &Expression<'_>,
+    access: AccessKind,
+) -> bool {
+    let span = object.span();
+    let subject = &content[span.start.offset as usize..span.end.offset as usize];
+    let rctx = loaders.resolution_ctx_at(content, span.start.offset);
+    resolve_target_classes(subject, access, &rctx)
+        .iter()
+        .any(|r| {
+            is_subtype_of_named(
+                &r.type_string,
+                ELOQUENT_MODEL_FQN,
+                loaders.resolved_class_loader(),
+            )
+        })
 }
 
 /// Candidate files for the project-wide guard setting, including during save invalidation.

@@ -9,6 +9,7 @@ class Model {
     public function fill(array $attributes) {}
     public function update(array $attributes, array $options = []) {}
     public static function unguard(bool $state = true) {}
+    public static function unguarded(callable $callback) {}
     /** @return Builder<static> */ public static function query() {}
 }";
 const BUILDER: &str = r"<?php namespace Illuminate\Database\Eloquent;
@@ -29,7 +30,7 @@ class OpenModel extends Model { protected $guarded = []; }
 #[Unguarded] class Allowed extends Model {}
 trait AllowsNames { protected $fillable = ['name']; }
 class WithTrait extends Model { use AllowsNames; }
-class Other { public static function create($attributes) {} public static function unguard() {} }
+class Other { public static function create($attributes) {} public static function unguard() {} public static function unguarded($callback) {} }
 class Overridden extends Model { public static function create($attributes) {} }
 ";
 
@@ -231,4 +232,35 @@ async fn laravel_mass_assignment_guard_setting_belongs_to_the_application() {
     open_php_file(&backend, "other/Bootstrap.php").await;
     open_php_file(&backend, "vendor/package/Example.php").await;
     assert_eq!(warnings(&backend, &uri, source).len(), 1);
+}
+
+#[tokio::test]
+async fn laravel_mass_assignment_skips_calls_inside_an_unguarded_callback() {
+    let source = r"<?php namespace App;
+use Illuminate\Database\Eloquent\Model;
+function seed(Draft $draft, array $data) {
+    Model::unguarded(fn () => Draft::create($data));
+    Draft::unguarded(function () use ($draft, $data) {
+        $draft->fill($data);
+    });
+    Other::unguarded(fn () => Draft::create($data)); // warn
+    Model::unguarded(fn () => null);
+    Draft::create($data); // warn
+}";
+    let (backend, _dir, uri) = workspace(source, "<?php").await;
+    let diagnostics = warnings(&backend, &uri, source);
+    let expected: Vec<_> = source
+        .lines()
+        .enumerate()
+        .filter(|(_, line)| line.ends_with("// warn"))
+        .map(|(i, _)| i as u32)
+        .collect();
+    assert_eq!(
+        diagnostics
+            .iter()
+            .map(|d| d.range.start.line)
+            .collect::<Vec<_>>(),
+        expected,
+        "{diagnostics:?}"
+    );
 }
