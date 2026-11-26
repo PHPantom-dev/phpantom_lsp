@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795697634146,
+  "lastUpdate": 1795698651814,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -17596,6 +17596,65 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_yii_action",
             "value": 101.8,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "shuvro.nsu.cse@gmail.com",
+            "name": "Shuvro Roy",
+            "username": "shuvroroy"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "85f9e3d1127a6c62111b378fe3e63e232ae755a8",
+          "message": "Navigate PHP callables in Symfony service definitions",
+          "timestamp": "2026-11-26T13:49:11+01:00",
+          "tree_id": "2a72f64e408654453ac762a2eaac0e42f9f6c93b",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/85f9e3d1127a6c62111b378fe3e63e232ae755a8"
+        },
+        "date": 1795698641917,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_drupal_module",
+            "value": 278.1,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_hello_world",
+            "value": 45,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 82.8,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_symfony_controller",
+            "value": 81.5,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_tempest_view",
+            "value": 74.7,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_wordpress_plugin",
+            "value": 76.5,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_yii_action",
+            "value": 103.4,
             "unit": "MiB"
           }
         ]
