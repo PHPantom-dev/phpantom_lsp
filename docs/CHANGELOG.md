@@ -23,6 +23,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Service arguments, bindings, listener methods and factories navigate.** In Symfony service configuration, go to definition on a named argument or a `_defaults` binding opens the constructor or factory parameter it fills, and on a listener tag's `method` or a factory's method opens that method. Find references on the PHP side lists them. Contributed by @shuvroroy.
 
+#### Doctrine
+
+- **Navigate Doctrine XML fields.** A field or association name in an XML mapping goes to the property it maps and shows its hover, and find references and rename on the property include the mapping. Contributed by @shuvroroy.
+
 ### Changed
 
 - **Project tools only run in a trusted workspace.** PHPStan, PHP_CodeSniffer, PHPMD, Mago and external formatters execute the project's code, so the language server now runs them only once the workspace is trusted. VS Code and Zed already ask before starting the server, other editors ask once per project, and `phpantom_lsp trust` covers editors that cannot show the question. See [Project tools and workspace trust](configuration.md#project-tools-and-workspace-trust). Reported by @bhavyamalhotra2210.

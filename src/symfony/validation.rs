@@ -24,7 +24,8 @@
 use crate::Backend;
 use crate::atom::atom;
 use crate::class_lookup::Fqn;
-use crate::symbol_map::{ClassRefContext, DocblockMemberRef, SubjectText, SymbolKind, SymbolSpan};
+use crate::resource_navigation::property_span;
+use crate::symbol_map::{ClassRefContext, SymbolKind, SymbolSpan};
 
 const CONSTRAINTS_NS: &str = "Symfony\\Component\\Validator\\Constraints\\";
 
@@ -177,22 +178,6 @@ pub(crate) fn option_key_at(
             .collect();
         Some((options.constraint, start, given))
     })
-}
-
-fn property_span(class: &str, property: &str, start: usize) -> SymbolSpan {
-    SymbolSpan {
-        start: start as u32,
-        end: (start + property.len()) as u32,
-        kind: SymbolKind::MemberAccess {
-            subject_text: SubjectText::owned(class.to_string()),
-            member_name: atom(property),
-            is_static: false,
-            is_method_call: false,
-            docblock_ref: DocblockMemberRef::No,
-            is_array_callable: false,
-            is_nullsafe: false,
-        },
-    }
 }
 
 /// The class reference a constraint written by its short name makes.
@@ -716,7 +701,7 @@ mod tests {
                 let text = content[span.start as usize..span.end as usize].to_string();
                 let what = match span.kind {
                     SymbolKind::MemberAccess {
-                        subject_text: subject @ SubjectText::Owned { .. },
+                        subject_text: subject @ crate::symbol_map::SubjectText::Owned { .. },
                         member_name,
                         ..
                     } => format!(

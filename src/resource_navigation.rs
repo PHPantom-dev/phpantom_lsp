@@ -20,7 +20,8 @@ use tower_lsp_server::gen_lsp_types::{Location, Position};
 use crate::Backend;
 use crate::atom::atom;
 use crate::symbol_map::{
-    ClassRefContext, StringKeyKind, SubjectText, SymbolKind, SymbolMap, SymbolSpan,
+    ClassRefContext, DocblockMemberRef, StringKeyKind, SubjectText, SymbolKind, SymbolMap,
+    SymbolSpan,
 };
 
 #[derive(Debug, PartialEq, Eq)]
@@ -75,6 +76,23 @@ pub(crate) fn is_resource_path(path: &Path) -> bool {
     path.file_name()
         .and_then(|name| name.to_str())
         .is_some_and(is_resource_document)
+}
+
+/// A PHP property named by a configuration mapping, without its dollar sign.
+pub(crate) fn property_span(class: &str, property: &str, start: usize) -> SymbolSpan {
+    SymbolSpan {
+        start: start as u32,
+        end: (start + property.len()) as u32,
+        kind: SymbolKind::MemberAccess {
+            subject_text: SubjectText::owned(class.to_string()),
+            member_name: atom(property),
+            is_static: false,
+            is_method_call: false,
+            docblock_ref: DocblockMemberRef::No,
+            is_array_callable: false,
+            is_nullsafe: false,
+        },
+    }
 }
 
 impl Backend {
@@ -225,7 +243,6 @@ impl Backend {
         let symbol_map = Arc::new(self.resource_symbol_map(uri, content));
         self.publish_symbol_maps([(uri.to_string(), Arc::clone(&symbol_map))]);
         self.reindex_references_for_symbol_maps_batch(vec![(uri.to_string(), symbol_map)]);
-        self.index_framework_uri_content(uri, content);
     }
 
     /// Index resource files discovered during the workspace walk.
@@ -270,7 +287,6 @@ impl Backend {
             .iter()
             .filter(|(uri, _)| self.is_resource_uri(uri))
             .map(|(uri, content)| {
-                self.index_framework_uri_content(uri, content);
                 (
                     (*uri).clone(),
                     Arc::new(self.resource_symbol_map(uri, content)),
@@ -278,7 +294,6 @@ impl Backend {
             });
         let other_maps = others.into_iter().filter_map(|(uri, path)| {
             let content = crate::util::read_file_to_string(path).ok()?;
-            self.index_framework_uri_content(uri, &content);
             Some((
                 uri.clone(),
                 Arc::new(self.resource_symbol_map(uri, &content)),
@@ -294,6 +309,8 @@ impl Backend {
     }
 
     fn resource_symbol_map(&self, uri: &str, content: &str) -> SymbolMap {
+        let mut mapping_spans = Vec::new();
+        self.index_framework_with_property_spans(uri, content, Some(&mut mapping_spans));
         let is_symfony = self.is_symfony_project();
         let is_template = self.is_twig_template_uri(uri);
         if is_template || crate::symfony::translations::is_xliff_uri(uri) {
@@ -427,6 +444,7 @@ impl Backend {
                 spans.extend(crate::symfony::config_tree::config_key_spans(content));
             }
         }
+        spans.extend(mapping_spans);
         for symbol in scan_symbols(content) {
             spans.push(SymbolSpan {
                 start: symbol.class_start as u32,

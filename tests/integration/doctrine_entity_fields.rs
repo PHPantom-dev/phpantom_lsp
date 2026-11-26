@@ -430,3 +430,70 @@ async fn renaming_the_property_from_a_key_renames_the_keys() {
         "the property is not renamed: {edit:?}"
     );
 }
+
+#[tokio::test]
+async fn doctrine_xml_properties_navigate_and_rename_in_both_directions() {
+    use crate::common::{definitions_at, edits_for_uri, position_of, rename};
+    let php = r"<?php
+namespace App;
+class Order {
+    public string $placedAt;
+    public ?Order $customer;
+}
+";
+    let xml = r#"<doctrine-mapping>
+  <entity name="App\Order">
+    <!-- <field name="unused"/> <field name="placedAt"/> -->
+    <field column="placed_at" name="placedAt"/>
+    <many-to-one field="customer" target-entity="App\Order"/>
+  </entity>
+  <entity name="App\Unrelated"><field name="placedAt"/></entity>
+</doctrine-mapping>"#;
+    let (backend, dir) = create_psr4_workspace(
+        COMPOSER,
+        &[("src/Order.php", php), ("config/Order.orm.xml", xml)],
+    );
+    let owner = Uri::from_file_path(dir.path().join("src/Order.php")).unwrap();
+    let mapping = Uri::from_file_path(dir.path().join("config/Order.orm.xml")).unwrap();
+    open_document(&backend, &owner, "php", php).await;
+    open_document(&backend, &mapping, "xml", xml).await;
+    for (name, line, field) in [("placedAt", 3, 3), ("customer", 4, 4)] {
+        let decl = position_of(php, name);
+        let mapped = Position::new(
+            field,
+            xml.lines().nth(field as usize).unwrap().find(name).unwrap() as u32 + 2,
+        );
+        let target = crate::common::definition_locations(
+            goto_definition_at(&backend, &mapping, mapped.line, mapped.character).await,
+        );
+        assert_eq!(target.len(), 1);
+        assert_eq!((&target[0].uri, target[0].range.start.line), (&owner, line));
+        assert!(
+            hover_text_at(&backend, &mapping, mapped.line, mapped.character)
+                .await
+                .unwrap()
+                .contains(name)
+        );
+        for (uri, pos) in [(&owner, decl), (&mapping, mapped)] {
+            let refs = find_references(&backend, uri, pos, true).await;
+            assert!(
+                refs.iter()
+                    .any(|r| r.uri == mapping && r.range.start.line == field),
+                "{refs:?}"
+            );
+            let edit = rename(&backend, uri, pos.line, pos.character, "replacement")
+                .await
+                .unwrap();
+            let mapped_edits = edits_for_uri(&edit, &mapping);
+            assert_eq!(mapped_edits.len(), 1, "{mapped_edits:?}");
+            assert_eq!(mapped_edits[0].range.start.line, field);
+            assert_eq!(mapped_edits[0].new_text, "replacement");
+            assert_eq!(edits_for_uri(&edit, &owner)[0].new_text, "$replacement");
+        }
+    }
+    assert!(
+        definitions_at(&backend, &mapping, xml, "placed_at")
+            .await
+            .is_empty()
+    );
+}

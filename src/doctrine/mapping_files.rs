@@ -14,6 +14,7 @@ use parking_lot::RwLock;
 use crate::framework::{
     leading_spaces, line_offsets, normalize_framework_fqn, strip_yaml_quotes, xml_attr_value,
 };
+use crate::symbol_map::SymbolSpan;
 
 /// A class a mapping file maps, and the fields it maps on it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -39,8 +40,15 @@ pub(crate) fn new_mapping_file_index() -> MappingFileIndex {
 
 /// Record the classes `content` maps under `uri`, or forget the document
 /// when it maps none.  Returns whether that changed what the index holds.
-pub(crate) fn index_mapping_file(index: &MappingFileIndex, uri: &str, content: &str) -> bool {
-    let classes = scan_mapping_file(uri, content);
+/// When `spans` is given, the spans of the PHP properties an XML mapping
+/// names are added to it.
+pub(crate) fn index_mapping_file(
+    index: &MappingFileIndex,
+    uri: &str,
+    content: &str,
+    spans: Option<&mut Vec<SymbolSpan>>,
+) -> bool {
+    let classes = scan_mapping_file(uri, content, spans);
     let mut index = index.write();
     if classes.is_empty() {
         return index.remove(uri).is_some();
@@ -109,9 +117,13 @@ pub(crate) fn is_mapping_file_path(path: &Path) -> bool {
         .is_some_and(|name| has_suffix(name, XML_SUFFIXES) || has_suffix(name, YAML_SUFFIXES))
 }
 
-fn scan_mapping_file(uri: &str, content: &str) -> Vec<MappedClass> {
+fn scan_mapping_file(
+    uri: &str,
+    content: &str,
+    spans: Option<&mut Vec<SymbolSpan>>,
+) -> Vec<MappedClass> {
     if has_suffix(uri, XML_SUFFIXES) {
-        scan_xml(content)
+        scan_xml(content, spans)
     } else if has_suffix(uri, YAML_SUFFIXES) {
         scan_yaml(content)
     } else {
@@ -179,12 +191,18 @@ const XML_FIELD_TAGS: &[(&str, &str)] = &[
     ("many-to-many", "field"),
 ];
 
-fn scan_xml(content: &str) -> Vec<MappedClass> {
+fn scan_xml(content: &str, mut spans: Option<&mut Vec<SymbolSpan>>) -> Vec<MappedClass> {
     let mut classes = Vec::new();
     let mut current: Option<(usize, MappedClass)> = None;
     let mut search = 0;
     while let Some(rel) = content[search..].find('<') {
         let start = search + rel;
+        if content[start..].starts_with("<!--") {
+            search = content[start + 4..]
+                .find("-->")
+                .map_or(content.len(), |at| start + 4 + at + 3);
+            continue;
+        }
         let Some(rel_end) = content[start..].find('>') else {
             break;
         };
@@ -232,11 +250,33 @@ fn scan_xml(content: &str) -> Vec<MappedClass> {
         }
         if let Some((_, class)) = current.as_mut()
             && let Some(&(_, attr)) = XML_FIELD_TAGS.iter().find(|(t, _)| *t == name)
-            && let Some((field, _, _)) = xml_attr_value(tag, 0, &[attr])
+            && let Some((field, field_start, _)) = xml_attr_value(tag, start + 1, &[attr])
         {
+            if let Some(out) = spans.as_deref_mut() {
+                out.push(crate::resource_navigation::property_span(
+                    &class.fqn,
+                    &field,
+                    field_start,
+                ));
+            }
             if attr == "field" {
                 let target = xml_attr_value(tag, 0, &["target-entity"])
                     .map(|(target, _, _)| qualify_target(&class.fqn, &target));
+                // The other side of a bidirectional association names its
+                // property on the target entity, so a rename must reach it.
+                if let (Some(out), Some(target)) = (spans.as_deref_mut(), target.as_deref()) {
+                    for side in ["mapped-by", "inversed-by"] {
+                        if let Some((property, property_start, _)) =
+                            xml_attr_value(tag, start + 1, &[side])
+                        {
+                            out.push(crate::resource_navigation::property_span(
+                                target,
+                                &property,
+                                property_start,
+                            ));
+                        }
+                    }
+                }
                 class.associations.push((field.clone(), target));
             }
             class.fields.push(field);
@@ -389,7 +429,7 @@ mod tests {
     <field name="createdAt" type="datetime"/>
   </mapped-superclass>
 </doctrine-mapping>"#;
-        let classes = scan_mapping_file("file:///p/config/doctrine/User.orm.xml", xml);
+        let classes = scan_mapping_file("file:///p/config/doctrine/User.orm.xml", xml, None);
         assert_eq!(
             classes,
             vec![
@@ -432,7 +472,7 @@ App\\Entity\\User:
     lifecycleCallbacks:
         prePersist: [touch]
 ";
-        let classes = scan_mapping_file("file:///p/config/doctrine/User.orm.yml", yaml);
+        let classes = scan_mapping_file("file:///p/config/doctrine/User.orm.yml", yaml, None);
         assert_eq!(
             classes,
             vec![MappedClass {
@@ -448,8 +488,57 @@ App\\Entity\\User:
     }
 
     #[test]
+    fn xml_mapping_names_the_properties_of_both_association_sides() {
+        let xml = r#"<doctrine-mapping>
+  <entity name="App\Entity\User">
+    <field name="email"/>
+    <many-to-one field="team" target-entity="Team" inversed-by="members"/>
+  </entity>
+  <entity name="App\Entity\Team">
+    <one-to-many field="members" target-entity="User" mapped-by="team"/>
+  </entity>
+</doctrine-mapping>"#;
+        let mut spans = Vec::new();
+        scan_mapping_file(
+            "file:///p/config/doctrine/User.orm.xml",
+            xml,
+            Some(&mut spans),
+        );
+        let named: Vec<(String, String)> = spans
+            .iter()
+            .map(|span| {
+                let crate::symbol_map::SymbolKind::MemberAccess {
+                    subject_text,
+                    member_name,
+                    ..
+                } = &span.kind
+                else {
+                    panic!("not a property: {span:?}");
+                };
+                let text = &xml[span.start as usize..span.end as usize];
+                assert_eq!(text, member_name.as_str());
+                (
+                    subject_text.synthesised().unwrap().to_string(),
+                    text.to_string(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            named,
+            [
+                ("App\\Entity\\User", "email"),
+                ("App\\Entity\\User", "team"),
+                ("App\\Entity\\Team", "members"),
+                ("App\\Entity\\Team", "members"),
+                ("App\\Entity\\User", "team"),
+            ]
+            .map(|(class, property)| (class.to_string(), property.to_string()))
+        );
+    }
+
+    #[test]
     fn other_documents_map_nothing() {
         let yaml = "App\\Service\\Mailer:\n    type: entity\n";
-        assert!(scan_mapping_file("file:///p/config/services.yaml", yaml).is_empty());
+        assert!(scan_mapping_file("file:///p/config/services.yaml", yaml, None).is_empty());
     }
 }
