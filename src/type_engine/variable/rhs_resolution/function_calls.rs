@@ -49,6 +49,7 @@ pub(super) fn resolve_rhs_function_call<'b>(
         if let Some(resolved) = laravel_helper_call(name, argument_list, ctx)
             .or_else(|| call_user_func_return(name, argument_list, ctx))
             .or_else(|| constant_call(name, argument_list, ctx))
+            .or_else(|| super::conversion_calls::conversion_call(name, argument_list, ctx))
             .or_else(|| compact_call(name, expr, argument_list, ctx))
             .or_else(|| builtin_function_call(name, argument_list, ctx))
             .or_else(|| named_function_call(name, name_offset, argument_list, ctx))

@@ -171,7 +171,7 @@ function probe(int $i, float $f, mixed $anything): void {
         &[
             ("$whole", "int<0, max>"),
             ("$fractional", "float"),
-            ("$unknown", "int<0, max>|float"),
+            ("$unknown", "float|int<0, max>"),
         ],
     );
 }
@@ -646,7 +646,7 @@ function probe(array $names, array $labels): void {
 
 /// `pow()`'s `object` branch belongs to the operator-overloading extensions
 /// (GMP, BCMath); two numbers can only produce a number. Only an operand
-/// that *is* one of those objects brings the branch back — an operand nobody
+/// that *is* one of those objects brings the object back, as its own class — an operand nobody
 /// typed is no evidence for it, and unioning the branch back in for every
 /// such call would report an `object` where the code returns a number.
 #[test]
@@ -662,10 +662,10 @@ function probe(int $n, float $f, mixed $anything, \GMP $gmp): void {
     assert_assigned_types(
         content,
         &[
-            ("$ints", "int|float"),
-            ("$mixedNumeric", "int|float"),
+            ("$ints", "8"),
+            ("$mixedNumeric", "float"),
             ("$untyped", "int|float"),
-            ("$overloaded", "object"),
+            ("$overloaded", "GMP"),
         ],
     );
 }
@@ -944,11 +944,7 @@ function probe(bool $flag): void {
 "#;
     assert_assigned_types(
         content,
-        &[
-            ("$three", "3"),
-            ("$either", "2|4"),
-            ("$withEncoding", "int"),
-        ],
+        &[("$three", "3"), ("$either", "2|4"), ("$withEncoding", "3")],
     );
 }
 

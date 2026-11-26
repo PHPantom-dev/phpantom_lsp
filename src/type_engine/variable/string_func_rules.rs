@@ -60,20 +60,12 @@ pub(in crate::type_engine) fn string_func_return_type(
 /// when the call is not one of the folded functions or an argument it
 /// reads is not a literal.
 fn literal_type(name: &str, args: &dyn ArrayFuncArgs) -> Option<PhpType> {
-    // The length is an `int`, so it is folded apart from the transforms.
-    // On the ASCII input that gets this far bytes and characters agree.
-    if matches!(name, "strlen" | "mb_strlen") && !args.has_arg(1) {
-        let mut lengths: Vec<PhpType> = Vec::new();
-        for subject in literal_alternatives(args, 0)? {
-            let length = PhpType::literal_int(subject.len().to_string());
-            if !lengths.contains(&length) {
-                lengths.push(length);
-            }
-        }
-        return Some(match lengths.len() {
-            1 => lengths.remove(0),
-            _ => PhpType::union(lengths),
-        });
+    match name {
+        "strlen" if !args.has_arg(1) => return length_type(args, false),
+        "mb_strlen" => return length_type(args, true),
+        "str_increment" => return step_literals(args, true),
+        "str_decrement" => return step_literals(args, false),
+        _ => {}
     }
 
     let folded: Vec<String> = match name {
@@ -199,6 +191,13 @@ fn refined_type(name: &str, args: &dyn ArrayFuncArgs) -> Option<PhpType> {
         "vsprintf" => sprintf_type(args, false),
         "number_format" => number_format_type(args),
         "implode" | "join" => implode_type(args),
+        // An increment never produces `'0'`; a decrement can (`'1'`).
+        "str_increment" if args.has_arg(0) && !args.is_spread(0) => {
+            Some(PhpType::non_falsy_string())
+        }
+        "str_decrement" if args.has_arg(0) && !args.is_spread(0) => {
+            Some(PhpType::non_empty_string())
+        }
         _ => None,
     }
 }
@@ -479,6 +478,69 @@ fn parse_format(format: &str) -> Option<Format> {
         has_non_zero_text,
         lone_placeholder: (placeholders == 1 && !has_text).then_some(last),
     })
+}
+
+/// `strlen()` and `mb_strlen()`: the length of each alternative of the
+/// subject as PHP converts it to a string.  A known value has a known
+/// length (`strlen(123)` is `3`); otherwise the length is the range its
+/// type allows, `int<1, max>` for a non-empty string or a number.
+///
+/// `mb_strlen()` counts characters only in UTF-8; in any other encoding a
+/// known value still gets the range its emptiness allows.
+fn length_type(args: &dyn ArrayFuncArgs, multibyte: bool) -> Option<PhpType> {
+    use crate::type_engine::type_ops::int_interval::IntInterval;
+    use crate::type_engine::variable::rhs_resolution::php_string_of_type;
+
+    if !args.has_arg(0) || args.is_spread(0) || args.is_named(0) {
+        return None;
+    }
+    let ty = args.arg_raw_type(0)?;
+    let read_values = !names_a_constant(args, 0) && (!multibyte || is_utf8_encoding(args, 1));
+    let mut lengths: Vec<i64> = Vec::new();
+    let mut ranges: Vec<IntInterval> = Vec::new();
+    for member in ty.union_members() {
+        if let Some(text) = read_values.then(|| php_string_of_type(member)).flatten() {
+            let length = if multibyte {
+                text.chars().count()
+            } else {
+                text.len()
+            };
+            let length = i64::try_from(length).ok()?;
+            if !lengths.contains(&length) {
+                lengths.push(length);
+            }
+            continue;
+        }
+        let (min, max) = if member.is_null() || member.is_false() {
+            (Some(0), Some(0))
+        } else if member.is_true() {
+            (Some(1), Some(1))
+        } else if member.is_bool() {
+            (Some(0), Some(1))
+        } else if member.is_subtype_of(&PhpType::non_empty_string())
+            || member.is_int_subtype()
+            || member.is_float_subtype()
+        {
+            (Some(1), None)
+        } else {
+            (Some(0), None)
+        };
+        ranges.push(IntInterval { min, max });
+    }
+    if ranges.is_empty() {
+        lengths.sort_unstable();
+        return Some(PhpType::union(
+            lengths
+                .into_iter()
+                .map(|length| PhpType::literal_int(length.to_string()))
+                .collect(),
+        ));
+    }
+    ranges.extend(lengths.into_iter().map(|length| IntInterval {
+        min: Some(length),
+        max: Some(length),
+    }));
+    Some(IntInterval::hull_of(&ranges).into_type())
 }
 
 /// `number_format()`: a `numeric-string` when no thousands separator is
@@ -1008,6 +1070,89 @@ fn sprintf_fold(args: &dyn ArrayFuncArgs) -> Option<String> {
     Some(out)
 }
 
+/// PHP's alphanumeric string increment (`'a'` → `'b'`, `'Az'` → `'Ba'`,
+/// `'zz'` → `'aaa'`), or `None` for a string with any other character,
+/// whose increment PHP deprecates.
+pub(in crate::type_engine) fn increment_alphanumeric(s: &str) -> Option<String> {
+    if s.is_empty() || !s.bytes().all(|b| b.is_ascii_alphanumeric()) {
+        return None;
+    }
+    let mut bytes = s.as_bytes().to_vec();
+    for i in (0..bytes.len()).rev() {
+        let (wrapped, carry) = match bytes[i] {
+            b'z' => (b'a', b'a'),
+            b'Z' => (b'A', b'A'),
+            b'9' => (b'0', b'1'),
+            byte => (byte + 1, 0),
+        };
+        bytes[i] = wrapped;
+        if carry == 0 {
+            break;
+        }
+        // The carry ran off the front: prepend the first value of the
+        // kind of character it came from.
+        if i == 0 {
+            bytes.insert(0, carry);
+        }
+    }
+    String::from_utf8(bytes).ok()
+}
+
+/// What `str_decrement()` gives a string: `Some(None)` when PHP throws
+/// for it (not alphanumeric, or nothing left to decrement, like `'a'` or
+/// `'0'`), and `None` for a leading-zero string such as `'01'`, which
+/// this does not try to answer.
+fn decrement_alphanumeric(s: &str) -> Option<Option<String>> {
+    if s.is_empty() || !s.bytes().all(|b| b.is_ascii_alphanumeric()) {
+        return Some(None);
+    }
+    if s.len() > 1 && s.starts_with('0') {
+        return None;
+    }
+    let mut bytes = s.as_bytes().to_vec();
+    let mut carry = true;
+    for byte in bytes.iter_mut().rev() {
+        (*byte, carry) = match *byte {
+            b'0' => (b'9', true),
+            b'a' => (b'z', true),
+            b'A' => (b'Z', true),
+            other => (other - 1, false),
+        };
+        if !carry {
+            break;
+        }
+    }
+    // A borrow off the front, or a first digit that reached zero, drops
+    // the first character: `'aa'` is `'z'` and `'10'` is `'9'`.
+    if carry || (bytes.len() > 1 && bytes[0] == b'0') {
+        if bytes.len() == 1 {
+            return Some(None);
+        }
+        bytes.remove(0);
+    }
+    Some(String::from_utf8(bytes).ok())
+}
+
+/// `str_increment()` and `str_decrement()` over literal subjects.  An
+/// alternative PHP throws for contributes nothing, so a call where every
+/// one throws is `never`.
+fn step_literals(args: &dyn ArrayFuncArgs, increment: bool) -> Option<PhpType> {
+    let mut folded = Vec::new();
+    // Not ASCII-only: a multibyte subject is one PHP throws for.
+    for subject in literal_alternatives_any(args, 0)? {
+        let stepped = if increment {
+            increment_alphanumeric(&subject)
+        } else {
+            decrement_alphanumeric(&subject)?
+        };
+        folded.extend(stepped);
+    }
+    Some(match folded.is_empty() {
+        true => PhpType::never(),
+        false => union_of_literals(folded),
+    })
+}
+
 /// A string builtin must resolve to the global declaration, even when a
 /// namespaced function or import shares its short name.
 pub(in crate::type_engine) fn is_builtin_string_function(
@@ -1015,15 +1160,24 @@ pub(in crate::type_engine) fn is_builtin_string_function(
     loader: crate::types::FunctionLoader<'_>,
     offset: u32,
 ) -> bool {
-    has_string_func_rule(name)
-        && loader
-            .and_then(|loader| loader(name, offset))
-            .is_none_or(|function| {
-                function.namespace.as_deref().is_none_or(str::is_empty)
-                    && function
-                        .name
-                        .eq_ignore_ascii_case(name.trim_start_matches('\\'))
-            })
+    has_string_func_rule(name) && calls_global_function(name, loader, offset)
+}
+
+/// Whether a call written as `name` at `offset` reaches the global function
+/// of that name rather than a namespaced function or import sharing it.
+pub(in crate::type_engine) fn calls_global_function(
+    name: &str,
+    loader: crate::types::FunctionLoader<'_>,
+    offset: u32,
+) -> bool {
+    loader
+        .and_then(|loader| loader(name, offset))
+        .is_none_or(|function| {
+            function.namespace.as_deref().is_none_or(str::is_empty)
+                && function
+                    .name
+                    .eq_ignore_ascii_case(name.trim_start_matches('\\'))
+        })
 }
 
 /// Whether `func_name` is one of the string builtins
@@ -1056,6 +1210,8 @@ pub(in crate::type_engine) fn has_string_func_rule(func_name: &str) -> bool {
             | "str_replace"
             | "strlen"
             | "mb_strlen"
+            | "str_increment"
+            | "str_decrement"
             | "mb_lcfirst"
             | "mb_ucfirst"
             | "sprintf"

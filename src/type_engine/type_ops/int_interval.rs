@@ -204,6 +204,45 @@ impl IntInterval {
         }
     }
 
+    /// The interval of the absolute values: `int<-123, 5>` gives
+    /// `int<0, 123>`.
+    pub(crate) fn abs(self) -> Self {
+        let negate = |bound: Option<i64>| bound.and_then(i64::checked_neg);
+        match (self.min, self.max) {
+            (Some(min), _) if min >= 0 => self,
+            (min, Some(max)) if max <= 0 => Self {
+                min: negate(Some(max)),
+                max: negate(min),
+            },
+            (min, max) => Self {
+                min: Some(0),
+                max: negate(min).zip(max).map(|(a, b)| a.max(b)),
+            },
+        }
+    }
+
+    /// The fewest intervals covering exactly the integers of `intervals`:
+    /// overlapping and adjacent ones merge (`123|int<124, 125>` is
+    /// `int<123, 125>`), the rest stay apart, ordered from the lowest.
+    pub(crate) fn merged(mut intervals: Vec<Self>) -> Vec<Self> {
+        intervals.sort_by_key(|interval| (interval.min.is_some(), interval.min));
+        let mut merged: Vec<Self> = Vec::with_capacity(intervals.len());
+        for interval in intervals {
+            if let Some(last) = merged.last_mut() {
+                let touches = match (last.max, interval.min) {
+                    (None, _) | (_, None) => true,
+                    (Some(max), Some(min)) => max.checked_add(1).is_none_or(|next| min <= next),
+                };
+                if touches {
+                    last.max = last.max.zip(interval.max).map(|(a, b)| a.max(b));
+                    continue;
+                }
+            }
+            merged.push(interval);
+        }
+        merged
+    }
+
     /// The type holding exactly the integers of this interval.
     pub(crate) fn into_type(self) -> PhpType {
         match (self.min, self.max) {

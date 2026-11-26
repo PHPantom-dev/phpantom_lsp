@@ -22,6 +22,12 @@ use crate::php_type::{LiteralValue, PhpType, TypeKind, with_keyword_lowercase};
 use crate::type_engine::type_ops::int_interval::IntInterval;
 use crate::types::ResolvedType;
 
+/// The string PHP converts a value of type `ty` to, when `ty` pins it to
+/// one scalar (`123` is `'123'`, `null` is `''`).
+pub(crate) fn php_string_of_type(ty: &PhpType) -> Option<String> {
+    Scalar::from_type(ty)?.to_php_string()
+}
+
 /// One known scalar value.
 #[derive(Clone, Debug, PartialEq)]
 pub(super) enum Scalar {
@@ -85,7 +91,7 @@ impl Scalar {
 
     /// The number PHP reads the value as for `+`, `-` and friends: a
     /// numeric string counts, anything else that would warn does not.
-    fn to_number(&self) -> Option<Scalar> {
+    pub(super) fn to_number(&self) -> Option<Scalar> {
         match self {
             Scalar::Int(_) | Scalar::Float(_) => Some(self.clone()),
             Scalar::Bool(value) => Some(Scalar::Int(i64::from(*value))),

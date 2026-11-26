@@ -72,6 +72,7 @@ mod assignment_value;
 mod branches;
 mod calls;
 mod constant_access;
+mod conversion_calls;
 mod doctrine_calls;
 mod drupal_calls;
 mod function_calls;
@@ -92,7 +93,7 @@ mod symfony_calls;
 mod unary_prefix;
 
 pub(crate) use magic_constants::file_magic_constant_type;
-pub(crate) use scalar_fold::{fold_concat_types, is_literal_string_type};
+pub(crate) use scalar_fold::{fold_concat_types, is_literal_string_type, php_string_of_type};
 
 use arithmetic::{combine_with_lhs, combines_operand_types, resolve_binary_result_type};
 use array_access::resolve_rhs_array_access;

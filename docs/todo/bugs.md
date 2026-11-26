@@ -53,23 +53,42 @@ treats it as always defined. `// SKIP` line in `tests/phpstan_nsrt/compact.php`.
 **Impact: Low · Complexity: Low-Medium**
 
 ```php
-strval(1.5);              // string, should be '1.5'
-abs(-5);                  // int, should be 5
-pow(2, 3);                // int|float, should be 8
-str_increment('Az');      // non-empty-string, should be 'Ba'
-mb_strlen('déjà');        // int<0, max>, should be 4
+implode(',', ['12', '345']);   // literal-string, should be '12,345'
+array_sum([1, 2, 3]);          // int, should be 6
 ```
 
-The string functions that rewrite a literal (casing, trimming, `str_repeat()`,
-`mb_substr()`, `sprintf()` of plain placeholders) and the `++` operator fold,
-but the numeric builtins, the PHP 8.3 `str_increment()`/`str_decrement()`
-functions, `mb_strlen()` of a multibyte literal and `implode()` of a literal
-array do not.
+The string functions that rewrite a literal, the numeric conversions
+(`intval()` and friends, `abs()`, `pow()`), `str_increment()`,
+`str_decrement()` and `strlen()`/`mb_strlen()` fold, but `implode()` of a
+literal array, `array_sum()`, `date()` with a literal format and the rest
+below do not. `mb_strlen()` with an encoding other than UTF-8 is not
+measured either (`// SKIP` lines in `tests/phpstan_nsrt/mb-strlen-php83.php`).
 
 **Fix:** fold each function over its literal arguments, one at a time; each
 upstream fixture is the spec for its function.
 
-**Upstream cases** (PHPStan `nsrt/`, 267 assertions): `strval.php` (39), `abs.php` (35), `pow.php` (27), `str_increment.php` (20), `str_decrement.php` (17), `mb-strlen-php83.php` (15), `implode.php` (13), `date.php` (13), `array-sum.php` (13), `range-function.php` (11), `constantTypes.php` (8), `string-offsets.php` (8), 19 more.
+**Upstream cases** (PHPStan `nsrt/`): `implode.php` (13), `date.php` (13), `array-sum.php` (13), `range-function.php` (11), `constantTypes.php` (8), `string-offsets.php` (8), 19 more.
+
+### B910. `**` does not work out its result from integer ranges or a trivial operand
+
+**Impact: Low · Complexity: Low-Medium**
+
+```php
+$range = rand(1, 3);
+$range ** 2;        // int|float, should be int<1, 9>
+$int ** 0;          // int|float, should be 1
+$int ** true;       // int|float, should be int
+null ** $int;       // int|float, should be 0|1
+$gmp ** $object;    // GMP, should be GMP|stdClass
+```
+
+Two known numbers fold, but integer ranges are not raised the way `+`, `-`
+and `*` combine them, an exponent of `0`, `1`, `null` or `bool` does not
+decide the result, an operand `**` rejects is not an error, and a plain
+object beside a `GMP` is dropped. `pow()` goes through the same typing.
+`rand()` with bounds is typed `int` rather than the range between them,
+which hides the range cases behind it. `// SKIP` lines in
+`tests/phpstan_nsrt/pow.php`.
 
 ### B795. `array_column()` does not read object rows
 

@@ -63,24 +63,38 @@ pub(crate) fn unary_prefix_result_type(
         _ => {}
     }
     let kind = CastKind::of(operator)?;
-    // `(int)`, `(float)` and `(bool)` of anything but a cheap operand are
-    // decided without it, so an `(int)` cast of a call pays nothing for
-    // resolving the call.
-    if matches!(kind, CastKind::Int | CastKind::Float | CastKind::Bool)
-        && !scalar_fold::is_cheap_scalar_operand(operand)
-    {
-        return Some(match kind {
-            CastKind::Int => PhpType::int(),
-            CastKind::Float => PhpType::float(),
-            _ => PhpType::bool(),
-        });
-    }
-    Some(cast_result_type(
+    Some(cast_expression_type(
         kind,
-        resolve_operand(),
+        operand,
+        resolve_operand,
         class_loader,
         cache,
     ))
+}
+
+/// The type converting the expression `operand` with `kind` produces, for
+/// a cast and for the `intval()` / `strval()` family alike.
+///
+/// `(int)`, `(float)` and `(bool)` of anything but a cheap operand are
+/// decided without it, so an `(int)` cast of a call pays nothing for
+/// resolving the call.
+pub(super) fn cast_expression_type(
+    kind: CastKind,
+    operand: &Expression<'_>,
+    resolve_operand: impl FnOnce() -> Vec<ResolvedType>,
+    class_loader: &ResolvedClassLoader<'_>,
+    cache: Option<&ResolvedClassCache>,
+) -> PhpType {
+    if matches!(kind, CastKind::Int | CastKind::Float | CastKind::Bool)
+        && !scalar_fold::is_cheap_scalar_operand(operand)
+    {
+        return match kind {
+            CastKind::Int => PhpType::int(),
+            CastKind::Float => PhpType::float(),
+            _ => PhpType::bool(),
+        };
+    }
+    cast_result_type(kind, resolve_operand(), class_loader, cache)
 }
 
 /// The scalar, array, object and `null` conversions a cast or `settype()`

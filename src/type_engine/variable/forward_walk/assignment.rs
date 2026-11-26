@@ -116,7 +116,9 @@ pub(super) fn type_after_increment_decrement(
                 }
                 IncrementDecrementKind::Increment => content
                     .as_deref()
-                    .and_then(increment_alphanumeric)
+                    .and_then(
+                        crate::type_engine::variable::string_func_rules::increment_alphanumeric,
+                    )
                     .map_or_else(PhpType::string, PhpType::literal_string_value),
                 IncrementDecrementKind::Decrement => ty.clone(),
             }
@@ -131,33 +133,7 @@ pub(super) fn type_after_increment_decrement(
     }
 }
 
-/// PHP's alphanumeric string increment (`'a'` → `'b'`, `'Az'` → `'Ba'`,
-/// `'zz'` → `'aaa'`), or `None` for a string with any other character,
-/// whose increment PHP deprecates.
-fn increment_alphanumeric(s: &str) -> Option<String> {
-    if s.is_empty() || !s.bytes().all(|b| b.is_ascii_alphanumeric()) {
-        return None;
-    }
-    let mut bytes = s.as_bytes().to_vec();
-    for i in (0..bytes.len()).rev() {
-        let (wrapped, carry) = match bytes[i] {
-            b'z' => (b'a', b'a'),
-            b'Z' => (b'A', b'A'),
-            b'9' => (b'0', b'1'),
-            byte => (byte + 1, 0),
-        };
-        bytes[i] = wrapped;
-        if carry == 0 {
-            break;
-        }
-        // The carry ran off the front: prepend the first value of the
-        // kind of character it came from.
-        if i == 0 {
-            bytes.insert(0, carry);
-        }
-    }
-    String::from_utf8(bytes).ok()
-}
+/// Get the byte offset of an expression (used for cursor comparisons).
 pub(crate) fn stmt_offset(expr: &Expression<'_>) -> u32 {
     expr.span().start.offset
 }
