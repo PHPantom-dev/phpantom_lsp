@@ -108,6 +108,7 @@ impl BackendState {
             kept_parse: Mutex::new(None),
             whole_file_coalesce: Arc::new(WholeFileCoalesce::default()),
             client: None,
+            workspace_trust: crate::workspace_trust::WorkspaceTrust::default(),
             phar_archives: Arc::new(RwLock::new(HashMap::new())),
             parsed_uris: Arc::new(RwLock::new(HashSet::new())),
             dormant_files: RwLock::new(HashSet::new()),

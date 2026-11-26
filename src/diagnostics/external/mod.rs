@@ -62,7 +62,8 @@ impl Backend {
     /// 1. Wait for a notification (file saved).
     /// 2. Snapshot the pending URI and file content.
     /// 3. Call `prepare` to resolve the binary (skip if not found /
-    ///    disabled / the project doesn't use this tool).
+    ///    disabled / the project doesn't use this tool / the workspace
+    ///    is not trusted).
     /// 4. Run the tool (blocking — this is the slow part).
     /// 5. Cache the results and re-publish diagnostics for the file.
     /// 6. Loop back to step 1.
@@ -126,6 +127,13 @@ impl Backend {
                 Some(run) => run,
                 None => continue,
             };
+
+            // Checked once the project turns out to use the tool, so a
+            // project without one is never asked.  Granting trust
+            // reschedules every open file.
+            if !self.may_run_project_tools() {
+                continue;
+            }
 
             // ── Step 4: run the tool (the slow part) ────────────────
             // Move the blocking execution onto a dedicated OS thread.

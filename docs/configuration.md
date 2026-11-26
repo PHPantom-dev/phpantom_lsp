@@ -37,8 +37,9 @@ phpantom_lsp init --global
 
 It lives at `$XDG_CONFIG_HOME/phpantom_lsp/.phpantom.toml` (typically
 `~/.config/phpantom_lsp/.phpantom.toml` on Linux and macOS alike, and
-`%APPDATA%\phpantom_lsp\.phpantom.toml` on Windows), takes exactly the
-same keys as a project config, and is read first. macOS follows the XDG
+`%APPDATA%\phpantom_lsp\.phpantom.toml` on Windows), takes the same
+keys as a project config (plus [`[trust]`](#trust), which only it can
+set), and is read first. macOS follows the XDG
 path rather than `~/Library/Application Support`, which is where a
 command-line tool's config is expected to be, and keeps the path the
 same across a machine you use both platforms on. A project config is
@@ -375,6 +376,14 @@ Set `lint` or `analyze` explicitly to override all of this in either direction.
 | `enabled` | bool     | `true`  | Enable Laravel migration scanning for Eloquent model property inference. |
 | `paths`   | string[] | unset   | Migration files or directories to scan. Defaults to non-vendor `database/migrations` directories. |
 
+### `[trust]`
+
+Only read from the global config. A `[trust]` table in a project's `.phpantom.toml` is ignored with a warning, since a repository cannot vouch for itself. See [Project tools and workspace trust](#project-tools-and-workspace-trust).
+
+| Key              | Type | Default | Description |
+| ---------------- | ---- | ------- | ----------- |
+| `all-workspaces` | bool | `false` | Trust every workspace, so project tools run without asking. Only set this if you never open code you don't trust. |
+
 The file is optional. Unknown keys are silently ignored, so the file is forward-compatible.
 
 ## Editor-supplied file filters
@@ -422,6 +431,28 @@ An editor extension can offer its own switches for the `[inlay-hints]` kinds and
 It is read from `initializationOptions` and `workspace/didChangeConfiguration`, also under a `phpantom` key, and a notification without an `inlayHints` block leaves the toggles as they are. A key left out has no opinion. When a toggle changes, PHPantom asks the editor to re-request the hints of open files, so the change shows at once.
 
 A kind is shown only when neither `.phpantom.toml` nor the editor turns it off. Editors send their default `true` along with every other setting, so an editor's `true` never brings back a kind the config file switched off.
+
+## Project tools and workspace trust
+
+PHPStan, PHP_CodeSniffer, PHPMD, Mago and the external formatters (Pint, php-cs-fixer, phpcbf, blade-formatter) execute code from the project they work on. The language server therefore only runs them in a workspace you trust. Indexing, completion, navigation and PHPantom's own diagnostics only read the code and always work.
+
+A workspace counts as trusted when:
+
+- the editor says so. Zed (0.218 and later) only starts language servers in a folder you have already trusted, and the VS Code extension only runs in a trusted workspace. An extension for another editor can pass its own verdict as `{ "workspaceTrusted": true }` (or `false`) in `initializationOptions`;
+- you trusted it before, through the prompt or `phpantom_lsp trust`;
+- the global config sets `[trust] all-workspaces = true`.
+
+Otherwise PHPantom asks the first time one of those tools would run, and remembers the answer. A project that uses none of them is never asked. Until you answer, diagnostics from the tools are left out, and formatting does nothing rather than reformat the file in a different style.
+
+In an editor that cannot show the question, run this in the project's root and restart the server:
+
+```bash
+phpantom_lsp trust            # trust the current directory
+phpantom_lsp trust --deny     # never run its tools, and don't ask again
+phpantom_lsp trust --forget   # forget the answer, so the editor asks again
+```
+
+Answers are kept in `trusted-workspaces.json` under the platform's data directory (`~/.local/share/phpantom_lsp/` on Linux and macOS, `%APPDATA%\phpantom_lsp\` on Windows). The `analyze`, `fix` and `format` commands are run on purpose and do not ask.
 
 ## Code Formatting
 

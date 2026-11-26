@@ -49,6 +49,19 @@ impl Backend {
             *self.client_name.lock() = info.name.clone();
         }
 
+        let client_gates = params.client_info.as_ref().is_some_and(|info| {
+            crate::workspace_trust::client_gates_language_servers(
+                &info.name,
+                info.version.as_deref(),
+            )
+        });
+        let client_trust = params
+            .initialization_options
+            .as_ref()
+            .and_then(crate::workspace_trust::client_trust_option);
+        let root = self.workspace.workspace_root.read().clone();
+        self.init_workspace_trust(client_trust, client_gates, root.as_deref());
+
         // File filters the editor forwarded from its own settings. Read
         // before anything scans, so the very first discovery pass already
         // honours them rather than indexing excluded trees and dropping

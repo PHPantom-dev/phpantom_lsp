@@ -1334,3 +1334,31 @@ fn old_spellings_are_reported_with_their_new_names() {
         ]
     );
 }
+
+/// A repository cannot vouch for itself: `[trust]` in a project's
+/// `.phpantom.toml` is dropped with a warning, while the global config's
+/// applies.
+#[test]
+fn trust_is_only_read_from_the_global_config() {
+    let dir = tempfile::tempdir().unwrap();
+    let project = dir.path().join("project");
+    std::fs::create_dir(&project).unwrap();
+    let project_file = project.join(CONFIG_FILE_NAME);
+    std::fs::write(&project_file, "[trust]\nall-workspaces = true\n").unwrap();
+
+    let loaded = load_config_with_warnings(&project, None).unwrap();
+    assert!(!loaded.config.trust.trusts_all_workspaces());
+    assert_eq!(
+        loaded.warnings,
+        vec![ConfigWarning::GlobalOnlyKey {
+            file: project_file.clone(),
+            key: "trust".to_string(),
+        }]
+    );
+
+    let global = dir.path().join("global.toml");
+    std::fs::write(&global, "[trust]\nall-workspaces = true\n").unwrap();
+    std::fs::write(&project_file, "[trust]\nall-workspaces = false\n").unwrap();
+    let loaded = load_config_with_warnings(&project, Some(&global)).unwrap();
+    assert!(loaded.config.trust.trusts_all_workspaces());
+}

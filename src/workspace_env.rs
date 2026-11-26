@@ -90,6 +90,10 @@ pub(crate) struct WorkspaceEnv {
     /// so a `.phpantom.toml` in the developer's own config directory
     /// cannot change what the suite asserts.
     pub(crate) global_config_path: Option<PathBuf>,
+    /// Where the user's answers about which workspaces to trust are
+    /// kept (see [`crate::workspace_trust`]).  `None` in tests, for the
+    /// same reason as `global_config_path`.
+    pub(crate) trust_store_path: Option<PathBuf>,
     /// Compiled `[indexing]` exclude globs and extra PHP extensions,
     /// built lazily from `config` and reset when the config changes.
     /// Shared across clones so a config reload invalidates everywhere.
@@ -191,7 +195,10 @@ impl WorkspaceEnv {
     /// The environment a real session runs in: the global config layer
     /// comes from the platform config directory.
     pub(crate) fn new() -> Self {
-        Self::with_global_config(config::global_config_path())
+        Self {
+            trust_store_path: crate::workspace_trust::trust_store_path(),
+            ..Self::with_global_config(config::global_config_path())
+        }
     }
 
     /// An environment with no global config layer, for tests.
@@ -221,6 +228,7 @@ impl WorkspaceEnv {
             php_version: Mutex::new(PhpVersion::default()),
             config: Arc::new(Mutex::new(config::Config::default())),
             global_config_path,
+            trust_store_path: None,
             index_filters: Arc::new(RwLock::new(None)),
             client_indexing: Arc::new(RwLock::new(config::ClientIndexingOptions::default())),
             is_drupal: Arc::new(AtomicBool::new(false)),
@@ -272,6 +280,7 @@ impl Clone for WorkspaceEnv {
             php_version: Mutex::new(*self.php_version.lock()),
             config: Arc::clone(&self.config),
             global_config_path: self.global_config_path.clone(),
+            trust_store_path: self.trust_store_path.clone(),
             index_filters: Arc::clone(&self.index_filters),
             client_indexing: Arc::clone(&self.client_indexing),
             is_drupal: Arc::clone(&self.is_drupal),
@@ -314,6 +323,10 @@ mod tests {
             assert!(
                 backend.workspace.global_config_path.is_none(),
                 "Backend::{name} must not read the global .phpantom.toml"
+            );
+            assert!(
+                backend.workspace.trust_store_path.is_none(),
+                "Backend::{name} must not read the user's trust store"
             );
         }
     }

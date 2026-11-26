@@ -276,13 +276,24 @@ impl Backend {
     pub(crate) fn resolve_blade_formatting_strategy(&self) -> BladeFormattingStrategy {
         let inputs = self.formatting_inputs();
         let (composer_json, bin_dir) = inputs.composer();
-        resolve_blade_strategy(
+        let strategy = resolve_blade_strategy(
             inputs.workspace_root.as_deref(),
             &inputs.config.formatting,
             composer_json.as_ref(),
             bin_dir.as_deref(),
             self.php_version(),
-        )
+        );
+        // Not the built-in reindenter in an untrusted workspace, for the
+        // same reason as `resolve_formatting_strategy`.
+        match strategy {
+            BladeFormattingStrategy::Pint { .. }
+            | BladeFormattingStrategy::BladeFormatter { .. }
+                if !self.may_run_project_tools() =>
+            {
+                BladeFormattingStrategy::Disabled
+            }
+            strategy => strategy,
+        }
     }
 
     /// Format one Blade template's `content` with `strategy`; see

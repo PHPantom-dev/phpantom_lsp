@@ -378,6 +378,7 @@ mod wasm_wasi;
 mod wordpress;
 mod workspace_env;
 mod workspace_symbols;
+pub mod workspace_trust;
 mod yii;
 
 #[cfg(test)]
@@ -493,6 +494,8 @@ pub struct BackendState {
     /// [`WholeFileCoalesce`] for why this exists.
     pub(crate) whole_file_coalesce: Arc<WholeFileCoalesce>,
     pub(crate) client: Option<Client>,
+    /// Whether the project's own tooling may run; see [`workspace_trust`].
+    pub(crate) workspace_trust: workspace_trust::WorkspaceTrust,
     /// Whether to update ASTs synchronously.  Used for testing.
     pub(crate) sync_ast_updates: bool,
     /// Workspace-level configuration and PSR-4/vendor location metadata.

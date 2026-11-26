@@ -196,6 +196,31 @@ enum Command {
         yes: bool,
     },
 
+    /// Let the language server run a project's own tools.
+    ///
+    /// PHPStan, PHP_CodeSniffer, PHPMD, Mago and the external formatters
+    /// execute code from the project they check, so the language server
+    /// only runs them in a workspace you trust.  Editors that ask about
+    /// trust themselves (VS Code, Zed) tell the server; in other editors
+    /// PHPantom asks the first time a tool would run.  Use this command
+    /// in an editor that cannot show that question, or to change an
+    /// answer.
+    Trust {
+        /// The project's root directory.  Defaults to the current
+        /// directory.
+        #[arg(value_name = "PATH")]
+        path: Option<std::path::PathBuf>,
+
+        /// Record the project as not trusted: its tools never run, and
+        /// the editor does not ask again.
+        #[arg(long, conflicts_with = "forget")]
+        deny: bool,
+
+        /// Forget the answer, so the editor asks again.
+        #[arg(long)]
+        forget: bool,
+    },
+
     /// Check for updates or upgrade to the latest version.
     ///
     /// Downloads the latest release from GitHub and replaces the current
@@ -386,6 +411,35 @@ async fn async_main() {
                     std::process::exit(1);
                 }
             }
+        }
+        Some(Command::Trust { path, deny, forget }) => {
+            use phpantom_lsp::workspace_trust;
+            let path = match path {
+                Some(path) => path,
+                None => std::env::current_dir().unwrap_or_else(|e| {
+                    eprintln!("Error: cannot determine current directory: {}", e);
+                    std::process::exit(1);
+                }),
+            };
+            if !path.is_dir() {
+                eprintln!("Error: {} is not a directory", path.display());
+                std::process::exit(1);
+            }
+            let Some(store) = workspace_trust::trust_store_path() else {
+                eprintln!("Error: cannot determine the user data directory");
+                std::process::exit(1);
+            };
+            let (decision, verb) = match (deny, forget) {
+                (_, true) => (None, "Forgot the trust decision for"),
+                (true, _) => (Some(false), "Marked as not trusted:"),
+                _ => (Some(true), "Trusted"),
+            };
+            if let Err(e) = workspace_trust::record_decision(&store, &path, decision) {
+                eprintln!("Error: cannot write {}: {}", store.display(), e);
+                std::process::exit(1);
+            }
+            println!("{verb} {}", path.display());
+            println!("Restart the language server for the change to take effect.");
         }
         #[cfg(not(target_arch = "wasm32"))]
         Some(Command::Update { check, no_confirm }) => {

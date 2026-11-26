@@ -28,6 +28,7 @@ mod stubs;
 #[cfg(test)]
 mod tests;
 mod tools;
+mod trust;
 
 pub use diagnostics::{DiagnosticsConfig, IgnoreRule};
 pub use indexing::{ClientIndexingOptions, IndexingConfig, IndexingStrategy};
@@ -35,6 +36,7 @@ pub use inlay_hints::{ClientInlayHintOptions, InlayHintKinds, InlayHintsConfig};
 pub use laravel::{LaravelConfig, LaravelMigrationsConfig, LaravelSchemaConfig};
 pub use stubs::{ClientStubOptions, StubsConfig};
 pub use tools::{FormattingConfig, MagoConfig, PhpStanConfig, PhpcsConfig, PhpmdConfig};
+pub use trust::TrustConfig;
 
 /// Top-level configuration parsed from `.phpantom.toml`.
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -66,6 +68,9 @@ pub struct Config {
     pub mago: MagoConfig,
     /// Laravel-specific analysis settings.
     pub laravel: LaravelConfig,
+    /// Which workspaces may run the project's own tooling.  Read from
+    /// the global config only.
+    pub trust: TrustConfig,
 }
 
 /// `[semantic-tokens]` section — controls LSP semantic highlighting.
@@ -150,6 +155,10 @@ const RENAMED_KEYS: &[(&[&str], &str, &str)] = &[
         "magic-properties",
     ),
 ];
+
+/// Sections read from the global config only, dropped from a project's
+/// `.phpantom.toml` with a [`ConfigWarning::GlobalOnlyKey`].
+const GLOBAL_ONLY_SECTIONS: &[&str] = &["trust"];
 
 /// Rewrite the old spellings in [`RENAMED_KEYS`] to the current ones,
 /// recording a warning for each one `path` uses.
@@ -349,6 +358,14 @@ pub enum ConfigWarning {
         /// The current dotted path, e.g. `semantic-tokens`.
         new: String,
     },
+    /// A section only the global config may set, written in a project's
+    /// `.phpantom.toml`.  It is ignored there.
+    GlobalOnlyKey {
+        /// The project config the section was written in.
+        file: PathBuf,
+        /// The section's name, e.g. `trust`.
+        key: String,
+    },
 }
 
 impl std::fmt::Display for ConfigWarning {
@@ -360,6 +377,11 @@ impl std::fmt::Display for ConfigWarning {
             ConfigWarning::RenamedKey { file, old, new } => write!(
                 f,
                 "`{old}` in {} has been renamed to `{new}`",
+                file.display()
+            ),
+            ConfigWarning::GlobalOnlyKey { file, key } => write!(
+                f,
+                "`[{key}]` in {} is ignored, it is only read from the global config",
                 file.display()
             ),
         }
@@ -436,7 +458,17 @@ pub fn load_config_with_warnings(
     }
 
     let project_path = workspace_root.join(CONFIG_FILE_NAME);
-    if let Some(project) = load_toml_table(&project_path, &mut warnings)? {
+    if let Some(mut project) = load_toml_table(&project_path, &mut warnings)? {
+        // A repository would otherwise vouch for itself and have its own
+        // tooling run on open.
+        for key in GLOBAL_ONLY_SECTIONS {
+            if project.remove(*key).is_some() {
+                warnings.push(ConfigWarning::GlobalOnlyKey {
+                    file: project_path.clone(),
+                    key: (*key).to_string(),
+                });
+            }
+        }
         if table.is_empty() {
             config = Some(deserialize_layer(project, &project_path, &mut warnings)?);
         } else {

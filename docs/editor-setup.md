@@ -57,6 +57,8 @@ Two kinds of entry are skipped, because neither has an equivalent the server can
 
 These editors require you to [install PHPantom](installation.md) first.
 
+None of them tells the server whether you trust the folder you opened, so PHPantom asks the first time it would run one of the project's own tools (PHPStan, PHP_CodeSniffer, a formatter and so on). See [Project tools and workspace trust](configuration.md#project-tools-and-workspace-trust), including how to answer from the command line in an editor that cannot show the question.
+
 ### Neovim
 
 PHPantom is included in [nvim-lspconfig](https://github.com/neovim/nvim-lspconfig) (just needs to be enabled). If you do not use nvim-lspconfig, then you will need to manually configure it:

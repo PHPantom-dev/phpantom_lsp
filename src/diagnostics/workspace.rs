@@ -1200,6 +1200,35 @@ impl Backend {
 
     // ── External tools ──────────────────────────────────────────────
 
+    /// [`Backend::may_run_project_tools`] for the workspace pass, which
+    /// remembers a refusal so that granting trust later can run the
+    /// pass's external tools after all.
+    fn may_run_workspace_tool(&self) -> bool {
+        let allowed = self.may_run_project_tools();
+        if !allowed {
+            self.workspace_trust.defer_workspace_tools();
+        }
+        allowed
+    }
+
+    /// Run the workspace pass's external tools on their own, once a pass
+    /// that skipped them for want of trust has been granted it.
+    pub(crate) fn rerun_workspace_external_tools(&self) {
+        let Ok(runtime) = tokio::runtime::Handle::try_current() else {
+            return;
+        };
+        let backend = self.clone_for_blocking();
+        runtime.spawn(async move {
+            if backend.config().diagnostics.workspace_external_enabled()
+                && !backend.workspace_pass_stopping()
+            {
+                backend
+                    .run_workspace_external_tools(&ScanProgress::new())
+                    .await;
+            }
+        });
+    }
+
     /// Run each enabled external tool once over the whole project and
     /// store the results, delivering after each tool completes.
     async fn run_workspace_external_tools(&self, progress: &ScanProgress) {
@@ -1219,6 +1248,7 @@ impl Backend {
                 bin_dir.as_deref(),
                 composer_pkg.as_ref(),
             )
+            && self.may_run_workspace_tool()
         {
             progress.set_percentage(80, "Running PHPStan (project-wide)");
             let phpstan_config = config.phpstan.clone();
@@ -1253,6 +1283,7 @@ impl Backend {
                 bin_dir.as_deref(),
                 composer_pkg.as_ref(),
             )
+            && self.may_run_workspace_tool()
         {
             progress.set_percentage(85, "Running PHPCS (project-wide)");
             let phpcs_config = config.phpcs.clone();
@@ -1278,6 +1309,7 @@ impl Backend {
             && crate::phpmd::has_project_config(&root)
             && let Some(resolved) =
                 crate::phpmd::resolve_phpmd(Some(&root), &config.phpmd, bin_dir.as_deref())
+            && self.may_run_workspace_tool()
         {
             progress.set_percentage(87, "Running PHPMD (project-wide)");
             let phpmd_config = config.phpmd.clone();
@@ -1310,6 +1342,7 @@ impl Backend {
                 bin_dir.as_deref(),
                 composer_pkg.as_ref(),
             )
+            && self.may_run_workspace_tool()
         {
             if mago_services.lint {
                 progress.set_percentage(90, "Running Mago lint (project-wide)");

@@ -295,16 +295,26 @@ impl Backend {
     ///
     /// Reads `composer.json` from disk, so call it once per request (or
     /// once per run), not per file.
+    ///
+    /// A strategy that runs an external tool in a workspace that is not
+    /// trusted resolves to `Disabled` rather than the built-in formatter,
+    /// which would rewrite the file in a style the project does not use.
     pub(crate) fn resolve_formatting_strategy(&self) -> FormattingStrategy {
         let inputs = self.formatting_inputs();
         let (composer_json, bin_dir) = inputs.composer();
-        resolve_strategy(
+        let strategy = resolve_strategy(
             inputs.workspace_root.as_deref(),
             &inputs.config.formatting,
             inputs.config.phpcs.standard.as_deref(),
             composer_json.as_ref(),
             bin_dir.as_deref(),
-        )
+        );
+        match strategy {
+            FormattingStrategy::External(_) if !self.may_run_project_tools() => {
+                FormattingStrategy::Disabled
+            }
+            strategy => strategy,
+        }
     }
 
     /// Format one file's `content` with `strategy`.

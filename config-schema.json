@@ -372,6 +372,17 @@
           "minimum": 0
         }
       }
+    },
+    "trust": {
+      "type": "object",
+      "description": "Which workspaces may run the project's own tools (PHPStan, PHP_CodeSniffer, PHPMD, Mago, external formatters). Only read from the global config; a project's .phpantom.toml cannot set it.",
+      "properties": {
+        "all-workspaces": {
+          "type": "boolean",
+          "description": "Trust every workspace, so project tools run without asking. These tools execute code from the project, so only set this if you never open code you don't trust.",
+          "default": false
+        }
+      }
     }
   }
 }

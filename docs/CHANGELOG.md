@@ -13,6 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Flux and Filament components.** Flux's `<flux:button>` tags complete, offer the attributes the component declares, jump to its template in the package, and are reported when no component has the name. Components a package registers by directory, such as Flux's, now work under their `<x-prefix::…>` spelling too.
 
+### Changed
+
+- **Project tools only run in a trusted workspace.** PHPStan, PHP_CodeSniffer, PHPMD, Mago and external formatters execute the project's code, so the language server now runs them only once the workspace is trusted. VS Code and Zed already ask before starting the server, other editors ask once per project, and `phpantom_lsp trust` covers editors that cannot show the question. See [Project tools and workspace trust](configuration.md#project-tools-and-workspace-trust).
+
 ### Fixed
 
 - **Livewire 4's view locations are view roots.** Templates in the directories Livewire 4's `component_locations` and `component_namespaces` settings name (by default `resources/views/livewire` and `pages::`) are views by those names, so `view()` and `@include` calls naming them are no longer reported as unknown. A `<livewire:…>` tag is checked against the components in every location the config names.

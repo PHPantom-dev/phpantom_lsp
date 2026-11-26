@@ -1112,3 +1112,32 @@ fn run_pint_on_blade_rejects_empty_stdout_for_nonempty_input() {
     let err = result.expect_err("empty stdout for non-empty input must be rejected");
     assert!(err.contains("pint"), "unexpected error: {err}");
 }
+
+/// The project's own formatter is not run in a workspace nobody has
+/// trusted, and the built-in one does not stand in for it either: it
+/// would rewrite the file in a style the project does not use.
+#[test]
+fn untrusted_workspace_does_not_format_with_the_project_tool() {
+    let dir = tempfile::tempdir().unwrap();
+    let vendor_bin = dir.path().join("vendor/bin");
+    std::fs::create_dir_all(&vendor_bin).unwrap();
+    std::fs::write(vendor_bin.join("php-cs-fixer"), "#!/bin/sh\n").unwrap();
+    std::fs::write(
+        dir.path().join("composer.json"),
+        r#"{ "require-dev": { "friendsofphp/php-cs-fixer": "^3.0" } }"#,
+    )
+    .unwrap();
+
+    let backend = crate::Backend::new_test_with_workspace(dir.path().to_path_buf(), Vec::new());
+    backend.init_workspace_trust(None, false, Some(dir.path()));
+    assert!(matches!(
+        backend.resolve_formatting_strategy(),
+        FormattingStrategy::Disabled
+    ));
+
+    backend.init_workspace_trust(Some(true), false, Some(dir.path()));
+    assert!(matches!(
+        backend.resolve_formatting_strategy(),
+        FormattingStrategy::External(_)
+    ));
+}
