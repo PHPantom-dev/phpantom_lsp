@@ -2303,17 +2303,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b901-environment-dependent-predefined-constants-take-the-stubs-placeholder-value" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B901. Environment-dependent predefined constants take the stubs' placeholder value
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -4233,17 +4222,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b901-environment-dependent-predefined-constants-take-the-stubs-placeholder-value" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B901. Environment-dependent predefined constants take the stubs' placeholder value
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -5849,20 +5827,6 @@ completion goes through the same path. <code>// SKIP</code> lines in
 <li><code>foreach</code> over an <code>IteratorAggregate</code> misreads its value type</li>
 </ul>
 <p><strong>Cases</strong> (PHPStan <code>nsrt/</code>, 5 assertions): <code>foreach-object-type.php</code> (3), <code>bug-4267.php</code> (2).</p>
-<h3 id="b901-environment-dependent-predefined-constants-take-the-stubs-placeholder-value">B901. Environment-dependent predefined constants take the stubs' placeholder value<a class="headerlink" href="#b901-environment-dependent-predefined-constants-take-the-stubs-placeholder-value" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-114-1" name="__codelineno-114-1" href="#__codelineno-114-1"></a><span class="x">PHP_OS;                 // got "Linux", should be non-falsy-string</span>
-<a id="__codelineno-114-2" name="__codelineno-114-2" href="#__codelineno-114-2"></a><span class="x">DEFAULT_INCLUDE_PATH;   // got ".:/usr/share/php:/usr/share/pear", should be string</span>
-<a id="__codelineno-114-3" name="__codelineno-114-3" href="#__codelineno-114-3"></a><span class="x">DIRECTORY_SEPARATOR;    // got "/", should be '/'|'\\'</span>
-<a id="__codelineno-114-4" name="__codelineno-114-4" href="#__codelineno-114-4"></a><span class="x">PHP_WINDOWS_VERSION_MAJOR; // got 0, should be int&lt;4, max&gt;</span>
-</code></pre></div>
-<p>Constants whose value depends on the build, OS or install (paths, PHP_OS, PHP_SAPI, PHP_ZTS, PHP_MAXPATHLEN, PHP_SHLIB_SUFFIX, library versions, PHP_BUILD_DATE, <strong>COMPILER_HALT_OFFSET</strong>, the Windows constants) are read from the stub's sample value. They should get the type the stub's value has, not the value itself. Version constants matching the configured PHP version and PHP_INT_SIZE are fine and were left out.</p>
-<p>It also shows as:</p>
-<ul>
-<li>Platform-dependent predefined constants are typed as the analysing machine's value</li>
-</ul>
-<p><strong>Fix:</strong> type <code>PHP_OS</code>, path and platform constants by their declared type rather than the stub's sample value; keep folding only the constants whose value the configured PHP version fixes.</p>
-<p><strong>Cases</strong> (PHPStan <code>nsrt/</code>, 34 assertions): <code>predefined-constants.php</code> (31), <code>predefined-constants-php72.php</code> (2), <code>predefined-constants-php85.php</code>.</p>
 
 
 
