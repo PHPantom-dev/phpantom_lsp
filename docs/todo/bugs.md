@@ -2318,27 +2318,3 @@ It also shows as:
 **Fix:** type `PHP_OS`, path and platform constants by their declared type rather than the stub's sample value; keep folding only the constants whose value the configured PHP version fixes.
 
 **Cases** (PHPStan `nsrt/`, 34 assertions): `predefined-constants.php` (31), `predefined-constants-php72.php` (2), `predefined-constants-php85.php`.
-
-### B902. Parentheses around an assignment's right side change its type
-
-**Impact: Low · Complexity: Low**
-
-```php
-/** @param list<string> $arr */
-function f(array $arr): void {
-    $a = array_pop($arr);     // string|null, and $arr is popped once
-    $b = (array_pop($arr));   // differs: the by-reference effect on $arr is applied differently
-    $c = voidFunction();      // void
-    $d = (voidFunction());    // null
-}
-```
-
-The assignment handler special-cases the shape of its right side (a call
-with by-reference arguments, a `void` result), and a parenthesised right side
-does not match those cases, so the same value gets a different type.
-
-**Fix:** unwrap parentheses before the assignment handler looks at its right
-side. Wrapping every expression in `tests/assert_type_runner.rs` in
-parentheses reproduces the cases (`array-pop.php`, `array-shift.php`,
-`bug-10122.php`, `bug-4499.php`, the `functionPhpDocs*`/`methodPhpDocs*`
-`void` assertions, and the WordPress `output-constants.php`).

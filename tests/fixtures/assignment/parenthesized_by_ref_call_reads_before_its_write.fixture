@@ -1,0 +1,16 @@
+// test: a parenthesized by-reference call is typed from before its write
+// feature: hover
+// php: 8.4
+// expect: Pencil
+// expect_absent: Eraser
+---
+<?php
+
+class Eraser {}
+class Pencil {}
+
+/** @param array{a: Eraser, b: Pencil} $kit */
+function test(array $kit): void {
+    $last = (array_pop($kit));
+    echo $la<>st;
+}

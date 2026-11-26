@@ -1002,6 +1002,11 @@ fn resolve_rhs_in_scope<'b>(
     expr_types: Option<&ExprTypes>,
     nullsafe_receivers_set: bool,
 ) -> Vec<ResolvedType> {
+    // `(expr)` has the type of `expr`.  Unwrap first so the shapes matched
+    // below, and the types `process_expr` recorded for the inner node (a
+    // by-reference call's result, read from before its write), apply to a
+    // parenthesized value too.
+    let rhs = crate::parser::unwrap_parens(rhs);
     if let Some(recorded) = expr_types.and_then(|types| types.get(rhs)) {
         return recorded.to_vec();
     }
@@ -1010,9 +1015,8 @@ fn resolve_rhs_in_scope<'b>(
     // `$x = $cache[$k] ??= expensive()`) evaluates to what it leaves in
     // its target.  Its operands are resolved through here rather than the
     // RHS pipeline, so `$a = $b = Foo::class` keeps the class-string this
-    // function gives `Foo::class`.  The assignment may be parenthesized
-    // (`$a = ($b = expr)`), so unwrap before matching.
-    if let Expression::Assignment(assignment) = crate::parser::unwrap_parens(rhs) {
+    // function gives `Foo::class`.
+    if let Expression::Assignment(assignment) = rhs {
         return assignment_value(
             &assignment.operator,
             || {
@@ -1160,9 +1164,6 @@ fn resolve_rhs_in_scope<'b>(
     // When resolve_rhs_expression returns empty, infer the type
     // purely from the expression structure.  These only fire as a
     // last resort so they never override a more precise result.
-
-    // Unwrap parenthesized expressions for structural inference.
-    let rhs = crate::parser::unwrap_parens(rhs);
 
     // Composite strings are not scalar literals and may not be handled by the
     // canonical literal resolver. Exact scalar literals have no fallback here:

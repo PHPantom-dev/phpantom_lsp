@@ -25,6 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Undefined variables in a dynamic class constant fetch.** An undefined `$name` in `Foo::{$name}` is reported like any other read of it.
 - **Hover shows `readonly` properties.** A property declared `readonly`, promoted as one, or belonging to a `readonly` class shows the keyword in its hover.
 - **DNF types are spelled as PHP writes them.** A union holding an intersection shows as `(A&B)|null` in hover and anywhere else a type is written out, instead of `A&B|null`, which is not valid PHP.
+- **Parentheses around an assigned value no longer change its type.** `$last = (array_pop($items));` is typed like `$last = array_pop($items);`, instead of reading the array as if it had already been popped.
 - **Reading a `@property-write` property is `never`.** A property the class documents only with `@property-write` can be assigned but not read, so a read of it is typed `never` instead of the declared type.
 - **`static::CONST` in a docblock type is resolved.** A `@return static::KEY` reads the constant on the class the call is made on, so `(new Child())->get()` is `Child`'s value. When the receiver may be a subclass that redeclares the constant, the result is the constant's declared type instead of one class's value.
 - **`self::CONST` in an inherited method's docblock reads the declaring class's constant.** A `@return self::KEY` or a shape key written `self::KEY` keeps naming the class that declares the method when it is called on a subclass that redeclares the constant.
