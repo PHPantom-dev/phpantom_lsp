@@ -55,6 +55,21 @@ impl LiteralValue {
         )
     }
 
+    /// [`string_content`](Self::string_content) when the value is known
+    /// exactly. A double-quoted literal whose escapes spell bytes that are
+    /// not UTF-8 (`"\xfe"`) has no `str` value, and the source text
+    /// `string_content` falls back to would be a different string.
+    pub fn exact_string_content(&self) -> Option<Cow<'_, str>> {
+        let LiteralValue::String(raw) = self else {
+            return None;
+        };
+        match crate::text_scan::decode_php_string_literal(raw) {
+            Some(content) => Some(content),
+            None if raw.contains('\\') => None,
+            None => self.string_content(),
+        }
+    }
+
     pub fn parse_i64(&self) -> Option<i64> {
         match self {
             LiteralValue::Int(raw) => parse_php_int_literal(raw),

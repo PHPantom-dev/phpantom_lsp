@@ -167,9 +167,133 @@ fn the_trim_family_strips_its_default_characters() {
 }
 
 #[test]
-fn a_character_list_argument_declines_rather_than_stripping_the_default_set() {
-    assert_eq!(fold("trim", &[lit("xax"), lit("x")]), None);
-    assert_eq!(fold("ucwords", &[lit("a-b"), lit("-")]), None);
+fn a_literal_character_list_replaces_the_default_set() {
+    assert_eq!(
+        fold("trim", &[lit("xa x"), lit("x")]).as_deref(),
+        Some("'a '")
+    );
+    assert_eq!(
+        fold("rtrim", &[lit("abc1"), lit("0..9")]).as_deref(),
+        Some("'abc'")
+    );
+    let lists = PhpType::union(vec![
+        PhpType::literal_string_value("foo"),
+        PhpType::literal_string_value("bar"),
+    ]);
+    assert_eq!(
+        fold("trim", &[lit("foo"), Some(lists)]).as_deref(),
+        Some("''|'foo'")
+    );
+    assert_eq!(fold("trim", &[lit("xax"), Some(PhpType::string())]), None);
+    assert_eq!(
+        fold("ucwords", &[lit("a-b c"), lit("-")]).as_deref(),
+        Some("'A-B c'")
+    );
+}
+
+#[test]
+fn the_multibyte_case_mappings_fold_utf8_subjects() {
+    assert_eq!(
+        fold("mb_strtoupper", &[lit("Ａｂｃ")]).as_deref(),
+        Some("'ＡＢＣ'")
+    );
+    assert_eq!(
+        fold("mb_strtolower", &[lit("ÄB"), lit("utf-8")]).as_deref(),
+        Some("'äb'")
+    );
+    // Another encoding reads the bytes differently.
+    assert_eq!(
+        fold("mb_strtolower", &[lit("ÄB"), lit("CP1252")]).as_deref(),
+        Some("lowercase-string&non-falsy-string")
+    );
+    // The final sigma depends on the PHP version.
+    assert_eq!(
+        fold("mb_strtolower", &[lit("ΟΔΟΣ")]).as_deref(),
+        Some("lowercase-string&non-falsy-string")
+    );
+    let title = Some(PhpType::literal_int("2"));
+    assert_eq!(
+        fold("mb_convert_case", &[lit("česká REPUBLIKA it's"), title]).as_deref(),
+        Some(r"'Česká Republika It\'s'")
+    );
+    // Folding `ß` differs from lowercasing it.
+    assert_eq!(
+        fold(
+            "mb_convert_case",
+            &[lit("ß"), Some(PhpType::literal_int("3"))]
+        ),
+        None
+    );
+}
+
+#[test]
+fn mb_substr_counts_characters() {
+    let int = |v: &str| Some(PhpType::literal_int(v));
+    assert_eq!(
+        fold("mb_substr", &[lit("déjà_vu"), int("0"), int("3")]).as_deref(),
+        Some("'déj'")
+    );
+    assert_eq!(
+        fold("mb_substr", &[lit("déjà_vu"), int("-2")]).as_deref(),
+        Some("'vu'")
+    );
+    assert_eq!(
+        fold("mb_substr", &[lit("déjà_vu"), int("1"), int("-4")]).as_deref(),
+        Some("'éj'")
+    );
+    assert_eq!(
+        fold("mb_substr", &[lit("abc"), int("5")]).as_deref(),
+        Some("''")
+    );
+    assert_eq!(fold("mb_substr", &[lit("abc"), Some(PhpType::int())]), None);
+}
+
+#[test]
+fn str_repeat_of_zero_is_empty_whatever_the_subject() {
+    assert_eq!(
+        fold(
+            "str_repeat",
+            &[Some(PhpType::string()), Some(PhpType::literal_int("0"))]
+        )
+        .as_deref(),
+        Some("''")
+    );
+}
+
+#[test]
+fn sprintf_of_literal_values_folds() {
+    assert_eq!(
+        fold("sprintf", &[lit("%s%s"), lit("ba"), lit("r")]).as_deref(),
+        Some("'bar'")
+    );
+    assert_eq!(
+        fold(
+            "sprintf",
+            &[
+                lit("%2$s-%1$d%%"),
+                Some(PhpType::literal_int("7")),
+                lit("a")
+            ]
+        )
+        .as_deref(),
+        Some("'a-7%'")
+    );
+    // Padding and other conversions are left to the refinement.
+    assert_eq!(
+        fold("sprintf", &[lit("%05d"), Some(PhpType::literal_int("7"))]).as_deref(),
+        Some("numeric-string")
+    );
+}
+
+#[test]
+fn a_literal_whose_escapes_are_not_utf8_does_not_fold() {
+    let bytes = Some(PhpType::literal_string_raw(r#""\xfeA""#));
+    assert_eq!(
+        fold("strtolower", &[bytes]).as_deref(),
+        Some("lowercase-string&non-falsy-string")
+    );
+    let text = Some(PhpType::literal_string_raw(r#""\x41B""#));
+    assert_eq!(fold("strtolower", &[text]).as_deref(), Some("'ab'"));
 }
 
 #[test]

@@ -38,8 +38,8 @@ class Foo
 		// Repeating a numeric type multiple times can lead to a non-numeric type: 3v4l.org/aRBdZ
 
 		assertType("''", str_repeat('1.23', 0));
-		assertType("''", str_repeat($string, 0)); // SKIP: a string function or `++` on literals is not folded
-		assertType("''", str_repeat($numericString, 0)); // SKIP: a string function or `++` on literals is not folded
+		assertType("''", str_repeat($string, 0));
+		assertType("''", str_repeat($numericString, 0));
 
 		// see https://3v4l.org/U4bM2
 		$x = rand(1,2);

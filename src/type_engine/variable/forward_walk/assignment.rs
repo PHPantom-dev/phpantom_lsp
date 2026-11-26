@@ -105,8 +105,19 @@ pub(super) fn type_after_increment_decrement(
         _ if ty.is_int_subtype() => PhpType::int(),
         _ if ty.is_float_subtype() => PhpType::float(),
         TypeKind::Literal(value) if matches!(&**value, LiteralValue::String(_)) => {
+            let content = value.exact_string_content();
             match operation {
-                IncrementDecrementKind::Increment => PhpType::string(),
+                // `'' ++` is `'1'` and `'' --` is `-1`.
+                IncrementDecrementKind::Increment if content.as_deref() == Some("") => {
+                    PhpType::literal_string_value("1")
+                }
+                IncrementDecrementKind::Decrement if content.as_deref() == Some("") => {
+                    PhpType::literal_int("-1")
+                }
+                IncrementDecrementKind::Increment => content
+                    .as_deref()
+                    .and_then(increment_alphanumeric)
+                    .map_or_else(PhpType::string, PhpType::literal_string_value),
                 IncrementDecrementKind::Decrement => ty.clone(),
             }
         }
@@ -120,7 +131,33 @@ pub(super) fn type_after_increment_decrement(
     }
 }
 
-/// Get the byte offset of an expression (used for cursor comparisons).
+/// PHP's alphanumeric string increment (`'a'` → `'b'`, `'Az'` → `'Ba'`,
+/// `'zz'` → `'aaa'`), or `None` for a string with any other character,
+/// whose increment PHP deprecates.
+fn increment_alphanumeric(s: &str) -> Option<String> {
+    if s.is_empty() || !s.bytes().all(|b| b.is_ascii_alphanumeric()) {
+        return None;
+    }
+    let mut bytes = s.as_bytes().to_vec();
+    for i in (0..bytes.len()).rev() {
+        let (wrapped, carry) = match bytes[i] {
+            b'z' => (b'a', b'a'),
+            b'Z' => (b'A', b'A'),
+            b'9' => (b'0', b'1'),
+            byte => (byte + 1, 0),
+        };
+        bytes[i] = wrapped;
+        if carry == 0 {
+            break;
+        }
+        // The carry ran off the front: prepend the first value of the
+        // kind of character it came from.
+        if i == 0 {
+            bytes.insert(0, carry);
+        }
+    }
+    String::from_utf8(bytes).ok()
+}
 pub(crate) fn stmt_offset(expr: &Expression<'_>) -> u32 {
     expr.span().start.offset
 }
@@ -1221,7 +1258,7 @@ mod tests {
 
     #[test]
     fn increment_decrement_preserves_only_values_that_cannot_change() {
-        let text = PhpType::literal_string_raw("'abc'");
+        let text = PhpType::literal_string_raw("'a-c'");
 
         assert_eq!(
             type_after_increment_decrement(&text, IncrementDecrementKind::Increment),
@@ -1244,6 +1281,37 @@ mod tests {
                 IncrementDecrementKind::Increment
             ),
             PhpType::named(atom("Number"))
+        );
+    }
+
+    #[test]
+    fn incrementing_an_alphanumeric_literal_folds() {
+        let step = |value: &str| {
+            type_after_increment_decrement(
+                &PhpType::literal_string_value(value),
+                IncrementDecrementKind::Increment,
+            )
+        };
+        for (before, after) in [
+            ("a", "b"),
+            ("Az", "Ba"),
+            ("zz", "aaa"),
+            ("Zz", "AAa"),
+            ("a9", "b0"),
+            ("", "1"),
+        ] {
+            assert_eq!(
+                step(before),
+                PhpType::literal_string_value(after),
+                "{before}"
+            );
+        }
+        assert_eq!(
+            type_after_increment_decrement(
+                &PhpType::literal_string_value(""),
+                IncrementDecrementKind::Decrement
+            ),
+            PhpType::literal_int("-1")
         );
     }
 }

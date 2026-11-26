@@ -118,7 +118,8 @@ namespace PsalmTest_binary_operation_10 {
     /** @psalm-suppress StringIncrement */
     $a++;
 
-    assertType('string', $a);
+    // Psalm widens the increment to `string`; PHPantom folds it like PHP.
+    assertType("'hellp'", $a);
 }
 
 // Test: numericWithInt

@@ -815,7 +815,7 @@ function test(bool $flag) {
 "#;
 
     assert_eq!(resolve_literal_test_var(content, "$numeric"), "int|float");
-    assert_eq!(resolve_literal_test_var(content, "$alphabetic"), "string");
+    assert_eq!(resolve_literal_test_var(content, "$alphabetic"), "'abd'");
     assert_eq!(resolve_literal_test_var(content, "$unchanged"), "'abc'");
     assert_eq!(resolve_literal_test_var(content, "$integer"), "int");
     assert_eq!(resolve_literal_test_var(content, "$float"), "float");

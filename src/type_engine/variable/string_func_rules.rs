@@ -19,11 +19,12 @@
 //! arguments through the same [`ArrayFuncArgs`] seam, so the AST walker
 //! and the text-driven call resolver both reach them.
 //!
-//! Folding only happens when it is exact.  Every transform here is
+//! Folding only happens when it is exact.  The single-byte transforms are
 //! byte-oriented in PHP, and the case-mapping ones have been
 //! locale-independent ASCII since PHP 8.2, so an argument that is not
 //! pure ASCII declines rather than guessing at a Unicode mapping the
-//! runtime would not perform.
+//! runtime would not perform.  The `mb_*` ones are folded over UTF-8
+//! only, and only for the characters whose mapping PHP and Rust agree on.
 
 use crate::php_type::{PhpType, TypeKind};
 
@@ -100,23 +101,50 @@ fn literal_type(name: &str, args: &dyn ArrayFuncArgs) -> Option<PhpType> {
                 })
                 .collect()
         }
-        // `mb_*` agrees with the ASCII mapping on ASCII input, which is
-        // the only input that gets this far.
-        "strtolower" | "mb_strtolower" => map_subject(args, |s| s.to_ascii_lowercase())?,
-        "strtoupper" | "mb_strtoupper" => map_subject(args, |s| s.to_ascii_uppercase())?,
+        "strtolower" => map_subject(args, |s| s.to_ascii_lowercase())?,
+        "strtoupper" => map_subject(args, |s| s.to_ascii_uppercase())?,
+        "mb_strtolower" => mb_convert_subject(args, 1, &[MB_CASE_LOWER])?,
+        "mb_strtoupper" => mb_convert_subject(args, 1, &[MB_CASE_UPPER])?,
+        "mb_convert_case" => {
+            let modes = mb_case_modes(args)?;
+            mb_convert_subject(args, 2, &modes)?
+        }
+        "mb_substr" => mb_substr(args)?,
         "ucfirst" => map_subject(args, |s| change_first(s, u8::to_ascii_uppercase))?,
         "lcfirst" => map_subject(args, |s| change_first(s, u8::to_ascii_lowercase))?,
-        "ucwords" if !args.has_arg(1) => map_subject(args, ucwords)?,
+        "ucwords" if !args.has_arg(1) => map_subject(args, |s| ucwords(s, UCWORDS_DELIMITERS))?,
+        "ucwords" => {
+            let delimiters = single_literal(args, 1)?;
+            map_subject(args, |s| ucwords(s, delimiters.as_bytes()))?
+        }
         "strrev" => map_subject(args, |s| s.chars().rev().collect())?,
-        // The two-argument spellings take a character list that replaces
-        // the default set, so only the default is folded here.
-        "trim" if !args.has_arg(1) => map_subject(args, |s| trim_default(s, true, true))?,
-        "ltrim" if !args.has_arg(1) => map_subject(args, |s| trim_default(s, true, false))?,
-        "rtrim" | "chop" if !args.has_arg(1) => {
-            map_subject(args, |s| trim_default(s, false, true))?
+        "trim" | "ltrim" | "rtrim" | "chop" => {
+            let (left, right) = match name {
+                "trim" => (true, true),
+                "ltrim" => (true, false),
+                _ => (false, true),
+            };
+            if !args.has_arg(1) {
+                map_subject(args, |s| trim_bytes(s, TRIM_CHARACTERS, left, right))?
+            } else {
+                let subjects = literal_alternatives(args, 0)?;
+                let lists = literal_alternatives(args, 1)?;
+                let mut folded = Vec::with_capacity(subjects.len() * lists.len());
+                for list in &lists {
+                    let characters = trim_character_list(list.as_bytes())?;
+                    for subject in &subjects {
+                        folded.push(trim_bytes(subject, &characters, left, right));
+                    }
+                }
+                folded
+            }
         }
         "str_repeat" => {
             let times = literal_int(args, 1)?;
+            // Zero repetitions of anything is empty, whatever the subject.
+            if times == 0 && args.has_arg(0) && !args.is_spread(0) {
+                return Some(PhpType::literal_string_value(""));
+            }
             // A negative count is a fatal error and a huge one is a
             // memory bomb; neither is worth a literal answer.
             if !(0..=1024).contains(&times) {
@@ -139,6 +167,7 @@ fn literal_type(name: &str, args: &dyn ArrayFuncArgs) -> Option<PhpType> {
                 .map(|s| s.replace(&search, &replace))
                 .collect()
         }
+        "sprintf" => vec![sprintf_fold(args)?],
         _ => return None,
     };
 
@@ -640,7 +669,7 @@ fn literal_int(args: &dyn ArrayFuncArgs, index: usize) -> Option<i64> {
 fn collect_literals(ty: &PhpType, out: &mut Vec<String>, ascii_only: bool) -> Option<()> {
     match ty.kind() {
         TypeKind::Literal(value) => {
-            let content = value.string_content()?;
+            let content = value.exact_string_content()?;
             // PHP's string functions are byte-oriented and the case
             // transforms map ASCII only; a multibyte subject would need
             // the runtime's own answer, not ours.
@@ -690,33 +719,293 @@ fn change_first(s: &str, recase: fn(&u8) -> u8) -> String {
 /// The characters `ucwords` treats as word separators by default.
 const UCWORDS_DELIMITERS: &[u8] = b" \t\r\n\x0c\x0b";
 
-/// `ucwords` with its default delimiter set.
-fn ucwords(s: &str) -> String {
+/// `ucwords`: uppercase the first byte and every byte after one of
+/// `delimiters`.
+fn ucwords(s: &str, delimiters: &[u8]) -> String {
     let mut bytes = s.as_bytes().to_vec();
     let mut at_word_start = true;
     for byte in &mut bytes {
         if at_word_start {
             *byte = byte.to_ascii_uppercase();
         }
-        at_word_start = UCWORDS_DELIMITERS.contains(byte);
+        at_word_start = delimiters.contains(byte);
     }
     String::from_utf8(bytes).unwrap_or_else(|_| s.to_string())
 }
 
 /// The characters the `trim` family strips by default.
-const TRIM_CHARACTERS: &[char] = &[' ', '\t', '\n', '\r', '\0', '\x0b'];
+const TRIM_CHARACTERS: &[u8] = b" \t\n\r\0\x0b";
 
-/// `trim` / `ltrim` / `rtrim` with their default character list.
-fn trim_default(s: &str, left: bool, right: bool) -> String {
+/// `trim` / `ltrim` / `rtrim` stripping the bytes in `characters`.
+fn trim_bytes(s: &str, characters: &[u8], left: bool, right: bool) -> String {
+    let strip = |c: char| c.is_ascii() && characters.contains(&(c as u8));
     let trimmed = match left {
-        true => s.trim_start_matches(TRIM_CHARACTERS),
+        true => s.trim_start_matches(strip),
         false => s,
     };
     match right {
-        true => trimmed.trim_end_matches(TRIM_CHARACTERS),
+        true => trimmed.trim_end_matches(strip),
         false => trimmed,
     }
     .to_string()
+}
+
+/// The bytes a `trim` character list names, expanding `a..z` ranges the
+/// way PHP's `php_charmask()` does. `None` for a malformed range, which
+/// PHP warns about and reads differently.
+fn trim_character_list(list: &[u8]) -> Option<Vec<u8>> {
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < list.len() {
+        let c = list[i];
+        if list.get(i + 1..i + 3) == Some(b"..") {
+            let end = *list.get(i + 3)?;
+            if end < c {
+                return None;
+            }
+            out.extend(c..=end);
+            i += 4;
+        } else {
+            out.push(c);
+            i += 1;
+        }
+    }
+    Some(out)
+}
+
+const MB_CASE_UPPER: i64 = 0;
+const MB_CASE_LOWER: i64 = 1;
+const MB_CASE_TITLE: i64 = 2;
+const MB_CASE_FOLD: i64 = 3;
+const MB_CASE_UPPER_SIMPLE: i64 = 4;
+const MB_CASE_LOWER_SIMPLE: i64 = 5;
+const MB_CASE_TITLE_SIMPLE: i64 = 6;
+const MB_CASE_FOLD_SIMPLE: i64 = 7;
+
+const MB_CASE_CONSTANTS: &[(&str, i64)] = &[
+    ("MB_CASE_UPPER", MB_CASE_UPPER),
+    ("MB_CASE_LOWER", MB_CASE_LOWER),
+    ("MB_CASE_TITLE", MB_CASE_TITLE),
+    ("MB_CASE_FOLD", MB_CASE_FOLD),
+    ("MB_CASE_UPPER_SIMPLE", MB_CASE_UPPER_SIMPLE),
+    ("MB_CASE_LOWER_SIMPLE", MB_CASE_LOWER_SIMPLE),
+    ("MB_CASE_TITLE_SIMPLE", MB_CASE_TITLE_SIMPLE),
+    ("MB_CASE_FOLD_SIMPLE", MB_CASE_FOLD_SIMPLE),
+];
+
+/// The `MB_CASE_*` modes `mb_convert_case()`'s second argument can be.
+fn mb_case_modes(args: &dyn ArrayFuncArgs) -> Option<Vec<i64>> {
+    if args.is_spread(1) || args.is_named(1) {
+        return None;
+    }
+    if let Some(text) = args.arg_atom_text(1) {
+        let bare = text.trim_start_matches('\\');
+        if let Some(&(_, mode)) = MB_CASE_CONSTANTS.iter().find(|(name, _)| *name == bare) {
+            return Some(vec![mode]);
+        }
+    }
+    let ty = args.arg_raw_type(1)?;
+    let mut modes = Vec::new();
+    for member in ty.union_members() {
+        let mode = match member.kind() {
+            TypeKind::Literal(value) => value.parse_i64()?,
+            TypeKind::Named(name) => {
+                MB_CASE_CONSTANTS
+                    .iter()
+                    .find(|(constant, _)| *constant == name.trim_start_matches('\\'))?
+                    .1
+            }
+            _ => return None,
+        };
+        if !modes.contains(&mode) {
+            modes.push(mode);
+        }
+    }
+    (!modes.is_empty()).then_some(modes)
+}
+
+/// Whether the encoding argument at `index` is absent or names UTF-8, the
+/// only encoding the multibyte folds model.
+fn is_utf8_encoding(args: &dyn ArrayFuncArgs, index: usize) -> bool {
+    if !args.has_arg(index) {
+        return true;
+    }
+    if args.is_spread(index) {
+        return false;
+    }
+    if args.arg_raw_type(index).is_some_and(|ty| ty.is_null()) {
+        return true;
+    }
+    single_literal(args, index).is_some_and(|encoding| {
+        encoding.eq_ignore_ascii_case("UTF-8") || encoding.eq_ignore_ascii_case("UTF8")
+    })
+}
+
+/// `mb_strtolower()`, `mb_strtoupper()` and `mb_convert_case()`: every
+/// subject converted in every one of `modes`.
+fn mb_convert_subject(
+    args: &dyn ArrayFuncArgs,
+    encoding_index: usize,
+    modes: &[i64],
+) -> Option<Vec<String>> {
+    if !is_utf8_encoding(args, encoding_index) {
+        return None;
+    }
+    let subjects = literal_alternatives_any(args, 0)?;
+    let mut out = Vec::with_capacity(subjects.len() * modes.len());
+    for subject in &subjects {
+        for &mode in modes {
+            out.push(mb_convert_case(subject, mode)?);
+        }
+    }
+    Some(out)
+}
+
+/// Whether every case mapping mbstring offers (full and simple, upper,
+/// lower, title and fold) agrees with Rust's full mapping for `c`.
+///
+/// That holds for ASCII and the Latin-1 and Latin Extended-A letters
+/// apart from the few whose full mapping is more than one character or
+/// whose fold differs from their lowercase.
+fn has_plain_case_mapping(c: char) -> bool {
+    c.is_ascii() || (('\u{C0}'..='\u{17F}').contains(&c) && !matches!(c, 'ß' | 'İ' | 'ŉ' | 'ſ'))
+}
+
+/// `mb_convert_case($s, $mode)` for UTF-8, or `None` when the string holds
+/// characters this does not map exactly the way mbstring does.
+///
+/// Full upper- and lowercasing use Unicode's mapping for any character but
+/// the Greek sigma, whose final form PHP only picks since 8.3. The other
+/// modes are only folded over characters whose every mapping agrees.
+fn mb_convert_case(s: &str, mode: i64) -> Option<String> {
+    let plain = s.chars().all(has_plain_case_mapping);
+    match mode {
+        MB_CASE_UPPER | MB_CASE_LOWER if !s.contains(['Σ', 'σ', 'ς']) => Some(match mode {
+            MB_CASE_UPPER => s.to_uppercase(),
+            _ => s.to_lowercase(),
+        }),
+        MB_CASE_UPPER_SIMPLE if plain => Some(s.to_uppercase()),
+        MB_CASE_LOWER_SIMPLE | MB_CASE_FOLD | MB_CASE_FOLD_SIMPLE if plain => {
+            Some(s.to_lowercase())
+        }
+        MB_CASE_TITLE | MB_CASE_TITLE_SIMPLE if plain => {
+            // A cased letter after a cased letter is inside a word and is
+            // lowercased; any other is titlecased. A case-ignorable
+            // character (an apostrophe, a period) does not end the word.
+            let mut out = String::with_capacity(s.len());
+            let mut in_word = false;
+            for c in s.chars() {
+                if in_word {
+                    out.extend(c.to_lowercase());
+                } else {
+                    out.extend(c.to_uppercase());
+                }
+                if !matches!(c, '\'' | '.' | ':' | '^' | '`') {
+                    in_word = c.is_lowercase() || c.is_uppercase();
+                }
+            }
+            Some(out)
+        }
+        _ => None,
+    }
+}
+
+/// `mb_substr()` of literal strings with a literal start and length,
+/// counting characters.
+fn mb_substr(args: &dyn ArrayFuncArgs) -> Option<Vec<String>> {
+    if (0..4).any(|index| args.is_spread(index) || args.is_named(index)) {
+        return None;
+    }
+    if !is_utf8_encoding(args, 3) {
+        return None;
+    }
+    let start = literal_int(args, 1)?;
+    let length = match args.arg_raw_type(2) {
+        _ if !args.has_arg(2) => None,
+        Some(ty) if ty.is_null() => None,
+        _ => Some(literal_int(args, 2)?),
+    };
+    let subjects = literal_alternatives_any(args, 0)?;
+    Some(
+        subjects
+            .iter()
+            .map(|subject| {
+                let chars: Vec<char> = subject.chars().collect();
+                let count = chars.len() as i64;
+                let from = if start < 0 {
+                    (count + start).max(0)
+                } else {
+                    start.min(count)
+                };
+                let to = match length {
+                    None => count,
+                    Some(length) if length < 0 => (count + length).max(from),
+                    Some(length) => from.saturating_add(length).min(count),
+                };
+                chars[from as usize..to as usize].iter().collect()
+            })
+            .collect(),
+    )
+}
+
+/// `sprintf()` whose format and values are all single literals and whose
+/// placeholders are plain `%s` and `%d`: the string it prints.
+fn sprintf_fold(args: &dyn ArrayFuncArgs) -> Option<String> {
+    if args.is_spread(0) || args.is_named(0) {
+        return None;
+    }
+    let format = single_literal_any(args, 0)?;
+    let bytes = format.as_bytes();
+    let mut out = String::with_capacity(format.len());
+    let mut next_position = 1usize;
+    let mut text_start = 0;
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] != b'%' {
+            i += 1;
+            continue;
+        }
+        out.push_str(&format[text_start..i]);
+        i += 1;
+        if bytes.get(i) == Some(&b'%') {
+            out.push('%');
+            i += 1;
+            text_start = i;
+            continue;
+        }
+        let digits_start = i;
+        while bytes.get(i).is_some_and(u8::is_ascii_digit) {
+            i += 1;
+        }
+        let position = if i > digits_start {
+            if bytes.get(i) != Some(&b'$') {
+                return None;
+            }
+            let position = format[digits_start..i].parse::<usize>().ok()?;
+            i += 1;
+            (position > 0).then_some(position)?
+        } else {
+            next_position += 1;
+            next_position - 1
+        };
+        let specifier = *bytes.get(i)?;
+        i += 1;
+        text_start = i;
+        let value = sprintf_value_type(args, position)?;
+        let TypeKind::Literal(literal) = value.kind() else {
+            return None;
+        };
+        match specifier {
+            b's' => match literal.exact_string_content() {
+                Some(content) => out.push_str(&content),
+                None => out.push_str(&literal.parse_i64()?.to_string()),
+            },
+            b'd' => out.push_str(&literal.parse_i64()?.to_string()),
+            _ => return None,
+        }
+    }
+    out.push_str(&format[text_start..]);
+    Some(out)
 }
 
 /// A string builtin must resolve to the global declaration, even when a
@@ -753,6 +1042,8 @@ pub(in crate::type_engine) fn has_string_func_rule(func_name: &str) -> bool {
             | "mb_strtolower"
             | "strtoupper"
             | "mb_strtoupper"
+            | "mb_convert_case"
+            | "mb_substr"
             | "ucfirst"
             | "lcfirst"
             | "ucwords"

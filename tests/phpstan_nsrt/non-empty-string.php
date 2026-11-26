@@ -348,9 +348,9 @@ class MoreNonEmptyStringFunctions
 
 		assertType('string', str_pad($s, 0));
 
-		assertType('\'\'', str_repeat($nonEmpty, 0)); // SKIP: a string function or `++` on literals is not folded
+		assertType('\'\'', str_repeat($nonEmpty, 0));
 		assertType('string', str_repeat($nonEmpty, $i));
-		assertType('\'\'', str_repeat($s, 0)); // SKIP: a string function or `++` on literals is not folded
+		assertType('\'\'', str_repeat($s, 0));
 		assertType('string', str_repeat($s, 1));
 		assertType('string', str_repeat($s, $i));
 	}

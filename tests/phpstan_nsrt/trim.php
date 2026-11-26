@@ -19,13 +19,13 @@ class Foo
 		assertType('string', ltrim($string, $foo));
 		assertType('string', rtrim($string, $foo));
 
-		assertType('\'\'|\'foo\'', trim($foo, $fooOrBar)); // SKIP: a string function or `++` on literals is not folded
-		assertType('\'\'|\'foo\'', ltrim($foo, $fooOrBar)); // SKIP: a string function or `++` on literals is not folded
-		assertType('\'\'|\'foo\'', rtrim($foo, $fooOrBar)); // SKIP: a string function or `++` on literals is not folded
+		assertType('\'\'|\'foo\'', trim($foo, $fooOrBar));
+		assertType('\'\'|\'foo\'', ltrim($foo, $fooOrBar));
+		assertType('\'\'|\'foo\'', rtrim($foo, $fooOrBar));
 
-		assertType('\'\'|\'bar\'', trim($fooOrBar, $foo)); // SKIP: a string function or `++` on literals is not folded
-		assertType('\'\'|\'bar\'', ltrim($fooOrBar, $foo)); // SKIP: a string function or `++` on literals is not folded
-		assertType('\'\'|\'bar\'', rtrim($fooOrBar, $foo)); // SKIP: a string function or `++` on literals is not folded
+		assertType('\'\'|\'bar\'', trim($fooOrBar, $foo));
+		assertType('\'\'|\'bar\'', ltrim($fooOrBar, $foo));
+		assertType('\'\'|\'bar\'', rtrim($fooOrBar, $foo));
 
 		assertType('string', trim($constantOrFooClass, '\\'));
 		assertType('string', ltrim($constantOrFooClass, '\\'));

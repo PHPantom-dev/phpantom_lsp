@@ -38,5 +38,5 @@ function doFoo($mixed, int $i, float $f, $numericS) {
 function addingAlphabet() {
 	$a = 'a';
 	$a++;
-	assertType("'b'", $a); // SKIP: a string function or `++` on literals is not folded
+	assertType("'b'", $a);
 }

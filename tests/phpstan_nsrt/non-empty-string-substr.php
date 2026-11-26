@@ -44,8 +44,8 @@ class Foo
 
 		assertType('string', mb_substr($s, 0, $positiveInt));
 
-		assertType("'déjà_vu'", mb_substr("déjà_vu", 0)); // SKIP: a string function or `++` on literals is not folded
-		assertType("'déj'", mb_substr("déjà_vu", 0, 3)); // SKIP: a string function or `++` on literals is not folded
+		assertType("'déjà_vu'", mb_substr("déjà_vu", 0));
+		assertType("'déj'", mb_substr("déjà_vu", 0, 3));
 	}
 
 }

@@ -44,7 +44,7 @@ impl Scalar {
                     .filter(|value| value.is_finite())
                     .map(Scalar::Float),
                 LiteralValue::String(_) => literal
-                    .string_content()
+                    .exact_string_content()
                     .map(|content| Scalar::String(content.into_owned())),
             };
         }
@@ -671,6 +671,17 @@ fn php_float_to_string(value: f64) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_literal_whose_escapes_are_not_utf8_is_not_a_known_scalar() {
+        let bytes = PhpType::literal_string_raw(r#""\xfe""#);
+        assert_eq!(Scalar::from_type(&bytes), None);
+        let text = PhpType::literal_string_raw(r#""\x41""#);
+        assert_eq!(
+            Scalar::from_type(&text),
+            Some(Scalar::String("A".to_string()))
+        );
+    }
 
     #[test]
     fn floats_convert_to_strings_the_way_php_does() {

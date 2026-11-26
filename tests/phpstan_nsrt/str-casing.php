@@ -22,15 +22,15 @@ class Foo {
 		assertType("'ABC'", mb_strtoupper('abc'));
 		assertType("'abc'", mb_strtolower('ABC', 'UTF-8'));
 		assertType("'ABC'", mb_strtoupper('abc', 'UTF-8'));
-		assertType("'ａｂｃ'", mb_strtolower('Ａｂｃ')); // SKIP: a string function or `++` on literals is not folded
-		assertType("'ＡＢＣ'", mb_strtoupper('Ａｂｃ')); // SKIP: a string function or `++` on literals is not folded
+		assertType("'ａｂｃ'", mb_strtolower('Ａｂｃ'));
+		assertType("'ＡＢＣ'", mb_strtoupper('Ａｂｃ'));
 		assertType("'aBC'", lcfirst('ABC'));
 		assertType("'Abc'", ucfirst('abc'));
 		assertType("'Hello World'", ucwords('hello world'));
-		assertType("'Hello|World'", ucwords('hello|world', "|")); // SKIP: a string function or `++` on literals is not folded
-		assertType("'ČESKÁ REPUBLIKA'", mb_convert_case('Česká republika', MB_CASE_UPPER)); // SKIP: a string function or `++` on literals is not folded
-		assertType("'česká republika'", mb_convert_case('Česká republika', MB_CASE_LOWER)); // SKIP: a string function or `++` on literals is not folded
-		assertType("'ČESKÁ REPUBLIKA'|'Česká Republika'|'česká republika'", mb_convert_case('Česká republika', $caseMode)); // SKIP: a string function or `++` on literals is not folded
+		assertType("'Hello|World'", ucwords('hello|world', "|"));
+		assertType("'ČESKÁ REPUBLIKA'", mb_convert_case('Česká republika', MB_CASE_UPPER));
+		assertType("'česká republika'", mb_convert_case('Česká republika', MB_CASE_LOWER));
+		assertType("'ČESKÁ REPUBLIKA'|'Česká Republika'|'česká republika'", mb_convert_case('Česká republika', $caseMode));
 
 		assertType("numeric-string", lcfirst($numericS));
 		assertType("numeric-string", ucfirst($numericS));
@@ -65,7 +65,7 @@ class Foo {
 
 	public function foo() {
 		// invalid char conversions still lead to non-falsy-string
-		assertType("lowercase-string&non-falsy-string", mb_strtolower("\xfe\xff\x65\xe5\x67\x2c\x8a\x9e", 'CP1252')); // SKIP: folding reads a double-quoted literal's escapes as written
+		assertType("lowercase-string&non-falsy-string", mb_strtolower("\xfe\xff\x65\xe5\x67\x2c\x8a\x9e", 'CP1252'));
 		// valid char sequence, but not support non ASCII / UTF-8 encodings
 		// invalid UTF-8 sequence
 	}

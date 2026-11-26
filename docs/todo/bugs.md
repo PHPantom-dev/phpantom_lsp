@@ -48,50 +48,28 @@ compact('foo', 'lorem');   // array{foo: 'bar', lorem: 'ipsum'}, should be array
 The forward walker keeps a variable's type after a branch that assigned it
 but not whether every path did, so `compact()` (and anything else asking)
 treats it as always defined. `// SKIP` line in `tests/phpstan_nsrt/compact.php`.
-### B778. String functions and `++` on literals are not folded
+### B778. Other builtins over literal arguments are not folded
 
 **Impact: Low · Complexity: Low-Medium**
 
 ```php
-str_repeat($anyString, 0);               // string, should be ''
-/** @param 'foo'|'bar' $fooOrBar */
-trim('foo', $fooOrBar);                  // string, should be ''|'foo'
-mb_strtolower('Ａｂｃ');                  // lowercase-string, should be 'ａｂｃ'
-mb_convert_case('Česká', MB_CASE_UPPER); // string, should be 'ČESKÁ'
-ucwords('hello|world', '|');             // string, should be 'Hello|World'
-mb_substr('déjà_vu', 0, 3);              // string, should be 'déj'
-$a = 'a'; $a++;                          // string, should be 'b'
-sprintf('%s%s', 'ba', 'r');              // not folded, should be 'bar'
+strval(1.5);              // string, should be '1.5'
+abs(-5);                  // int, should be 5
+pow(2, 3);                // int|float, should be 8
+str_increment('Az');      // non-empty-string, should be 'Ba'
+mb_strlen('déjà');        // int<0, max>, should be 4
 ```
 
-`strtolower()`, `trim()` with a literal character list, `str_repeat()` with a
-literal count and others already fold a literal argument. The multibyte
-variants, a union of literals in the second argument, a zero count, the
-delimiter form of `ucwords()`, `sprintf()` of literal arguments, and PHP's
-alphanumeric string increment do not.
+The string functions that rewrite a literal (casing, trimming, `str_repeat()`,
+`mb_substr()`, `sprintf()` of plain placeholders) and the `++` operator fold,
+but the numeric builtins, the PHP 8.3 `str_increment()`/`str_decrement()`
+functions, `mb_strlen()` of a multibyte literal and `implode()` of a literal
+array do not.
 
-**Fix:** fold these the way their single-byte, single-literal forms are
-folded, over each member of a literal union. `// SKIP` lines in
-`tests/phpstan_nsrt/str-casing.php`, `trim.php`, `literal-string.php`,
-`non-empty-string.php`, `non-empty-string-substr.php`, `mixed-to-number.php`
-and `enum-from.php`.
+**Fix:** fold each function over its literal arguments, one at a time; each
+upstream fixture is the spec for its function.
 
 **Upstream cases** (PHPStan `nsrt/`, 267 assertions): `strval.php` (39), `abs.php` (35), `pow.php` (27), `str_increment.php` (20), `str_decrement.php` (17), `mb-strlen-php83.php` (15), `implode.php` (13), `date.php` (13), `array-sum.php` (13), `range-function.php` (11), `constantTypes.php` (8), `string-offsets.php` (8), 19 more.
-
-### B779. Folding reads a double-quoted literal's escapes as written
-
-**Impact: Low · Complexity: Low**
-
-```php
-mb_strtolower("\xfe\xff\x65", 'CP1252');   // '\xfe\xff\x65', the source text
-```
-
-A string literal keeps its source spelling, so a function folded over a
-double-quoted literal works on the backslash sequences rather than the bytes
-they stand for, and the result can be a value PHP never produces.
-
-**Fix:** fold over the literal's decoded value and print the result in a
-spelling that round-trips. `// SKIP` line in `tests/phpstan_nsrt/str-casing.php`.
 
 ### B795. `array_column()` does not read object rows
 

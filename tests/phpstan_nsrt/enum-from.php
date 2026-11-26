@@ -60,7 +60,7 @@ class Foo
 		assertType(FooStringEnum::class, FooStringEnum::from('barz'));
 
 		assertType('EnumFrom\FooStringEnum::BAR', FooStringEnum::tryFrom('ba' . 'r'));
-		assertType('EnumFrom\FooStringEnum::BAR', FooStringEnum::from(sprintf('%s%s', 'ba', 'r'))); // SKIP: sprintf() of literal arguments is not folded to a literal
+		assertType('EnumFrom\FooStringEnum::BAR', FooStringEnum::from(sprintf('%s%s', 'ba', 'r')));
 
 		assertType('EnumFrom\FooStringEnum::BAZ', FooStringEnum::tryFrom('baz'));
 		assertType('EnumFrom\FooStringEnum::BAZ', FooStringEnum::tryFrom(FooStringEnum::BAZ->value));
