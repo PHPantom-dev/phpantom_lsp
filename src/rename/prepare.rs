@@ -390,6 +390,29 @@ impl Backend {
         let (resource_locations, mut locations): (Vec<Location>, Vec<Location>) = locations
             .into_iter()
             .partition(|location| self.is_resource_uri(location.uri.as_str()));
+        // A shared binding must keep configuring the other parameter as well.
+        for location in &resource_locations {
+            let uri = location.uri.as_str();
+            if let Some(content) = self.reference_file_content_arc(uri)
+                && let Some(SymbolSpan {
+                    kind:
+                        SymbolKind::ServiceArgument {
+                            name,
+                            targets,
+                            native_type,
+                        },
+                    ..
+                }) = self.lookup_symbol_at_position(uri, &content, location.range.start)
+                && self
+                    .service_argument_declarations(uri, &name, &targets, native_type)
+                    .len()
+                    > 1
+            {
+                return Err(format!(
+                    "The service binding `${name}` configures several parameters. Split the binding before renaming this parameter."
+                ));
+            }
+        }
         if !self.rename_locations_verified(&span.kind, magic_use, &locations) {
             return Ok(None);
         }
@@ -807,6 +830,7 @@ impl Backend {
             | SymbolKind::CommandOwnParam { .. }
             | SymbolKind::Keyword
             | SymbolKind::CastType
+            | SymbolKind::ServiceArgument { .. }
             | SymbolKind::Comment => None,
         }
     }

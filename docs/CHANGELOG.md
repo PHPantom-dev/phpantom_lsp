@@ -13,6 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Flux and Filament components.** Flux's `<flux:button>` tags complete, offer the attributes the component declares, jump to its template in the package, and are reported when no component has the name. Components a package registers by directory, such as Flux's, now work under their `<x-prefix::…>` spelling too.
 
+#### Symfony
+
+- **Service arguments, bindings, listener methods and factories navigate.** In Symfony service configuration, go to definition on a named argument or a `_defaults` binding opens the constructor or factory parameter it fills, and on a listener tag's `method` or a factory's method opens that method. Find references on the PHP side lists them. Contributed by @shuvroroy.
+
 ### Changed
 
 - **Project tools only run in a trusted workspace.** PHPStan, PHP_CodeSniffer, PHPMD, Mago and external formatters execute the project's code, so the language server now runs them only once the workspace is trusted. VS Code and Zed already ask before starting the server, other editors ask once per project, and `phpantom_lsp trust` covers editors that cannot show the question. See [Project tools and workspace trust](configuration.md#project-tools-and-workspace-trust). Reported by @bhavyamalhotra2210.

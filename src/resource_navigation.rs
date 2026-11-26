@@ -18,7 +18,7 @@ use std::sync::Arc;
 use tower_lsp_server::gen_lsp_types::{Location, Position};
 
 use crate::Backend;
-use crate::atom::{AtomMap, atom};
+use crate::atom::atom;
 use crate::symbol_map::{
     ClassRefContext, StringKeyKind, SubjectText, SymbolKind, SymbolMap, SymbolSpan,
 };
@@ -127,6 +127,15 @@ impl Backend {
             return Vec::new();
         };
         match span.kind {
+            SymbolKind::ServiceArgument {
+                name,
+                targets,
+                native_type,
+            } => self
+                .service_argument_declarations(uri, &name, &targets, native_type)
+                .into_iter()
+                .filter_map(|declaration| declaration.location(self))
+                .collect(),
             // A block name means something only where it is written, which
             // the key alone does not say.
             SymbolKind::StringKey {
@@ -153,9 +162,11 @@ impl Backend {
                 subject_text: ref subject @ SubjectText::Owned { .. },
                 member_name,
                 ..
-            } if let Some(service) = subject
-                .synthesised()
-                .and_then(crate::drupal::routing::service_of_subject) =>
+            } if let Some(service) = subject.synthesised().and_then(|subject| {
+                subject
+                    .strip_prefix('@')
+                    .or_else(|| crate::drupal::routing::service_of_subject(subject))
+            }) =>
             {
                 self.symfony_service_classes(service)
                     .iter()
@@ -446,16 +457,6 @@ impl Backend {
         spans.sort_by_key(|span| span.start);
         spans.dedup_by(|b, a| a.start == b.start && a.end == b.end);
 
-        let mut member_access_indices = AtomMap::default();
-        for (index, span) in spans.iter().enumerate() {
-            if let SymbolKind::MemberAccess { member_name, .. } = &span.kind {
-                member_access_indices
-                    .entry(*member_name)
-                    .or_insert_with(Vec::new)
-                    .push(index);
-            }
-        }
-
         // A field storage file declares a configurable field wherever it
         // is; which ones count is decided as the field index takes them.
         let drupal_fields = (self.is_drupal_project()
@@ -469,9 +470,8 @@ impl Backend {
             })
         });
 
-        SymbolMap {
+        let mut map = SymbolMap {
             spans,
-            member_access_indices,
             drupal_fields,
             container_values,
             service_decorations,
@@ -480,7 +480,9 @@ impl Backend {
             declares_twig_loader,
             source_len: u32::try_from(content.len()).unwrap_or(u32::MAX),
             ..SymbolMap::default()
-        }
+        };
+        map.rebuild_span_indices();
+        map
     }
 }
 

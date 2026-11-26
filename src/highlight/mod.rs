@@ -183,6 +183,7 @@ impl Backend {
             | SymbolKind::CommandOwnParam { .. }
             | SymbolKind::Keyword
             | SymbolKind::CastType
+            | SymbolKind::ServiceArgument { .. }
             | SymbolKind::Comment => Vec::new(),
         };
 

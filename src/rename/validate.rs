@@ -172,6 +172,7 @@ fn span_name(kind: &SymbolKind) -> Option<&str> {
         | SymbolKind::CommandOwnParam { .. }
         | SymbolKind::Keyword
         | SymbolKind::CastType
+        | SymbolKind::ServiceArgument { .. }
         | SymbolKind::Comment => None,
     }
 }
