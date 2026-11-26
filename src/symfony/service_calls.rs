@@ -79,7 +79,11 @@ fn sites(uri: &str, content: &str, arguments: &mut Vec<SymbolSpan>) -> Vec<CallS
         {
             yaml_call_sites(content, arguments)
         }
-        Some(super::ConfigFormat::Xml) if content.contains("<call") || content.contains("<tag") => {
+        Some(super::ConfigFormat::Xml)
+            if ["<call", "<tag", "<factory"]
+                .iter()
+                .any(|element| content.contains(element)) =>
+        {
             xml_call_sites(content)
         }
         _ => Vec::new(),
@@ -556,6 +560,31 @@ fn xml_call_sites(content: &str) -> Vec<CallSite> {
                     sites.push(CallSite {
                         class: class.clone(),
                         is_static: false,
+                        start,
+                        end,
+                    });
+                }
+            }
+            // `<factory class="App\Factory" method="create"/>` calls a static
+            // method, `<factory service="id" method="create"/>` one on a service.
+            "factory" if !closing => {
+                let owner = attribute(&["class"])
+                    .and_then(|(value, _, _)| class_name(&value))
+                    .or_else(|| {
+                        attribute(&["service"])
+                            .filter(|(id, _, _)| {
+                                super::resources::is_container_key(id) || class_name(id).is_some()
+                            })
+                            .map(|(id, _, _)| {
+                                format!("@{}", crate::framework::normalize_framework_fqn(&id))
+                            })
+                    });
+                if let Some(class) = owner
+                    && let Some((_, start, end)) = attribute(&["method"])
+                {
+                    sites.push(CallSite {
+                        is_static: !class.starts_with('@'),
+                        class,
                         start,
                         end,
                     });

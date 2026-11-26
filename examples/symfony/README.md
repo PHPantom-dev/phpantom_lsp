@@ -6,8 +6,6 @@ catalogues together, the way a real Symfony project does.
 
 ## What to try
 
-- In `config/services.yaml`, go to definition on `$queryBus`, `$inner`, `onOrderPlaced` or `getConfigTreeBuilder` to open the PHP parameter or method used by the container.
-
 - Open `config/services.yaml`, `config/routes.yaml`,
   `config/doctrine/User.orm.xml`, or `config/validator/User.yaml` and use
   go-to-definition on a PHP class name, or on the `Class::method` in a route's
@@ -17,6 +15,12 @@ catalogues together, the way a real Symfony project does.
 - A method a service's `calls:` names in `config/services.yaml`, such as
   `setSender`, goes to its declaration and completes from the public
   methods of the service's class.
+- The rest of a service definition's PHP names navigate too. In
+  `config/services.yaml`, go to the definition of `$inner` (a named
+  argument), `$queryBus` (a default binding), `onOrderPlaced` (a listener
+  tag's method) or `getConfigTreeBuilder` (a factory) to reach the parameter
+  or method the container uses, or find references on the PHP side to see
+  the configuration that names it.
 - Rename `legacy` in `config/routes.yaml`, or rename `UserRepository` from
   `config/doctrine/User.orm.xml`. The PHP declaration and every configuration
   file that names it are renamed together.

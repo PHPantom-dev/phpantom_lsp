@@ -366,3 +366,37 @@ when@test:
             .is_empty()
     );
 }
+
+#[tokio::test]
+async fn glob_resources_nullable_typed_bindings_and_xml_factories_resolve() {
+    let php = r"<?php namespace App\Feature; class Handler { public function __construct(?\App\Feature\Logger $logger) {} }";
+    let logger = r"<?php namespace App\Feature; class Logger { public static function make(): self { return new self(); } }";
+    let skipped = r"<?php namespace App\Skipped; class Other { public function __construct(?\App\Feature\Logger $logger) {} }";
+    let yaml = r"services:
+  App\:
+    resource: '../src/*'
+    exclude: '../src/{Kernel.php,Skipped}'
+  _defaults:
+    bind:
+      'App\Feature\Logger $logger': typed
+";
+    let xml = r#"<container><services><service id="logger" class="App\Feature\Logger"><factory class="App\Feature\Logger" method="make"/></service></services></container>"#;
+    let (backend, dir) = symfony_workspace(&[
+        ("src/Feature/Handler.php", php),
+        ("src/Feature/Logger.php", logger),
+        ("src/Skipped/Other.php", skipped),
+        ("config/services.yaml", yaml),
+        ("config/services.xml", xml),
+    ])
+    .await;
+    let config = uri_for(&dir, "config/services.yaml");
+    assert_eq!(
+        definitions(&backend, &config, position_in(yaml, "$logger'", 1)).await,
+        vec![(uri_for(&dir, "src/Feature/Handler.php"), 0)]
+    );
+    let mapping = uri_for(&dir, "config/services.xml");
+    assert_eq!(
+        definitions(&backend, &mapping, position_in(xml, "make", 1)).await,
+        vec![(uri_for(&dir, "src/Feature/Logger.php"), 0)]
+    );
+}

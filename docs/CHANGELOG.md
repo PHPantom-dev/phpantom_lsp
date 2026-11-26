@@ -15,7 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### Symfony
 
-- **Navigate PHP callables in Symfony services.** Use Go to Definition or Find References on named service arguments, bindings, listener methods, and factories in your service configuration. Contributed by @shuvroroy.
+- **Service arguments, bindings, listener methods and factories navigate.** In Symfony service configuration, go to definition on a named argument or a `_defaults` binding opens the constructor or factory parameter it fills, and on a listener tag's `method` or a factory's method opens that method. Find references on the PHP side lists them. Contributed by @shuvroroy.
 
 ### Changed
 

@@ -325,7 +325,17 @@ impl Backend {
                 .find(|p| p.bare_name() == name.as_str())?
                 .native_type_hint
                 .as_ref()?;
-            if ty.to_string().trim_start_matches('\\') != expected.as_str() {
+            // Symfony keys a typed binding by the parameter's type without
+            // its leading `?` and without a leading `\` on any class name.
+            let written = ty.to_string();
+            let mut key = String::with_capacity(written.len());
+            for ch in written.trim_start_matches('?').chars() {
+                if ch == '\\' && (key.is_empty() || key.ends_with(['(', '|', '&'])) {
+                    continue;
+                }
+                key.push(ch);
+            }
+            if key != expected.as_str() {
                 return None;
             }
         }

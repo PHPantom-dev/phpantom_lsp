@@ -161,15 +161,29 @@ impl Backend {
             return Vec::new();
         };
         let base = config.parent().unwrap_or(&config);
-        let root = crate::document_links::normalize_path(&base.join(directory));
+        let matcher = |pattern: &str| {
+            let path = crate::document_links::normalize_path(&base.join(pattern));
+            globset::Glob::new(&path.to_string_lossy().replace('\\', "/"))
+                .ok()
+                .map(|glob| glob.compile_matcher())
+        };
+        // A resource is a glob (`../src/*`, `../src/{Controller,Service}/`).
+        // Class names follow the path below the part before the first
+        // wildcard, and only files the glob reaches are loaded.
+        let (root, include) = match directory.find(['*', '?', '{', '[']) {
+            Some(wildcard) => {
+                let prefix = &directory[..directory[..wildcard].rfind('/').map_or(0, |at| at + 1)];
+                let Some(include) = matcher(directory) else {
+                    return Vec::new();
+                };
+                (base.join(prefix), Some(include))
+            }
+            None => (base.join(directory), None),
+        };
+        let root = crate::document_links::normalize_path(&root);
         let exclude: Vec<_> = excludes
             .iter()
-            .filter_map(|pattern| {
-                let path = crate::document_links::normalize_path(&base.join(pattern.as_str()));
-                globset::Glob::new(&path.to_string_lossy().replace('\\', "/"))
-                    .ok()
-                    .map(|glob| glob.compile_matcher())
-            })
+            .filter_map(|pattern| matcher(pattern))
             .collect();
         self.symbols
             .fqn_uri_index
@@ -179,6 +193,9 @@ impl Backend {
                 let suffix = name.strip_prefix(namespace)?.strip_prefix('\\')?;
                 let file = crate::util::uri_to_path(uri)?;
                 if file != root.join(suffix.replace('\\', "/")).with_extension("php")
+                    || include
+                        .as_ref()
+                        .is_some_and(|include| !file.ancestors().any(|path| include.is_match(path)))
                     || file
                         .ancestors()
                         .any(|path| exclude.iter().any(|matcher| matcher.is_match(path)))

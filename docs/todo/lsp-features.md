@@ -836,7 +836,7 @@ side table to mirror), and `references/symfony-language-tools`
 
 ---
 
-## F72. Symfony listener methods chosen by convention
+## F77. Symfony listener methods chosen by convention
 
 **Impact: Low-Medium · Complexity: Low-Medium**
 
@@ -844,6 +844,23 @@ When no listener method is written, Symfony tries `on` followed by the
 camel-cased event name and then `__invoke()`. Track the method Symfony
 chooses so its registration counts as a use. Report a missing listener
 method, including an explicit method on a YAML or XML tag.
+
+---
+
+## F78. Symfony named arguments and bindings in XML service files
+
+**Impact: Low · Complexity: Low-Medium**
+
+In YAML, a named argument (`$inner:` under `arguments:`) and a default
+binding (`$queryBus:` under `_defaults: bind:`) lead to the constructor
+or factory parameter they fill, and Find References on that parameter
+lists them. The XML spellings, `<argument key="$inner">` and
+`<bind key="$queryBus">` under `<defaults>`, do neither. A binding there
+reaches every service the file configures, including the classes a
+`<prototype namespace="…" resource="…">` loads.
+
+**Where to look:** `src/symfony/service_calls.rs` (`xml_call_sites`) and
+`src/symfony/service_arguments.rs` (the targets the YAML scan builds).
 
 ---
 
