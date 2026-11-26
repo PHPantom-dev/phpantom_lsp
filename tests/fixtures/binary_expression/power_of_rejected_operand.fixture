@@ -1,0 +1,22 @@
+// test: `**` is still a number when an operand only may throw
+// feature: hover
+// expect_hover: $leadingNumber => int|float
+// expect_hover: $maybeArray => int|float
+// expect_hover: $stringable => int|float
+// expect_hover: $nullableArray => int|float
+---
+<?php
+
+/**
+ * @param array<int>|int $arrayOrInt
+ */
+function test(int $i, $arrayOrInt, \Stringable $s, ?array $na): void {
+    $leadingNumber = '5 apples' ** $i;
+    $maybeArray = $arrayOrInt ** $i;
+    $stringable = $s ** $i;
+    $nullableArray = $na ** $i;
+    $<>leadingNumber;
+    $maybeArray;
+    $stringable;
+    $nullableArray;
+}

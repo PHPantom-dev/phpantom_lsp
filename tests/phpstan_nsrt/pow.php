@@ -122,8 +122,8 @@ function doFoo(int $intA, int $intB, string $s, bool $bool, $numericS, float $fl
 	assertType('int', pow($intA, true));
 	assertType('int', $intA ** true);
 
-	assertType('*ERROR*', pow($bool, $arr)); // SKIP: an operand `**` rejects is not `*ERROR*`
-	assertType('*ERROR*', pow($bool, [])); // SKIP: an operand `**` rejects is not `*ERROR*`
+	assertType('*ERROR*', pow($bool, $arr));
+	assertType('*ERROR*', pow($bool, []));
 
 	assertType('0|1', pow(null, "123"));
 	assertType('0|1', pow(null, $intA));
@@ -131,16 +131,16 @@ function doFoo(int $intA, int $intB, string $s, bool $bool, $numericS, float $fl
 	assertType('1', $intA ** null);
 	assertType('1.0', $float ** null);
 
-	assertType('*ERROR*', "123" ** $arr); // SKIP: an operand `**` rejects is not `*ERROR*`
-	assertType('*ERROR*', "123" ** []); // SKIP: an operand `**` rejects is not `*ERROR*`
+	assertType('*ERROR*', "123" ** $arr);
+	assertType('*ERROR*', "123" ** []);
 
 	assertType('625', pow('5', '4'));
 	assertType('625', '5' ** '4');
 
 	assertType('(float|int)', pow($intA, $bool)); // could be float
 	assertType('(float|int)', $intA ** $bool); // could be float
-	assertType('*ERROR*', $intA ** $arr); // SKIP: an operand `**` rejects is not `*ERROR*`
-	assertType('*ERROR*', $intA ** []); // SKIP: an operand `**` rejects is not `*ERROR*`
+	assertType('*ERROR*', $intA ** $arr);
+	assertType('*ERROR*', $intA ** []);
 
 	assertType('1', pow($intA, 0));
 	assertType('1', $intA ** '0');
@@ -152,14 +152,14 @@ function doFoo(int $intA, int $intB, string $s, bool $bool, $numericS, float $fl
 	assertType('1.0', $float ** false);
 	assertType('float', pow($float, 1));
 	assertType('float', $float ** '1');
-	assertType('*ERROR*', $float ** $arr); // SKIP: an operand `**` rejects is not `*ERROR*`
-	assertType('*ERROR*', $float ** []); // SKIP: an operand `**` rejects is not `*ERROR*`
+	assertType('*ERROR*', $float ** $arr);
+	assertType('*ERROR*', $float ** []);
 
 	assertType('1.0', pow(1.1, 0));
 	assertType('1.0', 1.1 ** '0');
 	assertType('1.0', 1.1 ** false);
-	assertType('*ERROR*', 1.1 ** $arr); // SKIP: an operand `**` rejects is not `*ERROR*`
-	assertType('*ERROR*', 1.1 ** []); // SKIP: an operand `**` rejects is not `*ERROR*`
+	assertType('*ERROR*', 1.1 ** $arr);
+	assertType('*ERROR*', 1.1 ** []);
 
 	assertType('NAN', pow(-1,5.5)); // SKIP: a NAN result is a plain `float`
 
@@ -168,27 +168,27 @@ function doFoo(int $intA, int $intB, string $s, bool $bool, $numericS, float $fl
 	assertType('1', $s ** false);
 	assertType('(float|int)', pow($s, 1));
 	assertType('(float|int)', $s ** '1');
-	assertType('*ERROR*', $s ** $arr); // SKIP: an operand `**` rejects is not `*ERROR*`
-	assertType('*ERROR*', $s ** []); // SKIP: an operand `**` rejects is not `*ERROR*`
+	assertType('*ERROR*', $s ** $arr);
+	assertType('*ERROR*', $s ** []);
 
 	assertType('1', pow($bool, 0));
 	assertType('1', $bool ** '0');
 	assertType('1', $bool ** false);
 	assertType('(float|int)', pow($bool, 1));
 	assertType('(float|int)', $bool ** '1');
-	assertType('*ERROR*', $bool ** $arr); // SKIP: an operand `**` rejects is not `*ERROR*`
-	assertType('*ERROR*', $bool ** []); // SKIP: an operand `**` rejects is not `*ERROR*`
+	assertType('*ERROR*', $bool ** $arr);
+	assertType('*ERROR*', $bool ** []);
 };
 
 function invalidConstantOperands(): void {
-	assertType('*ERROR*', 'a' ** 1); // SKIP: an operand `**` rejects is not `*ERROR*`
-	assertType('*ERROR*',  1 ** 'a'); // SKIP: an operand `**` rejects is not `*ERROR*`
+	assertType('*ERROR*', 'a' ** 1);
+	assertType('*ERROR*',  1 ** 'a');
 
-	assertType('*ERROR*', [] ** 1); // SKIP: an operand `**` rejects is not `*ERROR*`
-	assertType('*ERROR*',  1 ** []); // SKIP: an operand `**` rejects is not `*ERROR*`
+	assertType('*ERROR*', [] ** 1);
+	assertType('*ERROR*',  1 ** []);
 
-	assertType('*ERROR*', (new \stdClass()) ** 1); // SKIP: an operand `**` rejects is not `*ERROR*`
-	assertType('*ERROR*',  1 ** (new \stdClass())); // SKIP: an operand `**` rejects is not `*ERROR*`
+	assertType('*ERROR*', (new \stdClass()) ** 1);
+	assertType('*ERROR*',  1 ** (new \stdClass()));
 }
 
 function validConstantOperands(): void {

@@ -445,6 +445,14 @@ pub(crate) fn infer_arithmetic_result_type(
     if let Some(result) = overloaded_number_result(lhs_types, rhs_types, false) {
         return result;
     }
+    // `**` throws for an operand it cannot read as a number, so there is no
+    // result to type (PHPStan's `*ERROR*`).
+    if op_kind == ArithmeticOpKind::Exponentiation
+        && (super::exponentiation::is_rejected_operand(lhs_types)
+            || super::exponentiation::is_rejected_operand(rhs_types))
+    {
+        return PhpType::mixed();
+    }
 
     // Two operands that are each pinned to one literal value fold to the
     // exact value PHP would compute, the same way a mask built from two

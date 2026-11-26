@@ -6,9 +6,9 @@
 //! was, a `null` base is `0` or `1`, and integer ranges raise to the range
 //! of every power they can make.
 
-use crate::php_type::PhpType;
+use crate::php_type::{PhpType, TypeKind};
 use crate::type_engine::type_ops::int_interval::IntInterval;
-use crate::types::ResolvedType;
+use crate::types::{ClassLikeKind, ResolvedType};
 
 use super::scalar_fold::Scalar;
 
@@ -48,6 +48,48 @@ pub(super) fn exponentiation_result(
         .collect();
     results.extend(others);
     Some(PhpType::union(results))
+}
+
+/// Whether every alternative of an operand is a value `**` throws a
+/// `TypeError` for: an array, a string with no leading number, or an
+/// instance of a class that does not overload the operator. The operation
+/// then never produces a value. An operand nothing typed is not one.
+///
+/// Only a concrete class rules out the overloading ones: an interface such
+/// as `Stringable` may still hold a `BcMath\Number`.
+pub(super) fn is_rejected_operand(types: &[ResolvedType]) -> bool {
+    !types.is_empty()
+        && types.iter().all(|rt| {
+            if let Some(class) = &rt.class_info {
+                return matches!(
+                    rt.type_string.kind(),
+                    TypeKind::Named(_) | TypeKind::Generic(_)
+                ) && class.kind == ClassLikeKind::Class
+                    && !["GMP", "BcMath\\Number", "FFI\\CData"]
+                        .iter()
+                        .any(|name| class.fqn().eq_ignore_ascii_case(name));
+            }
+            let members = rt.type_string.union_members();
+            !members.is_empty()
+                && members.iter().all(|member| {
+                    !matches!(member.kind(), TypeKind::Nullable(_))
+                        && member.is_array_like()
+                        && !member.is_named("iterable")
+                        || member
+                            .as_literal()
+                            .and_then(|lit| lit.string_content())
+                            .is_some_and(|s| !has_leading_number(&s))
+                })
+        })
+}
+
+/// Whether PHP reads a number from the start of `s` in arithmetic, which
+/// makes a string like `'5 apples'` a warning rather than a `TypeError`.
+fn has_leading_number(s: &str) -> bool {
+    let s = s.trim_start_matches([' ', '\t', '\n', '\r', '\x0b', '\x0c']);
+    let s = s.strip_prefix(['+', '-']).unwrap_or(s);
+    let s = s.strip_prefix('.').unwrap_or(s);
+    s.starts_with(|c: char| c.is_ascii_digit())
 }
 
 /// Every alternative of an operand, or `None` for an operand nothing typed.

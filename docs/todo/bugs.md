@@ -54,20 +54,16 @@ upstream fixture is the spec for its function.
 
 **Upstream cases** (PHPStan `nsrt/`): `constantTypes.php` (8), 19 more.
 
-### B910. `**` with an operand PHP rejects is not an error type
+### B910. `pow()` and `**` with no real-number result are a plain `float`
 
-**Impact: Low · Complexity: Low-Medium**
+**Impact: Low · Complexity: Low**
 
 ```php
-$int ** [];         // int|float, should be *ERROR*
-'a' ** 1;           // int|float, should be *ERROR*
 pow(-1, 5.5);       // float, should be NAN
 ```
 
-`**` and `pow()` throw a `TypeError` for an array or plain object operand,
-and for a non-numeric string, but the result is still typed as a number.
-A result that is not a number (`NAN`) is a plain `float`. `// SKIP` lines in
-`tests/phpstan_nsrt/pow.php`.
+A result that is not a number (`NAN`) is a plain `float`, since there is no
+`NAN` literal type. `// SKIP` line in `tests/phpstan_nsrt/pow.php`.
 
 ### B819. Built-ins whose result their arguments decide return the declared type
 
