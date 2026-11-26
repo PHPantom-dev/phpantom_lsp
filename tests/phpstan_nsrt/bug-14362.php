@@ -80,5 +80,5 @@ function doFoo(string $c):void {
 	} else {
 		$a = C::u()(...);
 	}
-	assertType('callable-string|(Closure(Bug14362\B): int)', $a); // SKIP: `is_callable()` narrows a string to `callable` and widens it after the branch
+	assertType('callable-string|(Closure(Bug14362\B): int)', $a);
 }

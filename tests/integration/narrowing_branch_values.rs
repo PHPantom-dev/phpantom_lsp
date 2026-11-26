@@ -251,7 +251,45 @@ function f($h): void {
     }
 }
 "#;
-    assert_eq!(type_at_marker(php), "Handler");
+    assert_eq!(type_at_marker(php), "Handler|callable-string");
+}
+
+#[test]
+fn is_callable_narrows_a_string_to_callable_string() {
+    let php = r#"<?php
+function f(string $c): void {
+    if (is_callable($c)) {
+        $c; // here
+    }
+}
+"#;
+    assert_eq!(type_at_marker(php), "callable-string");
+}
+
+#[test]
+fn is_callable_leaves_a_string_after_the_branch() {
+    let php = r#"<?php
+function f(string $c): void {
+    if (is_callable($c)) {
+        $c;
+    }
+    $c; // here
+}
+"#;
+    assert_eq!(type_at_marker(php), "string");
+}
+
+#[test]
+fn a_failed_is_callable_drops_a_callable_string() {
+    let php = r#"<?php
+/** @param callable-string|int $c */
+function f($c): void {
+    if (!is_callable($c)) {
+        $c; // here
+    }
+}
+"#;
+    assert_eq!(type_at_marker(php), "int");
 }
 
 #[test]

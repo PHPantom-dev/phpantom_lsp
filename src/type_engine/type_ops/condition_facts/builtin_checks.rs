@@ -741,7 +741,7 @@ fn type_matches_guard(
         TypeGuardKind::Float => ty.is_float_subtype(),
         TypeGuardKind::Bool => ty.is_subtype_of(&PhpType::bool()),
         TypeGuardKind::Numeric => ty.is_subtype_of(&PhpType::numeric()),
-        TypeGuardKind::Callable => ty.is_callable(),
+        TypeGuardKind::Callable => ty.is_callable() || ty.is_subtype_of(&PhpType::callable()),
         TypeGuardKind::Object => ty.is_object_like(),
         TypeGuardKind::Null => ty.is_null(),
         TypeGuardKind::Scalar => {
@@ -935,8 +935,7 @@ fn filter_type_by_guard(
 
     if kind == TypeGuardKind::Callable
         && keep_matching
-        && let Some(loader) = class_loader
-        && let Some(narrowed) = narrow_classes_to_callable(ty, loader)
+        && let Some(narrowed) = narrow_to_callable(ty, class_loader)
     {
         return Some(narrowed);
     }
@@ -998,48 +997,67 @@ fn filter_type_by_guard(
 }
 
 /// What `is_callable()` passing leaves of `ty` when some alternative names
-/// a class, or `None` when none does and the type alone decides.
+/// a class or is a string, or `None` when none does and the type alone
+/// decides.
+///
+/// A string passes only when it names a function or static method, so it
+/// narrows to `callable-string`. An exact literal keeps its own spelling,
+/// since it already says more than `callable-string` would.
 ///
 /// An instance is callable when its class declares `__invoke`, so such a
 /// class stays as it is.  A class that cannot be extended (final, or an
 /// enum) and declares none drops out.  Any other class or interface may
 /// have a callable subclass, so it survives as that subclass would:
-/// `Route&callable`.
-fn narrow_classes_to_callable(ty: &PhpType, loader: &ResolvedClassLoader<'_>) -> Option<PhpType> {
+/// `Route&callable`.  Without a loader, class alternatives are left to the
+/// type-only filter.
+fn narrow_to_callable(ty: &PhpType, class_loader: GuardClassLoader<'_>) -> Option<PhpType> {
     let members: Vec<PhpType> = match ty.kind() {
         TypeKind::Nullable(inner) => inner.union_members().into_iter().cloned().collect(),
         _ => ty.union_members().into_iter().cloned().collect(),
     };
-    let mut names_class = false;
+    let mut refined = false;
     let mut kept: Vec<PhpType> = Vec::with_capacity(members.len());
     for member in members {
-        let class = match member.kind() {
-            TypeKind::Named(name) if !crate::php_type::is_keyword_type(name) => {
-                loader(Fqn::new(name))
-            }
-            TypeKind::Generic(g) if !crate::php_type::is_keyword_type(&g.name) => {
-                loader(Fqn::new(&g.name))
-            }
-            _ => None,
-        };
-        let Some(class) = class else {
-            if member.is_callable() || member.is_mixed() {
-                kept.push(if member.is_mixed() {
-                    PhpType::callable()
-                } else {
-                    member
-                });
+        if member.is_callable() || member.is_subtype_of(&PhpType::callable()) {
+            kept.push(member);
+            continue;
+        }
+        if member.is_mixed() {
+            kept.push(PhpType::callable());
+            continue;
+        }
+        if member.is_subtype_of(&PhpType::string()) {
+            if matches!(member.kind(), TypeKind::Literal(_)) {
+                kept.push(member);
+            } else {
+                refined = true;
+                kept.push(PhpType::callable_string());
             }
             continue;
+        }
+        let class = class_loader.and_then(|loader| {
+            let class = match member.kind() {
+                TypeKind::Named(name) if !crate::php_type::is_keyword_type(name) => {
+                    loader(Fqn::new(name))
+                }
+                TypeKind::Generic(g) if !crate::php_type::is_keyword_type(&g.name) => {
+                    loader(Fqn::new(&g.name))
+                }
+                _ => None,
+            }?;
+            Some((class, loader))
+        });
+        let Some((class, loader)) = class else {
+            continue;
         };
-        names_class = true;
+        refined = true;
         if declares_invoke(&class, loader) {
             kept.push(member);
         } else if !class.is_final && class.kind != ClassLikeKind::Enum {
             kept.push(PhpType::intersection(vec![member, PhpType::callable()]));
         }
     }
-    if !names_class {
+    if !refined {
         return None;
     }
     Some(match kept.len() {

@@ -2285,20 +2285,3 @@ It also shows as:
 - Variable variables and dynamic property names held in a literal-string variable are not resolved
 
 **Cases** (PHPStan `nsrt/`, 7 assertions): `bug-12875.php` (5), `bug-12398.php` (2).
-
-### B910. `is_callable()` on a string narrows to `callable` and widens it after the branch
-
-**Impact: Low · Complexity: Low-Medium**
-
-```php
-function f(string $c): void {
-    if (is_callable($c)) {
-        $c;   // callable, should be callable-string
-    }
-    $c;       // callable|string, should be string
-}
-```
-
-The true branch drops the string half of the type, and merging the branches back keeps the narrowed `callable` beside the original `string`. Once fixed, a union holding a `Closure(B): int` member also hovers with `B` unqualified, since each union member is shortened on its own line with no namespace for the closure's parameter types.
-
-**Cases** (PHPStan `nsrt/`, 1 assertion): `bug-14362.php` (1).

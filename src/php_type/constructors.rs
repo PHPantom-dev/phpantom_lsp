@@ -80,6 +80,8 @@ keyword_types! {
     lowercase_string => "lowercase-string",
     /// `uppercase-string` type.
     uppercase_string => "uppercase-string",
+    /// `callable-string` type.
+    callable_string => "callable-string",
     /// Internal `__empty` sentinel used during type narrowing to represent
     /// a fully-filtered-out union member.
     empty_sentinel => "__empty",
