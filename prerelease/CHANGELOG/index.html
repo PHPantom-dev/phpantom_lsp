@@ -6414,6 +6414,8 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 <li><strong><code>base64_decode()</code> returns <code>false</code> only in strict mode.</strong> Without <code>$strict</code> it is typed <code>string</code>.</li>
 <li><strong><code>pathinfo()</code> may leave out <code>dirname</code>.</strong> The empty path has no directory part, so the array's <code>dirname</code> key is optional.</li>
 <li><strong>A corrupt <code>.phar</code> no longer crashes the server.</strong> An archive whose header claims more files than it holds is skipped during indexing instead of aborting the process. Reported by @bhavyamalhotra2210.</li>
+<li><strong>A project file that leads to a device no longer hangs or crashes the server.</strong> A symlink, or an entry in Composer's generated autoload files, that points at something like <code>/dev/zero</code> or a pipe is skipped instead of read.</li>
+<li><strong>Created views and moved classes stay inside the project.</strong> On Windows, a view name with a drive letter no longer offers to create a file outside the view directory, and <code>phpantom_lsp move</code> refuses a destination that a <code>..</code> in the autoload paths would take outside the project.</li>
 </ul>
 <h2 id="110-2026-11-24"><a href="https://github.com/PHPantom-dev/phpantom_lsp/compare/1.0.0...1.1.0">1.1.0</a> - 2026-11-24<a class="headerlink" href="#110-2026-11-24" title="Permanent link">&para;</a></h2>
 <h3 id="added_1">Added<a class="headerlink" href="#added_1" title="Permanent link">&para;</a></h3>
