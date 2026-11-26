@@ -1341,6 +1341,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#doctrine" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Doctrine
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1575,7 +1586,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#doctrine" class="md-nav__link">
+  <a href="#doctrine_1" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
         Doctrine
@@ -3905,6 +3916,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#doctrine" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Doctrine
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -4139,7 +4161,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#doctrine" class="md-nav__link">
+  <a href="#doctrine_1" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
         Doctrine
@@ -6400,6 +6422,10 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 <ul>
 <li><strong>Service arguments, bindings, listener methods and factories navigate.</strong> In Symfony service configuration, go to definition on a named argument or a <code>_defaults</code> binding opens the constructor or factory parameter it fills, and on a listener tag's <code>method</code> or a factory's method opens that method. Find references on the PHP side lists them. Contributed by @shuvroroy.</li>
 </ul>
+<h4 id="doctrine">Doctrine<a class="headerlink" href="#doctrine" title="Permanent link">&para;</a></h4>
+<ul>
+<li><strong>Navigate Doctrine XML fields.</strong> A field or association name in an XML mapping goes to the property it maps and shows its hover, and find references and rename on the property include the mapping. Contributed by @shuvroroy.</li>
+</ul>
 <h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
 <ul>
 <li><strong>Project tools only run in a trusted workspace.</strong> PHPStan, PHP_CodeSniffer, PHPMD, Mago and external formatters execute the project's code, so the language server now runs them only once the workspace is trusted. VS Code and Zed already ask before starting the server, other editors ask once per project, and <code>phpantom_lsp trust</code> covers editors that cannot show the question. See <a href="../configuration/#project-tools-and-workspace-trust">Project tools and workspace trust</a>. Reported by @bhavyamalhotra2210.</li>
@@ -6641,7 +6667,7 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 <li><strong>Methods a service definition calls.</strong> A method named under a service's <code>calls:</code> in a Symfony services file or a Drupal <code>*.services.yml</code>, or in XML's <code>&lt;call method="…"&gt;</code>, jumps to its declaration, completes from the public methods of the service's class, and counts among the method's references.</li>
 <li><strong>Event subscriber maps built in code or keyed by constants.</strong> A subscriber's <code>getSubscribedEvents()</code> is read when it builds its map by assignment (<code>$events[KernelEvents::REQUEST][] = ['onRequest', 10];</code>) as well as when it returns one, and a key written as a class constant declares the event name the constant holds, which makes the constant that event's definition for navigation and Find References. Contributed by @giuseppe-esposito-87.</li>
 </ul>
-<h4 id="doctrine">Doctrine<a class="headerlink" href="#doctrine" title="Permanent link">&para;</a></h4>
+<h4 id="doctrine_1">Doctrine<a class="headerlink" href="#doctrine_1" title="Permanent link">&para;</a></h4>
 <ul>
 <li><strong>DQL variables.</strong> A variable a DQL join declares through an association, like <code>t</code> in <code>JOIN u.team t</code> or <code>-&gt;join('u.team', 't')</code>, stands for the entity the association targets, so its fields complete, jump to their property, and are reported when the entity does not map them. A variable the query uses but nothing declares is reported, following the query builder through the methods that create, return, or receive it, and through branches that declare the variable on only some paths.</li>
 <li><strong>DQL in expression objects and builders from other methods.</strong> The DQL an expression object is built from, like <code>new Expr\OrderBy('u.name')</code> or <code>new Expr\Andx([...])</code>, is read like any other query builder fragment: its fields complete, jump to their property, and are reported when unmapped, and text Doctrine cannot parse is reported. A fragment added to a query builder that another method returns knows the variables that method declared on it.</li>
