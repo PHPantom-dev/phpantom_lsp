@@ -241,7 +241,7 @@ impl Backend {
                     let open = self.open_files.read().get(uri).cloned();
                     let content = match open {
                         Some(content) => content,
-                        None => Arc::new(std::fs::read_to_string(path).ok()?),
+                        None => Arc::new(crate::util::read_file_to_string(path).ok()?),
                     };
                     Some((uri, content))
                 })
@@ -266,7 +266,7 @@ impl Backend {
                 )
             });
         let other_maps = others.into_iter().filter_map(|(uri, path)| {
-            let content = std::fs::read_to_string(path).ok()?;
+            let content = crate::util::read_file_to_string(path).ok()?;
             self.index_framework_uri_content(uri, &content);
             Some((
                 uri.clone(),

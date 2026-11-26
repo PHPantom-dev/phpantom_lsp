@@ -254,7 +254,7 @@ fn analyzer_understands_laravel(probe: &MagoTomlProbe) -> bool {
 ///
 /// A missing file means no services: Mago will not run without one.
 fn probe_mago_toml(workspace_root: &Path) -> MagoTomlProbe {
-    match std::fs::read_to_string(workspace_root.join("mago.toml")) {
+    match crate::util::read_file_to_string(workspace_root.join("mago.toml")) {
         Ok(source) => parse_mago_toml(&source),
         Err(_) => MagoTomlProbe::default(),
     }
@@ -541,7 +541,7 @@ fn parse_mago_json_workspace(
 
             let content = content_cache
                 .entry(file_path.clone())
-                .or_insert_with(|| std::fs::read_to_string(&file_path).ok());
+                .or_insert_with(|| crate::util::read_file_to_string(&file_path).ok());
             let Some(content) = content else {
                 continue;
             };

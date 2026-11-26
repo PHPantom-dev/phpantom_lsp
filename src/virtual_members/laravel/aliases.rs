@@ -420,7 +420,7 @@ fn read_source_by_fqn(backend: &Backend, fqn: &str) -> Option<String> {
         return Some(content);
     }
     let path = crate::util::uri_to_path(&uri)?;
-    std::fs::read_to_string(&path).ok()
+    crate::util::read_file_to_string(&path).ok()
 }
 
 /// Read a `config/*.php` file, preferring an open editor buffer over disk.
@@ -436,7 +436,7 @@ fn read_project_config(backend: &Backend, file_name: &str) -> Option<String> {
     {
         return Some(content);
     }
-    std::fs::read_to_string(&path).ok()
+    crate::util::read_file_to_string(&path).ok()
 }
 
 // ─── Parsers ──────────────────────────────────────────────────────────────

@@ -279,7 +279,7 @@ fn translator_dirs(root: &Path, config_dir: Option<PathBuf>) -> Option<Vec<PathB
                 pending.push(path);
                 continue;
             }
-            let Ok(content) = std::fs::read_to_string(&path) else {
+            let Ok(content) = crate::util::read_file_to_string(&path) else {
                 continue;
             };
             let uri = path.to_string_lossy();

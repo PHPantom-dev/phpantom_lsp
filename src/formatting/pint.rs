@@ -18,7 +18,7 @@ struct PintJson {
 /// workspace root when PHPantom runs it, so that is the only file that
 /// counts.
 pub(super) fn blade_rule_enabled(workspace_root: &Path) -> bool {
-    let Ok(source) = std::fs::read_to_string(workspace_root.join("pint.json")) else {
+    let Ok(source) = crate::util::read_file_to_string(workspace_root.join("pint.json")) else {
         return false;
     };
     let Ok(config) = serde_json::from_str::<PintJson>(&source) else {

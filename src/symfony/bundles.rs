@@ -224,7 +224,7 @@ fn read_php_file(uri: &str, content: &str) -> SymbolMap {
 /// What the configuration file at `path` declares, or `None` when it
 /// declares no service or parameter.
 fn read_bundle_file(path: &Path) -> Option<(String, SymbolMap)> {
-    let content = std::fs::read_to_string(path).ok()?;
+    let content = crate::util::read_file_to_string(path).ok()?;
     let uri = crate::util::path_to_uri(path);
     let mut map = if has_extension(path, &["php"]) {
         let finder = |needle: &[u8]| memchr::memmem::find(content.as_bytes(), needle).is_some();

@@ -322,7 +322,7 @@ fn load_toml_table(
         return Ok(None);
     }
 
-    let content = std::fs::read_to_string(path).map_err(|e| ConfigError::Io {
+    let content = crate::util::read_file_to_string(path).map_err(|e| ConfigError::Io {
         path: path.display().to_string(),
         source: e,
     })?;

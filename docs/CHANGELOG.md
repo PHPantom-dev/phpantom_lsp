@@ -102,6 +102,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`base64_decode()` returns `false` only in strict mode.** Without `$strict` it is typed `string`.
 - **`pathinfo()` may leave out `dirname`.** The empty path has no directory part, so the array's `dirname` key is optional.
 - **A corrupt `.phar` no longer crashes the server.** An archive whose header claims more files than it holds is skipped during indexing instead of aborting the process. Reported by @bhavyamalhotra2210.
+- **A project file that leads to a device no longer hangs or crashes the server.** A symlink, or an entry in Composer's generated autoload files, that points at something like `/dev/zero` or a pipe is skipped instead of read.
+- **Created views and moved classes stay inside the project.** On Windows, a view name with a drive letter no longer offers to create a file outside the view directory, and `phpantom_lsp move` refuses a destination that a `..` in the autoload paths would take outside the project.
 
 ## [1.1.0] - 2026-11-24
 

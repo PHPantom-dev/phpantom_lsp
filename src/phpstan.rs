@@ -202,7 +202,7 @@ pub(crate) fn run_phpstan(
     // temp file outside the real file's directory makes such rules
     // misfire. Keeping the temp file alive (its destructor removes it on
     // drop) until after PHPStan finishes; `None` in the direct path.
-    let on_disk = std::fs::read(file_path).ok();
+    let on_disk = crate::util::read_file(file_path).ok();
     let buffer_matches_disk = on_disk
         .as_deref()
         .map(|bytes| bytes == content.as_bytes())

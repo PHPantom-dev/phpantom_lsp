@@ -310,7 +310,7 @@ fn build_plan(root: &Path, edit: WorkspaceEdit) -> Result<MovePlan, String> {
     let mut writes = Vec::with_capacity(edits.len());
     for (path, file_edits) in edits {
         let source = source_path_for_target(&path, &moves);
-        let content = std::fs::read_to_string(&source)
+        let content = crate::util::read_file_to_string(&source)
             .map_err(|e| format!("failed to read {}: {e}", source.display()))?;
         writes.push((path, apply_planned_edits(&content, &file_edits)?));
     }
@@ -321,7 +321,7 @@ fn build_plan(root: &Path, edit: WorkspaceEdit) -> Result<MovePlan, String> {
 fn uri_path(uri: &Uri, root: &Path) -> Result<PathBuf, String> {
     let path =
         crate::util::url_to_path(uri).ok_or_else(|| format!("unsupported non-file URI: {uri}"))?;
-    if !path.starts_with(root) {
+    if !crate::util::is_path_inside(&path, root) {
         return Err(format!(
             "move would modify a path outside the project: {}",
             path.display()
@@ -361,7 +361,7 @@ fn validate_moves(root: &Path, moves: &[(PathBuf, PathBuf)]) -> Result<(), Strin
     let sources: HashSet<&Path> = moves.iter().map(|(from, _)| from.as_path()).collect();
     let mut destinations = HashSet::new();
     for (from, to) in moves {
-        if !from.starts_with(root) || !to.starts_with(root) {
+        if !crate::util::is_path_inside(from, root) || !crate::util::is_path_inside(to, root) {
             return Err("move would leave the project root".into());
         }
         if !from.exists() {

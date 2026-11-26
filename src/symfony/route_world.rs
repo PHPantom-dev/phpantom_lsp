@@ -251,7 +251,7 @@ fn read_routing_file(path: &Path, content: &str) -> Option<SymbolMap> {
 /// Symfony's own spelling of the name.
 fn bundle_class(config_dir: Option<&Path>, name: &str) -> String {
     let registered = config_dir
-        .and_then(|dir| std::fs::read_to_string(dir.join("bundles.php")).ok())
+        .and_then(|dir| crate::util::read_file_to_string(dir.join("bundles.php")).ok())
         .and_then(|bundles| {
             let suffix = format!("\\{name}::class");
             let end = bundles.find(&suffix)? + suffix.len() - "::class".len();
@@ -275,7 +275,7 @@ impl Backend {
         {
             return cached.map.clone();
         }
-        let map = std::fs::read_to_string(path)
+        let map = crate::util::read_file_to_string(path)
             .ok()
             .and_then(|content| read_routing_file(path, &content))
             .map(Arc::new);

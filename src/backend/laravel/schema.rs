@@ -59,7 +59,7 @@ impl Backend {
             let content = if *change_type == FileChangeType::Deleted {
                 None
             } else {
-                match std::fs::read_to_string(path) {
+                match crate::util::read_file_to_string(path) {
                     Ok(content) => Some(content),
                     Err(err) => {
                         self.log_detached(

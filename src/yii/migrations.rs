@@ -228,7 +228,7 @@ impl Schema {
             ..Self::default()
         };
         for file in files {
-            if let Ok(content) = std::fs::read_to_string(&file) {
+            if let Ok(content) = crate::util::read_file_to_string(&file) {
                 schema.apply_file(Arc::from(file.as_path()), &content, constants);
             }
         }
