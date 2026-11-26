@@ -482,7 +482,8 @@ fn descend_unhandled<'a>(node: Node<'a, 'a>, ctx: &mut ExtractionCtx<'a>, scope_
 /// uses.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Frameworks {
-    /// The project recognizes Laravel environment helpers.
+    /// The project is a Laravel application, which gates recording the
+    /// variables `env()` and `Env::get()` read.
     pub laravel: bool,
     /// The project is a Symfony application.
     pub symfony: bool,

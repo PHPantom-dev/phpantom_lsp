@@ -928,3 +928,29 @@ async fn symfony_env_reads_navigate_across_config_formats() {
         vec!["UPLOAD_DIR"]
     );
 }
+
+/// Hover shows the value Symfony loads: `.env.local` overrides the
+/// committed `.env`, and a name only `.env.example` documents still shows
+/// where it is declared.
+#[tokio::test]
+async fn symfony_env_hover_follows_dotenv_precedence() {
+    let yaml =
+        "parameters:\n    app.directory: '%env(UPLOAD_DIR)%'\n    app.region: '%env(REGION)%'\n";
+    let (backend, dir) = workspace(&[
+        (".env", "UPLOAD_DIR=committed\n"),
+        (".env.local", "UPLOAD_DIR=overridden\n"),
+        (".env.example", "UPLOAD_DIR=documented\nREGION=eu\n"),
+        ("config/services.yaml", yaml),
+    ])
+    .await;
+    // Reads `composer.json`, which settles that this is no Laravel project.
+    backend.initialized(InitializedParams {}).await;
+    let uri = uri_for(&dir, "config/services.yaml");
+    let pos = position_in(yaml, "UPLOAD_DIR", 3);
+    let hover = crate::common::markup_hover_at(&backend, &uri, pos.line, pos.character).await;
+    assert!(hover.contains("overridden"), "{hover}");
+    assert!(hover.contains("Declared in `.env.local`"), "{hover}");
+    let pos = position_in(yaml, "REGION", 3);
+    let hover = crate::common::markup_hover_at(&backend, &uri, pos.line, pos.character).await;
+    assert!(hover.contains("Declared in `.env.example`"), "{hover}");
+}

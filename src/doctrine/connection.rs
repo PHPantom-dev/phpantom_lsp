@@ -588,11 +588,17 @@ fn resolve_parameters(value: &str, env: &dyn Fn(&str) -> Option<String>) -> Stri
 /// in its default environment: `.env`, overridden by `.env.local`, then
 /// `.env.dev` and `.env.dev.local`.
 pub(crate) fn symfony_env(root: &Path, name: &str) -> Option<String> {
+    symfony_env_declaration(root, name).map(|(_, value)| value)
+}
+
+/// [`symfony_env`], with the dotenv file whose value wins.
+pub(crate) fn symfony_env_declaration(root: &Path, name: &str) -> Option<(&'static str, String)> {
     [".env.dev.local", ".env.dev", ".env.local", ".env"]
-        .iter()
+        .into_iter()
         .find_map(|file| {
             let content = std::fs::read_to_string(root.join(file)).ok()?;
             crate::virtual_members::laravel::declared_env_value(&content, name)
+                .map(|value| (file, value))
         })
 }
 

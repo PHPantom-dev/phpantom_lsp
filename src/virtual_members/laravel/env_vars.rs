@@ -90,8 +90,23 @@ pub(crate) struct EnvDeclaration {
 ///
 /// Separate from [`resolve_env_definitions`], which points at a file even
 /// when nothing in it declares the name: hover has to tell the two apart.
+///
+/// A Symfony project's value is the one Symfony loads, with `.env.local`
+/// and the environment's own files overriding `.env`.  Only a name none of
+/// those declares falls back to the other dotenv files, such as an
+/// `.env.example` that documents it.
 pub(crate) fn env_declaration(backend: &Backend, key: &str) -> Option<EnvDeclaration> {
     let root = backend.laravel_root()?;
+    if backend.is_symfony_project()
+        && !backend.resolved_class_cache.read().laravel().is_enabled()
+        && let Some((file, value)) =
+            crate::doctrine::connection::symfony_env_declaration(&root, key)
+    {
+        return Some(EnvDeclaration {
+            file: file.to_string(),
+            value,
+        });
+    }
     dotenv_file_names(&root).into_iter().find_map(|file| {
         let content = std::fs::read_to_string(root.join(&file)).ok()?;
         let value = declared_env_value(&content, key)?;

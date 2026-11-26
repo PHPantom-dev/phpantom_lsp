@@ -15,7 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### Symfony
 
-- **Environment variables in Symfony configuration.** Jump from a variable in a container placeholder or an `#[Autowire]` attribute to its dotenv declaration, hover for details, or find its uses across configuration files. Contributed by @shuvroroy.
+- **Environment variables.** The variable a `%env(…)%` placeholder or `#[Autowire(env: …)]` reads completes, jumps to the line of the dotenv file that declares it, shows its value on hover, and lists its uses across YAML, XML and PHP configuration. Contributed by @shuvroroy.
 
 ### Changed
 
