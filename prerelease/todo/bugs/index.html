@@ -2281,17 +2281,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b900-foreach-over-an-iteratoraggregate-does-not-use-getiterators-types" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B900. <code>foreach</code> over an <code>IteratorAggregate</code> does not use <code>getIterator()</code>'s types
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -4189,17 +4178,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b900-foreach-over-an-iteratoraggregate-does-not-use-getiterators-types" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B900. <code>foreach</code> over an <code>IteratorAggregate</code> does not use <code>getIterator()</code>'s types
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -5778,17 +5756,6 @@ completion goes through the same path. <code>// SKIP</code> lines in
 </code></pre></div>
 <p>The return type of <code>__invoke</code> is kept but its parameter list is not copied into the closure type (here through an intersection return type).</p>
 <p><strong>Cases</strong> (PHPStan <code>nsrt/</code>, 4 assertions): <code>bug-14362.php</code> (4).</p>
-<h3 id="b900-foreach-over-an-iteratoraggregate-does-not-use-getiterators-types">B900. <code>foreach</code> over an <code>IteratorAggregate</code> does not use <code>getIterator()</code>'s types<a class="headerlink" href="#b900-foreach-over-an-iteratoraggregate-does-not-use-getiterators-types" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-112-1" name="__codelineno-112-1" href="#__codelineno-112-1"></a><span class="x">interface Agg extends \IteratorAggregate { public function getIterator(): MyIterator; }</span>
-<a id="__codelineno-112-2" name="__codelineno-112-2" href="#__codelineno-112-2"></a><span class="x">foreach ($agg as $k =&gt; $v) {}   // int|string and mixed, should be MyKey and MyValue</span>
-</code></pre></div>
-<p>Without <code>@implements IteratorAggregate&lt;K, V&gt;</code> the key/value types should come from the declared <code>getIterator()</code> return (recursively); the fallback key <code>int|string</code> is also wrong for a Traversable, whose keys can be anything.</p>
-<p>It also shows as:</p>
-<ul>
-<li><code>foreach</code> over an <code>IteratorAggregate</code> misreads its value type</li>
-</ul>
-<p><strong>Cases</strong> (PHPStan <code>nsrt/</code>, 5 assertions): <code>foreach-object-type.php</code> (3), <code>bug-4267.php</code> (2).</p>
 
 
 
