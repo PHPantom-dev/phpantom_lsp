@@ -2265,17 +2265,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b897-a-bitwise-operator-with-a-string-and-a-mixed-operand-gives-int" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B897. A bitwise operator with a <code>string</code> and a <code>mixed</code> operand gives <code>int</code>
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -4157,17 +4146,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b897-a-bitwise-operator-with-a-string-and-a-mixed-operand-gives-int" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B897. A bitwise operator with a <code>string</code> and a <code>mixed</code> operand gives <code>int</code>
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -5740,15 +5718,6 @@ completion goes through the same path. <code>// SKIP</code> lines in
 <li>A short <code>set =&gt; expr</code> property hook's parameter has no type</li>
 </ul>
 <p><strong>Cases</strong> (PHPStan <code>nsrt/</code>, 19 assertions): <code>property-hooks.php</code> (19).</p>
-<h3 id="b897-a-bitwise-operator-with-a-string-and-a-mixed-operand-gives-int">B897. A bitwise operator with a <code>string</code> and a <code>mixed</code> operand gives <code>int</code><a class="headerlink" href="#b897-a-bitwise-operator-with-a-string-and-a-mixed-operand-gives-int" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-109-1" name="__codelineno-109-1" href="#__codelineno-109-1"></a><span class="x">function f(string $s, $mixed) {</span>
-<a id="__codelineno-109-2" name="__codelineno-109-2" href="#__codelineno-109-2"></a><span class="x">    $s &amp; $mixed;   // int, should be string</span>
-<a id="__codelineno-109-3" name="__codelineno-109-3" href="#__codelineno-109-3"></a><span class="x">    $mixed | $s;   // int, should be string</span>
-<a id="__codelineno-109-4" name="__codelineno-109-4" href="#__codelineno-109-4"></a><span class="x">}</span>
-</code></pre></div>
-<p>The string-operand bitwise rule (string op string =&gt; string) is not used when the other side is mixed.</p>
-<p><strong>Cases</strong> (PHPStan <code>nsrt/</code>, 6 assertions): <code>bitwise.php</code> (6).</p>
 
 
 
