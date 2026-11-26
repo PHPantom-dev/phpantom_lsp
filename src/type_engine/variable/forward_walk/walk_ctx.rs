@@ -37,6 +37,9 @@ pub(crate) struct WalkFlow {
     /// One frame per closure body being walked for the states its
     /// `return`s leave with, innermost last.
     pub(super) return_edges: RefCell<Vec<ReturnFrame>>,
+    /// The values the `return`s of one body carry, when this walk reads a
+    /// closure body for what it returns; see [`walk_closure_body_exits`].
+    pub(super) return_values: Option<RefCell<ReturnValues>>,
     /// Byte ranges of the branches a decidable guard rules out, when this
     /// walk collects them (the diagnostic pass's walk of a file).
     pub(super) unreachable: Option<RefCell<Vec<(u32, u32)>>>,

@@ -1,5 +1,7 @@
 use super::*;
 
+use std::cell::RefCell;
+
 use mago_span::HasSpan;
 use mago_syntax::cst::argument::Argument;
 use mago_syntax::cst::function_like::closure::ClosureUseClause;
@@ -136,6 +138,106 @@ pub(crate) fn record_return_edge(flow: &WalkFlow, scope: &ScopeState) {
             types.extend(scope.get(var_name.as_str()).iter().cloned());
         }
         Some(ReturnFrame::Barrier) | None => {}
+    }
+}
+
+// ─── Closure return values ──────────────────────────────────────────────────
+
+/// The values the `return`s of the body read by
+/// [`walk_closure_body_exits`] carry.
+///
+/// A `return` is matched to the body by its offset rather than by a frame
+/// on [`WalkFlow::return_edges`]: a `try … finally` collects the returns
+/// inside it into a frame of its own, and a nested closure walked on the
+/// same flow has returns of its own, but neither changes which statements
+/// belong to the body.
+pub(crate) struct ReturnValues {
+    /// Where each of the body's own `return` statements starts, ascending.
+    own: Vec<u32>,
+    /// What each `return` the walk reached carried, by statement offset:
+    /// `None` for a bare `return;`. A loop body walked again to converge
+    /// reaches its `return` again, and the later reading replaces the
+    /// earlier one.
+    reached: Vec<(u32, Option<Vec<ResolvedType>>)>,
+}
+
+/// Record the value `ret` carries out of the body being read for its
+/// returns, when it is one of that body's own.
+pub(crate) fn record_return_value(ret: &Return<'_>, scope: &ScopeState, ctx: &ForwardWalkCtx<'_>) {
+    let Some(values) = &ctx.flow.return_values else {
+        return;
+    };
+    let offset = ret.r#return.span.start.offset;
+    if scope.unreachable || values.borrow().own.binary_search(&offset).is_err() {
+        return;
+    }
+    let value = ret.value.map(|val| resolve_rhs_with_scope(val, scope, ctx));
+    let mut values = values.borrow_mut();
+    match values.reached.iter_mut().find(|(at, _)| *at == offset) {
+        Some((_, previous)) => *previous = value,
+        None => values.reached.push((offset, value)),
+    }
+}
+
+/// How control leaves a closure body, as [`walk_closure_body_exits`]
+/// found it.
+pub(crate) struct ClosureBodyExits {
+    /// The value each reachable `return` carries, in source order: `None`
+    /// for a bare `return;`, and an empty list for a value nothing
+    /// resolves.
+    pub returns: Vec<Option<Vec<ResolvedType>>>,
+    /// Whether some path runs off the end of the body.
+    pub falls_through: bool,
+    /// The scope the body leaves at its end.
+    pub scope: ScopeState,
+}
+
+/// Walk `closure`'s body from `scope`, which holds its captures and
+/// parameters, and report every way control leaves it.
+///
+/// A transient read, like [`resolve_in_method_body`]: it records no scope
+/// snapshots, and runs on a flow of its own so no frame of the walk around
+/// it sees the body's returns.
+pub(crate) fn walk_closure_body_exits(
+    closure: &Closure<'_>,
+    mut scope: ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) -> ClosureBodyExits {
+    let mut own = Vec::new();
+    crate::return_collection::collect_returns(closure.body.statements.iter(), &mut own);
+    let mut own: Vec<u32> = own
+        .into_iter()
+        .map(|(_, _, _, stmt_start)| stmt_start as u32)
+        .collect();
+    own.sort_unstable();
+    let flow = WalkFlow {
+        return_values: Some(RefCell::new(ReturnValues {
+            own,
+            reached: Vec::new(),
+        })),
+        ..WalkFlow::default()
+    };
+    let walk_ctx = ForwardWalkCtx {
+        flow: &flow,
+        cursor_offset: u32::MAX,
+        ..ctx.fresh()
+    };
+
+    let _suspend = suspend_snapshot_recording();
+    walk_body_forward(closure.body.statements.iter(), &mut scope, &walk_ctx);
+    let falls_through = !scope.unreachable
+        && !branch_exits_stmts(closure.body.statements.iter(), &scope, &walk_ctx);
+
+    let mut reached = flow
+        .return_values
+        .map(RefCell::into_inner)
+        .map(|values| values.reached)
+        .unwrap_or_default();
+    reached.sort_unstable_by_key(|(at, _)| *at);
+    ClosureBodyExits {
+        returns: reached.into_iter().map(|(_, value)| value).collect(),
+        falls_through,
+        scope,
     }
 }
 

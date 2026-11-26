@@ -663,28 +663,13 @@ fn call_user_func_return(
 
 /// What `($expr)()` returns when the callee is an arbitrary expression
 /// (`($this->foo)()`, `(getFactory())()`, a closure literal invoked on the
-/// spot): the literal's own return type, the callable type the expression
-/// resolves to, or its class's `__invoke()`.
+/// spot): what the callable type the expression resolves to returns (for
+/// a literal, what its body returns narrowed by what it declares), or its
+/// class's `__invoke()`.
 fn expression_invocation<'b>(
     callee_expr: &'b Expression<'b>,
     ctx: &VarResolutionCtx<'_>,
 ) -> Vec<ResolvedType> {
-    // ── Directly invoked closure / arrow function ────
-    // `(fn (): Foo => …)()` or `(function (): Foo { … })()`
-    // Extract the return type from the literal instead of going
-    // through `__invoke()` on the generic `Closure` stub.
-    if let Some(parsed_ret_type) = extract_closure_or_arrow_return_type(callee_expr, ctx) {
-        let resolved = crate::type_engine::type_resolution::type_hint_to_classes_typed(
-            &parsed_ret_type,
-            &ctx.current_class.fqn(),
-            ctx.file.all_classes,
-            ctx.file.class_loader,
-        );
-        if !resolved.is_empty() {
-            return ResolvedType::from_classes_with_hint(resolved, parsed_ret_type);
-        }
-    }
-
     // A callable-typed value carries its return type in the type string
     // itself (`callable(): Scope`, `Closure(): Item`), which is how a
     // property or a method result annotated that way arrives here.

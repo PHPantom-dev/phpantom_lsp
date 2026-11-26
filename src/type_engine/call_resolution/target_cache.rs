@@ -533,6 +533,7 @@ pub(crate) struct TypeEngineCaches {
     _body_infer: BodyInferMemoGuard,
     _out_type: super::out_param::OutTypeMemoGuard,
     _walk: crate::type_engine::variable::forward_walk::WalkMemoGuard,
+    _closure_return: crate::type_engine::variable::rhs_resolution::ClosureReturnMemoGuard,
     _include: crate::type_engine::variable::forward_walk::IncludeMemoGuard,
     _form_request_rules: crate::virtual_members::laravel::validation_rules::RulesMemoGuard,
 }
@@ -564,6 +565,9 @@ fn type_engine_caches(scope: MemoScope) -> TypeEngineCaches {
         _body_infer: with_body_infer_memo(scope),
         _out_type: super::out_param::with_out_type_memo(scope),
         _walk: crate::type_engine::variable::forward_walk::with_walk_memo(scope),
+        _closure_return: crate::type_engine::variable::rhs_resolution::with_closure_return_memo(
+            scope,
+        ),
         _include: crate::type_engine::variable::forward_walk::with_include_memo(scope),
         _form_request_rules: crate::virtual_members::laravel::validation_rules::with_rules_memo(
             scope,

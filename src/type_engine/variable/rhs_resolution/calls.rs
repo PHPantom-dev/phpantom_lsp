@@ -5,6 +5,7 @@
 //! substitution, the helpers that read a call argument's raw type for
 //! template binding, and the type a closure literal produces.
 
+use std::cell::RefCell;
 use std::collections::HashMap;
 
 use mago_span::HasSpan;
@@ -474,19 +475,24 @@ pub(super) fn resolve_return_type(ty: PhpType, ctx: &VarResolutionCtx<'_>) -> Ve
 
 /// The `Generator` a closure or arrow function literal returns when its
 /// body yields: its keys and values from its own `yield`s, and its return
-/// from its own `return`s.  `None` when the body does not yield.
-fn closure_generator_type(expr: &Expression<'_>, ctx: &VarResolutionCtx<'_>) -> Option<PhpType> {
+/// from `returned`, what the body's own `return`s carry (`void` when they
+/// carry nothing).  `None` when the body does not yield.
+///
+/// `ctx` reads the variables the yielded expressions name.
+fn closure_generator_type(
+    expr: &Expression<'_>,
+    returned: Option<PhpType>,
+    ctx: &VarResolutionCtx<'_>,
+) -> Option<PhpType> {
     let mut found = false;
     let mut keys: Vec<PhpType> = Vec::new();
     let mut values: Vec<PhpType> = Vec::new();
-    // Nothing declares these types, so a literal stands for its kind
-    // (`yield 1` makes a generator of `int`).
     let resolved = |expr: &Expression<'_>| {
         let types = resolve_rhs_expression(expr, ctx);
         if types.is_empty() {
             PhpType::mixed()
         } else {
-            ResolvedType::types_joined(&types).widen_scalar_literals()
+            ResolvedType::types_joined(&types)
         }
     };
     let mut visit = |yield_expr: &Yield<'_>| {
@@ -501,34 +507,34 @@ fn closure_generator_type(expr: &Expression<'_>, ctx: &VarResolutionCtx<'_>) -> 
                 keys.push(resolved(pair.key));
                 values.push(resolved(pair.value));
             }
-            // `yield from` delegates to another iterator.
-            Yield::From(_) => {}
+            // `yield from` hands on the keys and values of the iterable it
+            // delegates to.
+            Yield::From(from) => {
+                let iterable = resolved(from.iterator);
+                keys.push(iterable.iterable_key_type().unwrap_or_else(PhpType::mixed));
+                values.push(
+                    iterable
+                        .iterable_element_type()
+                        .unwrap_or_else(PhpType::mixed),
+                );
+            }
         }
     };
-    let returns = match expr {
+    match expr {
         Expression::Closure(closure) => {
             crate::parser::for_each_own_yield(closure.body.statements.iter(), &mut visit);
-            let mut returns = Vec::new();
-            crate::return_collection::collect_returns(closure.body.statements.iter(), &mut returns);
-            returns
         }
         Expression::ArrowFunction(arrow) => {
             crate::parser::for_each_own_yield_in_expression(arrow.expression, &mut visit);
-            Vec::new()
         }
         _ => return None,
-    };
+    }
     if !found {
         return None;
     }
-    let returned: Vec<PhpType> = returns
-        .iter()
-        .map(|(value, ..)| value.map_or_else(PhpType::void, resolved))
-        .collect();
     let join = |types: Vec<PhpType>, empty: PhpType| match types.len() {
         0 => empty,
-        1 => types.into_iter().next().unwrap_or(empty),
-        _ => PhpType::union(types),
+        _ => PhpType::join_runtime_value_types(types),
     };
     Some(PhpType::generic(
         "Generator",
@@ -536,9 +542,196 @@ fn closure_generator_type(expr: &Expression<'_>, ctx: &VarResolutionCtx<'_>) -> 
             join(keys, PhpType::int()),
             join(values, PhpType::mixed()),
             PhpType::mixed(),
-            join(returned, PhpType::void()),
+            returned.unwrap_or_else(PhpType::void),
         ],
     ))
+}
+
+/// What a full closure's body returns, read by walking it with its
+/// captures and parameters seeded: the join of every reachable `return`,
+/// with `null` for a bare `return;` or a path that runs off the end
+/// beside a valued one; `void` when no `return` carries a value; `never`
+/// when no path leaves the body normally.  A body that yields returns
+/// the `Generator` its `yield`s and `return`s make.
+///
+/// `param_seeds` holds, per position, what the call site hands a
+/// parameter (`array_map($cb, $users)` hands `$cb` a `User`); see
+/// [`seed_closure_params`] for when a seed wins over the declaration.
+///
+/// `None` when some `return` of a body that does not yield carries a
+/// value nothing resolves.
+///
+/// [`seed_closure_params`]: crate::type_engine::variable::forward_walk::seed_closure_params
+pub(crate) fn closure_body_type(
+    expr: &Expression<'_>,
+    closure: &Closure<'_>,
+    param_seeds: &[PhpType],
+    ctx: &VarResolutionCtx<'_>,
+) -> Option<PhpType> {
+    use crate::type_engine::variable::forward_walk::{ForwardWalkCtx, ScopeState, WalkFlow};
+
+    let flow = WalkFlow::default();
+    let walk_ctx = ForwardWalkCtx::fresh_from_var_ctx(ctx, &flow);
+    let mut scope = ScopeState::new();
+    // A non-static closure captures `$this`, and every closure what its
+    // `use` clause names, as they stand where it is written.
+    let captured = closure
+        .r#static
+        .is_none()
+        .then_some("$this")
+        .into_iter()
+        .chain(closure.use_clause.iter().flat_map(|clause| {
+            clause
+                .variables
+                .iter()
+                .map(|var| bytes_to_str(var.variable.name))
+        }));
+    let mut captured_types = Vec::new();
+    for name in captured {
+        let types = resolve_var_types(name, ctx, ctx.cursor_offset);
+        captured_types.push(if types.is_empty() {
+            PhpType::mixed()
+        } else {
+            ResolvedType::types_joined(&types)
+        });
+        if !types.is_empty() {
+            scope.set(name, types);
+        }
+    }
+
+    let span = closure.span();
+    let key: ClosureReturnKey = (
+        (ctx.file.content.as_ptr() as usize, ctx.file.content.len()),
+        (span.start.offset, span.end.offset),
+        ctx.current_class.name,
+        crate::type_engine::call_resolution::body_inference_context(),
+        captured_types.into_boxed_slice(),
+        param_seeds.into(),
+    );
+    if let Some(hit) = CLOSURE_RETURN_MEMO.with(|cell| {
+        cell.borrow()
+            .as_ref()
+            .and_then(|memo| memo.get(&key).cloned())
+    }) {
+        return hit;
+    }
+    let inferred = walked_closure_body_type(expr, closure, param_seeds, scope, &walk_ctx);
+    CLOSURE_RETURN_MEMO.with(|cell| {
+        if let Some(memo) = cell.borrow_mut().as_mut() {
+            memo.insert(key, inferred.clone());
+        }
+    });
+    inferred
+}
+
+thread_local! {
+    /// When `Some`, what each closure literal's body was found to return,
+    /// keyed by [`ClosureReturnKey`].  Activated with the rest of the
+    /// request-scoped type-engine memos.
+    ///
+    /// A closure is resolved wherever its value is read, and the walk that
+    /// answers reads the closures nested in it as well, so without this a
+    /// closure nested `n` deep would be walked once per enclosing closure
+    /// reading it, for every way the walk around it reaches it.
+    static CLOSURE_RETURN_MEMO: RefCell<Option<HashMap<ClosureReturnKey, Option<PhpType>>>> =
+        const { RefCell::new(None) };
+}
+
+/// What identifies one reading of a closure body: the source (`(pointer,
+/// length)`), the literal's span, the class it is written in, the
+/// body-inference context it is read under, the types of what it
+/// captures (the only part of the scope around it its body sees), and
+/// what the call site seeds its parameters with.
+type ClosureReturnKey = (
+    (usize, usize),
+    (u32, u32),
+    crate::atom::Atom,
+    u64,
+    Box<[PhpType]>,
+    Box<[PhpType]>,
+);
+
+/// The guard [`with_closure_return_memo`] hands back.
+pub(crate) type ClosureReturnMemoGuard =
+    crate::type_engine::MemoGuard<HashMap<ClosureReturnKey, Option<PhpType>>>;
+
+/// Activate [`CLOSURE_RETURN_MEMO`] for the current thread.  Nested
+/// activation is a no-op.
+pub(crate) fn with_closure_return_memo(
+    scope: crate::type_engine::MemoScope,
+) -> ClosureReturnMemoGuard {
+    crate::type_engine::activate_memo(&CLOSURE_RETURN_MEMO, scope)
+}
+
+/// [`closure_body_type`] for a body entered with `scope`, which holds its
+/// captures.
+fn walked_closure_body_type(
+    expr: &Expression<'_>,
+    closure: &Closure<'_>,
+    param_seeds: &[PhpType],
+    mut scope: crate::type_engine::variable::forward_walk::ScopeState,
+    walk_ctx: &crate::type_engine::variable::forward_walk::ForwardWalkCtx<'_>,
+) -> Option<PhpType> {
+    use crate::type_engine::variable::forward_walk::{
+        seed_closure_params, walk_closure_body_exits,
+    };
+
+    seed_closure_params(
+        &mut scope,
+        &closure.parameter_list,
+        closure.span().start.offset,
+        param_seeds,
+        walk_ctx,
+    );
+
+    let exits = walk_closure_body_exits(closure, scope, walk_ctx);
+
+    let mut valued: Vec<PhpType> = Vec::new();
+    let mut bare = false;
+    let mut unresolved = false;
+    for value in &exits.returns {
+        match value {
+            None => bare = true,
+            Some(types) if types.is_empty() => {
+                unresolved = true;
+                valued.push(PhpType::mixed());
+            }
+            Some(types) => valued.push(ResolvedType::types_joined(types)),
+        }
+    }
+    let leaves_without_value = bare || exits.falls_through;
+
+    let end_scope = |name: &str| -> Vec<ResolvedType> { exits.scope.get(name).to_vec() };
+    let yield_ctx = walk_ctx.var_ctx_for_with_scope(
+        "",
+        closure.span().end.offset,
+        &end_scope,
+        Some(exits.scope.proofs()),
+    );
+    let generator_return = (!valued.is_empty()).then(|| {
+        let mut returned = valued.clone();
+        if leaves_without_value {
+            returned.push(PhpType::null());
+        }
+        PhpType::join_runtime_value_types(returned)
+    });
+    if let Some(generator) = closure_generator_type(expr, generator_return, &yield_ctx) {
+        return Some(generator);
+    }
+    if unresolved {
+        return None;
+    }
+
+    Some(if !valued.is_empty() {
+        if leaves_without_value {
+            valued.push(PhpType::null());
+        }
+        PhpType::join_runtime_value_types(valued)
+    } else if leaves_without_value {
+        PhpType::void()
+    } else {
+        PhpType::never()
+    })
 }
 
 /// Whether returning `body` through the declared return type `declared`
@@ -570,35 +763,31 @@ pub(crate) fn infer_closure_literal_type(
         return closure_from_value(fpa.function, pa.is_first_class_callable(), ctx);
     }
 
-    // The declared `: ReturnType`, else the `Generator` the body's yields
-    // make the closure return.  Both name their classes in full already.
-    let explicit_or_yield = extract_closure_or_arrow_return_type(expr, ctx)
-        .or_else(|| closure_generator_type(expr, ctx));
+    let declared = extract_closure_or_arrow_return_type(expr, ctx);
 
     // What the body actually produces, independent of any declared
-    // return type: an arrow function's expression, or a full closure
-    // body's first top-level `return`.
+    // return type: an arrow function's expression (or the `Generator` its
+    // `yield` makes), or what every way out of a full closure's body
+    // carries.
     let body_return = || -> Option<PhpType> {
-        let (parameter_list, ret_expr) = match expr {
-            Expression::ArrowFunction(arrow) => (&arrow.parameter_list, Some(arrow.expression)),
-            Expression::Closure(closure) => (
-                &closure.parameter_list,
-                closure.body.statements.iter().find_map(|stmt| match stmt {
-                    Statement::Return(ret) => ret.value,
-                    _ => None,
-                }),
-            ),
+        let arrow = match expr {
+            Expression::ArrowFunction(arrow) => arrow,
+            Expression::Closure(closure) => return closure_body_type(expr, closure, &[], ctx),
             _ => return None,
         };
-        let ret_expr = ret_expr?;
+        if let Some(generator) = closure_generator_type(expr, None, ctx) {
+            return Some(generator);
+        }
+        let parameter_list = &arrow.parameter_list;
+        let ret_expr = arrow.expression;
         // `fn () => throw …` never returns.
         if matches!(ret_expr, Expression::Throw(_)) {
             return Some(PhpType::never());
         }
 
-        // The body may read the closure's own parameters (`fn (?string
-        // $value): string => $value ?? '-'`), which nothing outside the
-        // closure ever assigns, so the outer scope's variable resolution
+        // The body may read the arrow function's own parameters (`fn
+        // (?string $value): string => $value ?? '-'`), which nothing
+        // outside it ever assigns, so the outer scope's variable resolution
         // cannot see them. Seed each hinted one so the body resolves
         // against its own signature the way a call to it would. Each seed
         // carries the classes its hint names, so a member access on the
@@ -634,16 +823,21 @@ pub(crate) fn infer_closure_literal_type(
         }
     };
 
-    let inferred_return = match explicit_or_yield {
+    let inferred_return = match declared {
         // A closure really returns what its body produces narrowed by
         // what it declares: an explicit `: ReturnType` only wins when
         // the body does not resolve to something narrower (e.g. a bare
         // `: Closure` on a closure whose body returns a closure with a
-        // known signature).
+        // known signature). A body that never returns narrows any
+        // declaration, `void` included.
         Some(declared) => {
             let narrowed = body_return().filter(|body| {
-                crate::class_lookup::is_subtype_of_typed(body, &declared, ctx.file.class_loader)
-                    && !int_becomes_float(body, &declared, ctx)
+                body.is_never()
+                    || crate::class_lookup::is_subtype_of_typed(
+                        body,
+                        &declared,
+                        ctx.file.class_loader,
+                    ) && !int_becomes_float(body, &declared, ctx)
             });
             Some(narrowed.unwrap_or(declared))
         }

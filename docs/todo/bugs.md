@@ -2142,26 +2142,31 @@ It also shows as:
 
 **Cases** (PHPStan `nsrt/`, 12 assertions): `bug-9384.php` (9), `int-mask.php` (3).
 
-### B894. A closure's inferred return type misses `void`, `never`, branch returns and generator values
+### B912. Analysis time doubles with each level of nested callback arguments
 
-**Impact: Medium · Complexity: Medium**
+**Impact: Low · Complexity: Medium**
 
 ```php
-$f = function () use ($i) { if (rand(0, 1)) { return $i; } return null; };
-$f();   // null, should be int|null
-$g = function () { $a = ['foo' => 'bar']; return $a; };
-$g();   // mixed, should be array{foo: 'bar'}
+function t($x) {
+    $r = array_map(function ($q) use ($x) {
+        $y = $q;
+        if ($y) {
+            // … the same `array_map(function …)` again, one level deeper …
+        }
+        return array_filter([$y], function ($z) use ($x) { return $z; });
+    }, [$x]);
+    return $r;
+}
 ```
 
-Only the last top-level `return` seems to be read; returns nested in `if`/`else`, a bare `return;` mixed with a valued one, an implicit fall-through, and a returned local assigned in the body are missed.
-
-It also shows as:
-
-- A closure with no `return` value is inferred as `mixed` instead of `void`
-- Generator closures widen yielded literals, lose `yield from` values, and ignore the body under a declared `Generator` or `iterable` return
-- A closure that always ends in a `never` call or a `throw` is not inferred as `never`
-
-**Cases** (PHPStan `nsrt/`, 24 assertions): `closure-return-type.php` (15), `missing-closure-native-return-typehint.php` (7), `bug-7031.php` (2).
+Each level of closures passed as call arguments doubles the time
+`analyze` spends on the file: 0.8 s of CPU at 14 levels, 3.1 s at 16,
+12.6 s at 18 and 49 s at 20 (release build). The same nesting written
+as closures assigned to variables stays flat, because a closure
+literal's own body reading is memoized per request. The callback
+argument paths (template binding from a closure argument, and the
+callback return inference behind `array_map`/`array_filter`) re-read a
+nested callback once per enclosing level instead of sharing one answer.
 
 ### B895. `new $var()` has no type unless `$var` is a `class-string<T>`
 

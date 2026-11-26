@@ -1,6 +1,6 @@
 // test: a closure that yields returns the global Generator inside a namespace
 // feature: hover
-// expect: Generator<int, int, mixed, void>
+// expect: Generator<int, 1, mixed, void>
 // expect_absent: App\Generator
 ---
 <?php

@@ -202,6 +202,7 @@ pub(crate) fn process_statement<'b>(
             if let Some(val) = ret.value {
                 process_assignment_expr(val, scope, ctx);
             }
+            record_return_value(ret, scope, ctx);
 
             // A `return` leaves the body with the types it holds *here*.
             // For a closure walked to see what it writes to its `use (&$x)`

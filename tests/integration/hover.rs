@@ -15793,8 +15793,8 @@ function test(): void {
     let hover =
         hover_text(&hover_at(&backend, uri, content, 6, 6).expect("hover $closure")).to_string();
     assert!(
-        hover.contains("Generator") && hover.contains("string") && hover.contains("int"),
-        "$closure should expose Generator<int, string, mixed, int>-like type, got: {hover}"
+        hover.contains("Closure(): Generator<int, 'x', mixed, 123>"),
+        "$closure should be a Generator of what it yields and returns, got: {hover}"
     );
 }
 
@@ -15813,8 +15813,8 @@ function test(): void {
     let hover =
         hover_text(&hover_at(&backend, uri, content, 3, 6).expect("hover $arrow")).to_string();
     assert!(
-        hover.contains("Generator<int, string, mixed, void>"),
-        "$arrow should be a Generator of strings, got: {hover}"
+        hover.contains("Generator<int, 'x', mixed, void>"),
+        "$arrow should be a Generator of what it yields, got: {hover}"
     );
 }
 

@@ -913,39 +913,35 @@ fn first_param_name(params: &FunctionLikeParameterList<'_>) -> Option<String> {
         .map(|param| bytes_to_str(param.variable.name).to_string())
 }
 
-/// Infer the return type of a callback (arrow function or closure) by
-/// resolving its body expression with the first parameter seeded to
-/// `param_type`.
+/// Infer the return type of a callback (arrow function or closure) with
+/// its first parameter seeded to `param_type`.
 ///
 /// For arrow functions: resolves `arrow.expression` directly.
-/// For closures: finds the first `return` statement and resolves its
-/// expression.
+/// For closures: what every way out of the body carries, read by walking
+/// it (see [`closure_body_type`]).
+///
+/// [`closure_body_type`]: crate::type_engine::variable::rhs_resolution::closure_body_type
 fn infer_callback_return_type(
     callback_expr: &Expression<'_>,
     param_type: &PhpType,
     ctx: &VarResolutionCtx<'_>,
 ) -> Option<PhpType> {
-    let (param_name, body_expr) = match callback_expr {
-        // A callback that takes no parameters ignores the element it is
-        // handed, but its body still decides the result.
-        Expression::ArrowFunction(arrow) => {
-            let name = first_param_name(&arrow.parameter_list);
-            (name, arrow.expression)
-        }
+    let arrow = match callback_expr {
+        Expression::ArrowFunction(arrow) => arrow,
         Expression::Closure(closure) => {
-            let name = first_param_name(&closure.parameter_list);
-            // Find the first return statement's expression.
-            let ret_expr = closure.body.statements.iter().find_map(|stmt| {
-                if let Statement::Return(ret) = stmt {
-                    ret.value.as_ref()
-                } else {
-                    None
-                }
-            })?;
-            (name, *ret_expr)
+            return crate::type_engine::variable::rhs_resolution::closure_body_type(
+                callback_expr,
+                closure,
+                std::slice::from_ref(param_type),
+                ctx,
+            );
         }
         _ => return None,
     };
+    // A callback that takes no parameters ignores the element it is
+    // handed, but its body still decides the result.
+    let param_name = first_param_name(&arrow.parameter_list);
+    let body_expr = arrow.expression;
 
     // Build a scope resolver that maps the callback parameter to the
     // input element type.  Include ClassInfo when available so that
@@ -970,32 +966,7 @@ fn infer_callback_return_type(
         _ => vec![seed_member(param_type)],
     };
 
-    // A full closure body may reassign the parameter before returning it
-    // (`$result['a'] = (string) $result['a']; return $result;`), so its
-    // statements are walked with the shared forward walker — seeded with
-    // the same call-site type — before the return expression is resolved.
-    // Reading the parameter straight from `resolved_param` (as an arrow
-    // function's single-expression body still does below) would answer
-    // with the type the callback receives rather than the one it hands
-    // back.
-    let walked_locals = if let Expression::Closure(closure) = callback_expr {
-        Some(walk_closure_body_scope(
-            closure,
-            param_name.as_deref(),
-            &resolved_param,
-            ctx,
-        ))
-    } else {
-        None
-    };
-
     let scope_resolver = move |var: &str| -> Vec<ResolvedType> {
-        if let Some(locals) = &walked_locals
-            && let Some(types) = locals.get(&atom(var))
-            && !types.is_empty()
-        {
-            return types.clone();
-        }
         if param_name.as_deref() == Some(var) {
             resolved_param.clone()
         } else {
@@ -1013,33 +984,4 @@ fn infer_callback_return_type(
     };
 
     super::iterable_elements::resolve_expression_type(body_expr, &infer_ctx)
-}
-
-/// Walk a closure's own body with the shared forward walker, seeded with
-/// what the call site hands its parameter, and return the scope its
-/// statements leave behind.
-///
-/// This is a transient lookup seeded from the call site rather than the
-/// closure's own declared scope, so, like
-/// [`super::forward_walk::resolve_in_method_body`], it must not write into
-/// an active diagnostic scope cache — reading from one is safe, since the
-/// offsets walked belong to this same file.
-fn walk_closure_body_scope(
-    closure: &Closure<'_>,
-    param_name: Option<&str>,
-    resolved_param: &[ResolvedType],
-    ctx: &VarResolutionCtx<'_>,
-) -> super::forward_walk::Locals {
-    let flow = super::forward_walk::WalkFlow::default();
-    let fw_ctx =
-        super::forward_walk::ForwardWalkCtx::from_var_ctx(ctx, &flow).with_cursor_offset(u32::MAX);
-    let mut scope = super::forward_walk::ScopeState::new();
-    if let Some(name) = param_name {
-        scope.seed(name, resolved_param.to_vec());
-    }
-
-    let _suspend = super::forward_walk::suspend_snapshot_recording();
-    super::forward_walk::walk_body_forward(closure.body.statements.iter(), &mut scope, &fw_ctx);
-
-    scope.locals
 }
