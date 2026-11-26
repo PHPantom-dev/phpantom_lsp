@@ -2298,17 +2298,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b910-is_callable-on-a-string-narrows-to-callable-and-widens-it-after-the-branch" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B910. <code>is_callable()</code> on a string narrows to <code>callable</code> and widens it after the branch
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -4223,17 +4212,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b910-is_callable-on-a-string-narrows-to-callable-and-widens-it-after-the-branch" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B910. <code>is_callable()</code> on a string narrows to <code>callable</code> and widens it after the branch
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -5837,17 +5815,6 @@ completion goes through the same path. <code>// SKIP</code> lines in
 <li>Variable variables and dynamic property names held in a literal-string variable are not resolved</li>
 </ul>
 <p><strong>Cases</strong> (PHPStan <code>nsrt/</code>, 7 assertions): <code>bug-12875.php</code> (5), <code>bug-12398.php</code> (2).</p>
-<h3 id="b910-is_callable-on-a-string-narrows-to-callable-and-widens-it-after-the-branch">B910. <code>is_callable()</code> on a string narrows to <code>callable</code> and widens it after the branch<a class="headerlink" href="#b910-is_callable-on-a-string-narrows-to-callable-and-widens-it-after-the-branch" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-112-1" name="__codelineno-112-1" href="#__codelineno-112-1"></a><span class="x">function f(string $c): void {</span>
-<a id="__codelineno-112-2" name="__codelineno-112-2" href="#__codelineno-112-2"></a><span class="x">    if (is_callable($c)) {</span>
-<a id="__codelineno-112-3" name="__codelineno-112-3" href="#__codelineno-112-3"></a><span class="x">        $c;   // callable, should be callable-string</span>
-<a id="__codelineno-112-4" name="__codelineno-112-4" href="#__codelineno-112-4"></a><span class="x">    }</span>
-<a id="__codelineno-112-5" name="__codelineno-112-5" href="#__codelineno-112-5"></a><span class="x">    $c;       // callable|string, should be string</span>
-<a id="__codelineno-112-6" name="__codelineno-112-6" href="#__codelineno-112-6"></a><span class="x">}</span>
-</code></pre></div>
-<p>The true branch drops the string half of the type, and merging the branches back keeps the narrowed <code>callable</code> beside the original <code>string</code>. Once fixed, a union holding a <code>Closure(B): int</code> member also hovers with <code>B</code> unqualified, since each union member is shortened on its own line with no namespace for the closure's parameter types.</p>
-<p><strong>Cases</strong> (PHPStan <code>nsrt/</code>, 1 assertion): <code>bug-14362.php</code> (1).</p>
 
 
 
