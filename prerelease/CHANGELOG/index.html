@@ -6384,6 +6384,7 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 <li><strong><code>throw</code> as an expression is <code>never</code>.</strong> <code>fn () =&gt; throw new Exception()</code> returns <code>never</code>.</li>
 <li><strong><code>base64_decode()</code> returns <code>false</code> only in strict mode.</strong> Without <code>$strict</code> it is typed <code>string</code>.</li>
 <li><strong><code>pathinfo()</code> may leave out <code>dirname</code>.</strong> The empty path has no directory part, so the array's <code>dirname</code> key is optional.</li>
+<li><strong>A corrupt <code>.phar</code> no longer crashes the server.</strong> An archive whose header claims more files than it holds is skipped during indexing instead of aborting the process.</li>
 </ul>
 <h2 id="110-2026-11-24"><a href="https://github.com/PHPantom-dev/phpantom_lsp/compare/1.0.0...1.1.0">1.1.0</a> - 2026-11-24<a class="headerlink" href="#110-2026-11-24" title="Permanent link">&para;</a></h2>
 <h3 id="added_1">Added<a class="headerlink" href="#added_1" title="Permanent link">&para;</a></h3>
