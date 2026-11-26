@@ -67,6 +67,17 @@ $capsule->schema()->create('customers', function (\Illuminate\Database\Schema\Bl
     $table->string('email');
     $table->timestamps();
 });
+$attributes = ['title' => 'First draft'];
+$post = new \App\Models\BlogPost();
+$post->fill($attributes);
+check('BlogPost accepts a fillable title', $post->getAttributes()['title'] === 'First draft');
+try {
+    (new \App\Models\Review())->fill($attributes);
+    check('Review rejects mass assignment', false);
+} catch (\Illuminate\Database\Eloquent\MassAssignmentException) {
+    check('Review rejects mass assignment', true);
+}
+
 $customerDraft = \App\Models\Customer::make(['name' => 'Ada', 'email' => 'ada@example.test']);
 $profile = \App\Models\CustomerProfile::make(['full_name' => 'Ada']);
 check('A modern setter writes the backing name column', $profile->getAttributes() === ['name' => 'Ada']);

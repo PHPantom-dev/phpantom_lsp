@@ -209,7 +209,7 @@ pub(crate) use model_extraction::{
     has_inheritable_model_metadata, has_scope_attribute, inherit_model_column_attributes,
     inherit_model_metadata, relationship_has_default, relationship_return_type,
 };
-pub(crate) use model_type::{expand_model_type, has_model_type_operator};
+pub(crate) use model_type::{expand_model_type, has_model_type_operator, model_of_receiver};
 pub(crate) use morph_columns::is_morph_type_column;
 pub(crate) use morph_map::{LaravelMorphMapIndex, MorphMapEntry, MorphMapScan, scan_morph_map};
 pub(crate) use patches::STORAGE_FACADE_FQN;

@@ -247,6 +247,13 @@ static SLOW_COLLECTORS: &[SlowCollector] = &[
         reads_every_body: false,
         codes: &[],
     },
+    SlowCollector {
+        reads_every_body: true,
+        ..laravel(
+            "laravel_mass_assignment",
+            Backend::collect_mass_assignment_diagnostics,
+        )
+    },
     laravel(
         "invalid_laravel_validation_rule",
         Backend::collect_validation_string_diagnostics,
@@ -461,8 +468,12 @@ impl Backend {
     ) {
         let _parse_guard = crate::parser::with_parse_cache(content);
         let ctx = helpers::FileDiagnosticContext::gather(self, uri_str);
+        let is_laravel = self.resolved_class_cache.read().laravel().is_enabled();
         for collector in SLOW_COLLECTORS {
-            if collector.reads_every_body && collector.runs_in == Framework::Any {
+            if collector.reads_every_body
+                && (collector.runs_in == Framework::Any
+                    || (is_laravel && collector.runs_in == Framework::Laravel))
+            {
                 (collector.collect)(self, &ctx, uri_str, content, out);
             }
         }

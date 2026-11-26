@@ -125,6 +125,7 @@ These are shown dimmed rather than underlined, except `unwritten_property`.
 | `invalid_laravel_storage_disk` | Warning | A storage disk not in the config. |
 | `invalid_laravel_validation_rule` | Warning | A validation rule name Laravel does not have. |
 | `invalid_laravel_validation_message` | Warning | A form request `messages()` or `attributes()` key naming an unknown field or rule. |
+| `laravel_mass_assignment` | Warning | A dynamic attribute array passed to an Eloquent model that uses the default mass-assignment guards. |
 | `missing_blade_variable` | Error | A variable a Blade template declares that the call site does not pass. |
 | `unused_blade_variable` | Warning | A variable passed to a view that the template does not use. |
 | `type_mismatch_blade_variable` | Error | A variable passed to a view whose type the template's declaration does not accept. |

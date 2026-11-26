@@ -15,6 +15,24 @@ use super::{
     extends_eloquent_model, factory, resolve_relation_chain, resolve_relation_type,
 };
 
+/// The declared model behind an Eloquent receiver or one of its generic arguments.
+pub(crate) fn model_of_receiver(
+    receiver: &crate::types::ResolvedType,
+    loader: &ResolvedClassLoader<'_>,
+) -> Option<Arc<crate::types::ClassInfo>> {
+    if let Some(class) = &receiver.class_info
+        && extends_eloquent_model(class, loader)
+    {
+        return loader(Fqn::new(&class.fqn()));
+    }
+    let TypeKind::Generic(generic) = receiver.type_string.kind() else {
+        return None;
+    };
+    generic.args.iter().find_map(|arg| {
+        loader(Fqn::new(arg.base_name()?)).filter(|class| extends_eloquent_model(class, loader))
+    })
+}
+
 /// Replace every model operator in `ty` — `builder-of<Model>`,
 /// `collection-of<Model>`, `factory-of<Model>`, `relation-of<Model, 'path'>`
 /// — with the class it names, wherever in the type it appears.

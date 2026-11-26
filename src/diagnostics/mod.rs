@@ -301,6 +301,7 @@ mod incompatible_override;
 pub(crate) mod incremental;
 mod invalid_class_kind;
 mod laravel_string_keys;
+mod mass_assignment;
 mod match_type_errors;
 pub(crate) mod member_lookup;
 pub(crate) mod member_visibility;
