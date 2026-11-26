@@ -159,6 +159,12 @@ check('The App\\ resource registers the controller as a service', $container->ha
 check("app.greeting's %app.sender_name% placeholder reads app.sender_name", $container->getParameterBag()->resolveValue($container->getParameter('app.greeting')) === 'Hello from PHPantom');
 $mailerCalls = $container->getDefinition(WelcomeMailer::class)->getMethodCalls();
 check("WelcomeMailer's calls: in config/services.yaml calls setSender", ($mailerCalls[0][0] ?? null) === 'setSender' && method_exists(WelcomeMailer::class, 'setSender'));
+$inner = $container->getDefinition(CachingSlugger::class)->getArgument('$inner');
+check('The named decorator argument supplies its inner service', (string) $inner === '.inner' && (new ReflectionParameter([CachingSlugger::class, '__construct'], 'inner'))->getPosition() === 0);
+$binding = $container->getDefinition(App\Query\QueryBus::class)->getBindings()['$queryBus'];
+check('The default binding supplies the query bus parameter', (string) $binding->getValues()[0] === 'query.bus' && (new ReflectionParameter([App\Query\QueryBus::class, '__construct'], 'queryBus'))->getPosition() === 0);
+[$factory, $method] = $container->getDefinition('app.config_tree')->getFactory();
+check('The config tree factory calls the configuration service', (string) $factory === Configuration::class && $method === 'getConfigTreeBuilder' && (new Configuration())->$method() instanceof Symfony\Component\Config\Definition\Builder\TreeBuilder);
 $demoCache = $container->getDefinition('app.demo_cache');
 check('app.demo_cache is a child of cache.app', $demoCache instanceof ChildDefinition && $demoCache->getParent() === 'cache.app');
 check('app.slugger is built from Slugger', $container->getDefinition('app.slugger')->getClass() === Slugger::class);

@@ -43,7 +43,7 @@ impl Backend {
             let Some(path) = crate::util::uri_to_path(uri) else {
                 continue;
             };
-            let Ok(content) = std::fs::read(&path) else {
+            let Ok(content) = crate::util::read_file(&path) else {
                 continue;
             };
             if !source_may_declare_pivot_relationship(&content) {

@@ -106,7 +106,7 @@ impl ConfigPlan {
     /// Read the project's merge plan from `root`'s `composer.json`.
     pub(crate) fn load(root: &Path) -> Self {
         let mut plan = Self::default();
-        let Some(extra) = std::fs::read_to_string(root.join("composer.json"))
+        let Some(extra) = crate::util::read_file_to_string(root.join("composer.json"))
             .ok()
             .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
             .and_then(|composer| composer.get("extra").cloned())
@@ -275,7 +275,7 @@ fn package_params_files(package: &serde_json::Value, root: &Path) -> Vec<(Rank, 
 /// entries are kept, and every other value is `null`.  A key that is not a
 /// literal (`Environment::DEV`) is kept by its source text.
 fn read_php_config(path: &Path) -> Option<serde_json::Value> {
-    let content = std::fs::read_to_string(path).ok()?;
+    let content = crate::util::read_file_to_string(path).ok()?;
     crate::parser::with_parsed_program(&content, "yii_config_plugin_file", |program, content| {
         crate::virtual_members::laravel::array_file::returned_exprs(program)
             .first()
@@ -547,7 +547,7 @@ fn read_params_file(
     rank: Rank,
     reading: &mut Vec<PathBuf>,
 ) -> bool {
-    let Ok(content) = std::fs::read_to_string(file) else {
+    let Ok(content) = crate::util::read_file_to_string(file) else {
         return false;
     };
     crate::parser::with_parsed_program(&content, "yii_params", |program, content| {

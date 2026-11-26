@@ -205,7 +205,7 @@ impl Backend {
     /// a layout is what its children are paired against.
     fn blade_template_source(&self, uri: &str, path: &std::path::Path) -> Option<String> {
         self.get_file_content(uri)
-            .or_else(|| std::fs::read_to_string(path).ok())
+            .or_else(|| crate::util::read_file_to_string(path).ok())
     }
 
     /// Rescan one template's entry after an edit.

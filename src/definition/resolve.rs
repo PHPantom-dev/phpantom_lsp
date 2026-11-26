@@ -499,19 +499,7 @@ impl Backend {
                 // reads but has no text for (a built-in an embedded stub
                 // describes) has nowhere to land, as with any other built-in.
                 let declaration = self.named_argument_location(uri, content, symbol)?;
-                let name_token = declaration.name_token?;
-                // The declaration's file is read in the coordinate space its
-                // symbol map uses, as the reference search that starts from
-                // the same token reads it.
-                let declaration_content = self.reference_file_content_arc(&declaration.uri)?;
-                Some(vec![Location {
-                    uri: crate::util::parse_url(&declaration.uri)?,
-                    range: crate::text_position::byte_range_to_lsp_range(
-                        &declaration_content,
-                        name_token.0 as usize,
-                        name_token.1 as usize,
-                    ),
-                }])
+                Some(vec![declaration.location(self)?])
             }
 
             SymbolKind::LaravelMacroString { .. } => Some(vec![point_location(
@@ -522,6 +510,7 @@ impl Backend {
             SymbolKind::CommandOwnParam { .. }
             | SymbolKind::Keyword
             | SymbolKind::CastType
+            | SymbolKind::ServiceArgument { .. }
             | SymbolKind::Comment => None,
         }
     }

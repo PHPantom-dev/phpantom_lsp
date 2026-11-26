@@ -637,24 +637,45 @@ pub(crate) fn infer_modulo_result_type(
 /// to be two things. An operand that is already that benevolent pair (an
 /// earlier `$a | $b`, or `$a |= $b` on untyped operands) is just as
 /// undecided, so a chain keeps the answer.
+///
+/// An untyped operand beside a typed one takes the typed side's overload,
+/// as it does for `$int & $mixed`: `$string & $mixed` is a string. Two
+/// typed operands that may each be a string (`int|string & string`) can
+/// produce either, so the result is the plain pair.
 fn string_overload_result(
     lhs_types: &[ResolvedType],
     rhs_types: &[ResolvedType],
 ) -> Option<PhpType> {
+    let undecided = PhpType::benevolent(PhpType::union(vec![PhpType::int(), PhpType::string()]));
+    let is_undecided = |types: &[ResolvedType]| {
+        operand_is_undecided(types) || types.iter().any(|rt| rt.type_string == undecided)
+    };
     let all_strings = |types: &[ResolvedType]| {
         !types.is_empty()
             && types
                 .iter()
                 .all(|rt| rt.type_string.is_subtype_of(&PhpType::string()))
     };
-    if all_strings(lhs_types) && all_strings(rhs_types) {
+    let may_be_string = |types: &[ResolvedType]| {
+        types.iter().any(|rt| {
+            rt.type_string
+                .union_members()
+                .iter()
+                .any(|m| m.is_string_subtype())
+        })
+    };
+
+    let (lhs_undecided, rhs_undecided) = (is_undecided(lhs_types), is_undecided(rhs_types));
+    if lhs_undecided && rhs_undecided {
+        return Some(undecided);
+    }
+    let (lhs_string, rhs_string) = (all_strings(lhs_types), all_strings(rhs_types));
+    if (lhs_string || lhs_undecided) && (rhs_string || rhs_undecided) {
         return Some(PhpType::string());
     }
-    let undecided = PhpType::benevolent(PhpType::union(vec![PhpType::int(), PhpType::string()]));
-    let is_undecided = |types: &[ResolvedType]| {
-        operand_is_undecided(types) || types.iter().any(|rt| rt.type_string == undecided)
-    };
-    (is_undecided(lhs_types) && is_undecided(rhs_types)).then_some(undecided)
+    let lhs_may = lhs_undecided || may_be_string(lhs_types);
+    let rhs_may = rhs_undecided || may_be_string(rhs_types);
+    (lhs_may && rhs_may).then(|| PhpType::union(vec![PhpType::int(), PhpType::string()]))
 }
 
 /// The bitwise operator `operator` is, or `None` for every other binary

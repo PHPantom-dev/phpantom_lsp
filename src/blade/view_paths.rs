@@ -12,7 +12,7 @@ use crate::text_scan::unquote_php_string;
 /// paths.  Falls back to `resources/views` if the config file is
 /// missing or unparseable.  Returns only directories that exist.
 pub fn discover_view_paths(workspace_root: &Path) -> Vec<PathBuf> {
-    let config = std::fs::read_to_string(workspace_root.join("config/view.php")).ok();
+    let config = crate::util::read_file_to_string(workspace_root.join("config/view.php")).ok();
     view_paths_from_config(config.as_deref(), workspace_root)
 }
 

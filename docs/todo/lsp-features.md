@@ -836,22 +836,31 @@ side table to mirror), and `references/symfony-language-tools`
 
 ---
 
-## F46. Symfony listener methods a tag or a default names
+## F77. Symfony listener methods chosen by convention
 
 **Impact: Low-Medium · Complexity: Low-Medium**
 
-The method an `#[AsEventListener(method: …)]` or a subscriber's map names
-navigates to the listener's method, and one that does not exist is
-reported. Two other ways of naming it do not: the `method` of a
-`kernel.event_listener` tag in YAML or XML, which names a method of the
-tagged service's class, and no method at all, where Symfony calls
-`on` followed by the event name in camel case, else `__invoke()`. The
-second also leaves a listener whose method name is never written
-anywhere looking unused.
+When no listener method is written, Symfony tries `on` followed by the
+camel-cased event name and then `__invoke()`. Track the method Symfony
+chooses so its registration counts as a use. Report a missing listener
+method, including an explicit method on a YAML or XML tag.
 
-**Where to look:** `src/symfony/tags.rs` (the tag scan, which already
-reads the `event` beside the `method`), `src/resource_navigation.rs` (the
-`Class::member` spans a resource map already holds).
+---
+
+## F78. Symfony named arguments and bindings in XML service files
+
+**Impact: Low · Complexity: Low-Medium**
+
+In YAML, a named argument (`$inner:` under `arguments:`) and a default
+binding (`$queryBus:` under `_defaults: bind:`) lead to the constructor
+or factory parameter they fill, and Find References on that parameter
+lists them. The XML spellings, `<argument key="$inner">` and
+`<bind key="$queryBus">` under `<defaults>`, do neither. A binding there
+reaches every service the file configures, including the classes a
+`<prototype namespace="…" resource="…">` loads.
+
+**Where to look:** `src/symfony/service_calls.rs` (`xml_call_sites`) and
+`src/symfony/service_arguments.rs` (the targets the YAML scan builds).
 
 ---
 

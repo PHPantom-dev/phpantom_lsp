@@ -123,7 +123,7 @@ pub(crate) fn read_php_source(path: &Path) -> Option<String> {
     static REPORTED: std::sync::LazyLock<parking_lot::Mutex<std::collections::HashSet<PathBuf>>> =
         std::sync::LazyLock::new(Default::default);
 
-    match std::fs::read(path) {
+    match read_file(path) {
         Ok(bytes) => Some(match String::from_utf8(bytes) {
             Ok(text) => text,
             Err(err) => String::from_utf8_lossy(err.as_bytes()).into_owned(),
@@ -197,6 +197,59 @@ pub(crate) fn is_contained_relative_path(relative: &Path) -> bool {
     relative
         .components()
         .all(|component| matches!(component, std::path::Component::Normal(_)))
+}
+
+/// Whether `path` lies inside `root`, judged by components rather than by
+/// prefix, so `root/../x` is outside.
+pub(crate) fn is_path_inside(path: &Path, root: &Path) -> bool {
+    path.strip_prefix(root)
+        .is_ok_and(|rest| rest.as_os_str().is_empty() || is_contained_relative_path(rest))
+}
+
+/// [`std::fs::read`] for a file the workspace points at, which refuses
+/// anything but a regular file.
+///
+/// A repository can hold a symlink, or name a path in a generated file,
+/// that leads to a device such as `/dev/zero` or to a pipe: reading the
+/// first never ends and grows the buffer until the process aborts, and
+/// opening the second blocks until something writes to it.
+pub(crate) fn read_file(path: impl AsRef<Path>) -> std::io::Result<Vec<u8>> {
+    use std::io::Read;
+
+    let path = path.as_ref();
+
+    // Checked before opening as well, since opening a pipe already blocks.
+    if !std::fs::metadata(path)?.is_file() {
+        return Err(not_a_regular_file(path));
+    }
+    let mut file = std::fs::File::open(path)?;
+    let metadata = file.metadata()?;
+    if !metadata.is_file() {
+        return Err(not_a_regular_file(path));
+    }
+    let mut bytes = Vec::new();
+    bytes
+        .try_reserve_exact(usize::try_from(metadata.len()).unwrap_or(usize::MAX))
+        .map_err(std::io::Error::other)?;
+    file.read_to_end(&mut bytes)?;
+    Ok(bytes)
+}
+
+/// [`std::fs::read_to_string`] with the checks of [`read_file`].
+pub(crate) fn read_file_to_string(path: impl AsRef<Path>) -> std::io::Result<String> {
+    String::from_utf8(read_file(path)?).map_err(|_| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "stream did not contain valid UTF-8",
+        )
+    })
+}
+
+fn not_a_regular_file(path: &Path) -> std::io::Error {
+    std::io::Error::new(
+        std::io::ErrorKind::InvalidInput,
+        format!("{} is not a regular file", path.display()),
+    )
 }
 
 /// The canonical spelling of `path`, for comparing against paths recorded
@@ -349,6 +402,49 @@ pub(crate) fn find_enclosing_method_block_in_members<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn read_file_reads_regular_files_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("a.php");
+        std::fs::write(&file, "<?php").unwrap();
+        assert_eq!(read_file_to_string(&file).unwrap(), "<?php");
+        assert!(read_file(dir.path()).is_err());
+        assert_eq!(
+            read_file(dir.path().join("missing.php"))
+                .unwrap_err()
+                .kind(),
+            std::io::ErrorKind::NotFound
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn read_file_refuses_a_link_to_a_device() {
+        // Reading `/dev/zero` never ends, so without the check this test
+        // would exhaust memory rather than fail.
+        let dir = tempfile::tempdir().unwrap();
+        let link = dir.path().join("composer.json");
+        std::os::unix::fs::symlink("/dev/zero", &link).unwrap();
+        assert_eq!(
+            read_file(&link).unwrap_err().kind(),
+            std::io::ErrorKind::InvalidInput
+        );
+        assert!(read_php_source(&link).is_none());
+    }
+
+    #[test]
+    fn path_inside_root_is_judged_by_components() {
+        let root = std::env::temp_dir().join("project");
+        assert!(is_path_inside(&root, &root));
+        assert!(is_path_inside(&root.join("src/A.php"), &root));
+        assert!(!is_path_inside(&root.join("../other/A.php"), &root));
+        assert!(!is_path_inside(&root.join("src/../../A.php"), &root));
+        assert!(!is_path_inside(
+            &std::env::temp_dir().join("projectx"),
+            &root
+        ));
+    }
 
     #[test]
     fn unescape_string_literal_collapses_namespace_separators() {

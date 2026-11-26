@@ -110,6 +110,43 @@ class Service
 "#;
 
 #[test]
+fn mass_assignment_refreshes_other_methods_when_the_guard_setting_changes() {
+    let dir = tempfile::tempdir().unwrap();
+    let model_uri = crate::util::path_to_uri(&dir.path().join("Model.php"));
+    let uri = crate::util::path_to_uri(&dir.path().join("Draft.php"));
+    let backend = backend_with(&[(
+        &model_uri,
+        r"<?php namespace Illuminate\Database\Eloquent;
+        class Model { public static function unguard(): void {} public function fill(array $attributes): void {} }",
+    )]);
+    backend
+        .resolved_class_cache
+        .write()
+        .laravel_mut()
+        .set_enabled(true);
+    let source = r"<?php namespace App;
+        use Illuminate\Database\Eloquent\Model;
+        class Draft extends Model {
+            public function apply(array $attributes): void { $this->fill($attributes); }
+            public static function boot(): void { /* guard */ }
+        }";
+    let unguarded = source.replace("/* guard */", "Model::unguard();");
+    let mut baseline = None;
+    for (text, expected) in [(source, 1), (unguarded.as_str(), 0), (source, 1)] {
+        let pass = edit(&backend, &uri, text, baseline.as_deref());
+        if baseline.is_some() {
+            assert_eq!(pass.kind, SlowPassKind::Partial { units: 1 });
+        }
+        let warnings = codes_and_lines(&pass.diagnostics)
+            .into_iter()
+            .filter(|(code, _)| code == "laravel_mass_assignment")
+            .count();
+        assert_eq!(warnings, expected);
+        baseline = pass.baseline;
+    }
+}
+
+#[test]
 fn an_edit_to_one_method_rediagnoses_only_that_method() {
     let after = SERVICE.replace(
         "        $this->missingTwo();\n",

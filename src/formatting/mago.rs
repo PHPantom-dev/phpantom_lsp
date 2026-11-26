@@ -84,7 +84,7 @@ struct MagoFormatterToml {
 pub(super) fn load_mago_format_settings(
     config_path: &Path,
 ) -> Result<mago_formatter::settings::FormatSettings, String> {
-    let source = std::fs::read_to_string(config_path)
+    let source = crate::util::read_file_to_string(config_path)
         .map_err(|e| format!("Failed to read {}: {}", config_path.display(), e))?;
     let config: MagoToml = toml::from_str(&source)
         .map_err(|e| format!("Failed to parse {}: {}", config_path.display(), e))?;

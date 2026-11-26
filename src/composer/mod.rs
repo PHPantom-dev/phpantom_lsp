@@ -27,7 +27,6 @@
 //! Composer JSON parsing is delegated to the [`mago_composer`] crate,
 //! which provides typed Rust structs for the full `composer.json` schema.
 
-use std::fs;
 use std::path::{Path, PathBuf};
 
 pub use mago_composer::ComposerPackage;
@@ -110,7 +109,7 @@ pub fn try_read_composer_package(
     workspace_root: &Path,
 ) -> Result<Option<ComposerPackage>, ComposerReadError> {
     let composer_path = workspace_root.join("composer.json");
-    let content = match fs::read_to_string(&composer_path) {
+    let content = match crate::util::read_file_to_string(&composer_path) {
         Ok(content) => content,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(e) => {
@@ -133,7 +132,7 @@ pub fn try_read_composer_package(
 /// file that exists but cannot be read is logged rather than passed off
 /// as missing.
 pub(crate) fn read_composer_file(path: &Path) -> Option<String> {
-    match fs::read_to_string(path) {
+    match crate::util::read_file_to_string(path) {
         Ok(content) => Some(content),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
         Err(e) => {
@@ -361,7 +360,7 @@ mod tests {
     #[test]
     fn a_malformed_composer_json_is_reported() {
         let dir = tempfile::tempdir().unwrap();
-        fs::write(dir.path().join("composer.json"), "{ \"require\": ").unwrap();
+        std::fs::write(dir.path().join("composer.json"), "{ \"require\": ").unwrap();
         let err = try_read_composer_package(dir.path()).unwrap_err();
         assert!(err.to_string().contains("composer.json"), "{err}");
         assert!(read_composer_package(dir.path()).is_none());

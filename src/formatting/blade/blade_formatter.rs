@@ -41,7 +41,7 @@ pub(in crate::formatting) fn uses_blade_formatter(workspace_root: &Path) -> bool
 }
 
 fn package_json_lists_it(workspace_root: &Path) -> bool {
-    let Ok(source) = std::fs::read_to_string(workspace_root.join("package.json")) else {
+    let Ok(source) = crate::util::read_file_to_string(workspace_root.join("package.json")) else {
         return false;
     };
     let Ok(package) = serde_json::from_str::<serde_json::Value>(&source) else {

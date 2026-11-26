@@ -68,7 +68,7 @@ impl StylesheetIndex {
             },
         );
         for path in paths {
-            let Ok(content) = std::fs::read_to_string(&path) else {
+            let Ok(content) = crate::util::read_file_to_string(&path) else {
                 continue;
             };
             index.add(path, &content);
@@ -161,7 +161,8 @@ impl Backend {
         let mut read: Option<(u32, String)> = None;
         for &(file, offset) in declarations {
             if read.as_ref().is_none_or(|(current, _)| *current != file) {
-                let Ok(content) = std::fs::read_to_string(&index.files[file as usize]) else {
+                let Ok(content) = crate::util::read_file_to_string(&index.files[file as usize])
+                else {
                     continue;
                 };
                 read = Some((file, content));

@@ -33,9 +33,7 @@ use crate::type_engine::resolver::resolve_target_classes;
 use crate::type_engine::subject_extraction::detect_access_operator;
 use crate::types::{AccessKind, ClassInfo, FileContext, ParameterInfo};
 use crate::virtual_members::laravel::where_property::{AttributeNameKind, collect_attribute_names};
-use crate::virtual_members::laravel::{
-    classify_relationship_typed, extends_eloquent_model, resolve_relation_chain,
-};
+use crate::virtual_members::laravel::{classify_relationship_typed, resolve_relation_chain};
 
 /// Relationship-building method names on the Model base class.
 /// These return relationship types but are not actual relationship
@@ -572,23 +570,11 @@ impl Backend {
             AccessKind::Arrow
         };
 
-        let is_model = |cls: &ClassInfo| extends_eloquent_model(cls, class_loader);
-        for rt in resolve_target_classes(&es_ctx.subject, access_kind, &rctx) {
-            if let Some(cls) = &rt.class_info
-                && is_model(cls)
-            {
-                return class_loader(Fqn::new(&cls.fqn()));
-            }
-            if let TypeKind::Generic(g) = rt.type_string.kind() {
-                let model = g.args.iter().find_map(|arg| {
-                    class_loader(Fqn::new(arg.base_name()?)).filter(|cls| is_model(cls))
-                });
-                if model.is_some() {
-                    return model;
-                }
-            }
-        }
-        None
+        resolve_target_classes(&es_ctx.subject, access_kind, &rctx)
+            .iter()
+            .find_map(|receiver| {
+                crate::virtual_members::laravel::model_of_receiver(receiver, class_loader)
+            })
     }
 
     /// Build completion items for relation names on the given model.

@@ -54,7 +54,7 @@ pub(crate) fn resolve_env_definitions(backend: &Backend, key: &str) -> Vec<Locat
     for name in dotenv_file_names(&root) {
         let path = root.join(&name);
         let (Ok(content), Some(uri)) = (
-            std::fs::read_to_string(&path),
+            crate::util::read_file_to_string(&path),
             crate::util::path_to_url(&path),
         ) else {
             continue;
@@ -108,7 +108,7 @@ pub(crate) fn env_declaration(backend: &Backend, key: &str) -> Option<EnvDeclara
         });
     }
     dotenv_file_names(&root).into_iter().find_map(|file| {
-        let content = std::fs::read_to_string(root.join(&file)).ok()?;
+        let content = crate::util::read_file_to_string(root.join(&file)).ok()?;
         let value = declared_env_value(&content, key)?;
         Some(EnvDeclaration { file, value })
     })
@@ -146,7 +146,7 @@ pub(crate) fn enumerate_env_keys(backend: &Backend) -> Vec<String> {
     };
     let mut keys: Vec<String> = dotenv_file_names(&root)
         .into_iter()
-        .filter_map(|name| std::fs::read_to_string(root.join(name)).ok())
+        .filter_map(|name| crate::util::read_file_to_string(root.join(name)).ok())
         .flat_map(|content| {
             content
                 .lines()

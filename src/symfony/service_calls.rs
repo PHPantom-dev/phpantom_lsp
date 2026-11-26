@@ -1,4 +1,4 @@
-//! The methods a service definition's `calls:` names.
+//! The PHP callables and named arguments configured on a service.
 //!
 //! ```yaml
 //! services:
@@ -19,56 +19,79 @@
 //! symbol map, which go-to-definition and Find References already read,
 //! and the position of one is where completion offers the class's methods.
 
-use crate::atom::atom;
+use super::service_arguments::{Bindings, Target, argument_key, argument_spans};
+use crate::atom::{Atom, atom};
 use crate::symbol_map::{DocblockMemberRef, SubjectText, SymbolKind, SymbolSpan};
+use std::ops::Range;
+use std::sync::Arc;
 
-/// Where a method name is, or would be written, under a service's `calls:`.
+/// The location and receiver of a configured method.
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) struct CallSite {
-    /// The class the method belongs to.
+    /// The class name or the factory service reference (`@id`).
     pub(crate) class: String,
+    /// Whether this factory calls the method statically.
+    pub(crate) is_static: bool,
+    /// Byte offset of the first character in the method name.
     pub(crate) start: usize,
+    /// Byte offset after the last character in the method name.
     pub(crate) end: usize,
 }
 
-/// The method-call spans of one services file.
+/// Method and named-argument spans for a services file.
 pub(crate) fn service_call_spans(uri: &str, content: &str) -> Vec<SymbolSpan> {
-    call_sites(uri, content)
-        .into_iter()
-        .filter(|site| is_method_name(&content[site.start..site.end]))
-        .map(|site| SymbolSpan {
-            start: site.start as u32,
-            end: site.end as u32,
-            kind: SymbolKind::MemberAccess {
-                member_name: atom(&content[site.start..site.end]),
-                subject_text: SubjectText::owned(site.class),
-                is_static: false,
-                is_method_call: true,
-                docblock_ref: DocblockMemberRef::No,
-                is_array_callable: false,
-                is_nullsafe: false,
-            },
-        })
-        .collect()
+    let mut spans = Vec::new();
+    let calls = sites(uri, content, &mut spans);
+    spans.extend(
+        calls
+            .into_iter()
+            .filter(|site| is_method_name(&content[site.start..site.end]))
+            .map(|site| SymbolSpan {
+                start: site.start as u32,
+                end: site.end as u32,
+                kind: SymbolKind::MemberAccess {
+                    member_name: atom(&content[site.start..site.end]),
+                    subject_text: SubjectText::owned(site.class),
+                    is_static: site.is_static,
+                    is_method_call: true,
+                    docblock_ref: DocblockMemberRef::No,
+                    is_array_callable: false,
+                    is_nullsafe: false,
+                },
+            }),
+    );
+    spans
 }
 
 /// The call site the cursor is typing a method name at, if any.
 pub(crate) fn call_site_at(uri: &str, content: &str, cursor: usize) -> Option<CallSite> {
-    call_sites(uri, content)
+    sites(uri, content, &mut Vec::new())
         .into_iter()
         .find(|site| (site.start..=site.end).contains(&cursor))
 }
 
-fn call_sites(uri: &str, content: &str) -> Vec<CallSite> {
+fn sites(uri: &str, content: &str, arguments: &mut Vec<SymbolSpan>) -> Vec<CallSite> {
     match super::config_format(uri) {
-        Some(super::ConfigFormat::Yaml) if content.contains("calls") => yaml_call_sites(content),
-        Some(super::ConfigFormat::Xml) if content.contains("<call") => xml_call_sites(content),
+        Some(super::ConfigFormat::Yaml)
+            if ["calls", "factory", "tags", "arguments", "bind"]
+                .iter()
+                .any(|key| content.contains(key)) =>
+        {
+            yaml_call_sites(content, arguments)
+        }
+        Some(super::ConfigFormat::Xml)
+            if ["<call", "<tag", "<factory"]
+                .iter()
+                .any(|element| content.contains(element)) =>
+        {
+            xml_call_sites(content)
+        }
         _ => Vec::new(),
     }
 }
 
 /// Whether `name` is a PHP identifier.
-fn is_method_name(name: &str) -> bool {
+pub(super) fn is_method_name(name: &str) -> bool {
     let mut bytes = name.bytes();
     bytes
         .next()
@@ -94,38 +117,111 @@ struct Item {
     content_indent: usize,
 }
 
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+enum Property {
+    Calls,
+    Tags,
+    Arguments,
+    Excludes,
+    #[default]
+    Other,
+}
+
 /// A service definition being read.
 struct Service {
     indent: usize,
     key_class: Option<String>,
+    namespace: Option<Atom>,
+    resource: Option<Atom>,
+    excludes: Vec<Atom>,
+    property: Property,
+    defaults: bool,
+    tags: Option<Range<usize>>,
+    argument_indent: Option<usize>,
+    arguments: Vec<super::service_arguments::Argument>,
+    factory: Option<CallSite>,
+    has_factory: bool,
     class: Option<String>,
     property_indent: Option<usize>,
-    /// The indentation of `calls:`, while its entries are being read.
-    calls_indent: Option<usize>,
     item: Option<Item>,
     names: Vec<(usize, usize)>,
 }
 
 impl Service {
-    fn new(indent: usize, key_class: Option<String>) -> Self {
+    fn new(indent: usize, key: &str) -> Self {
         Self {
             indent,
-            key_class,
+            key_class: class_name(key),
+            namespace: key
+                .ends_with('\\')
+                .then(|| atom(&crate::framework::normalize_framework_fqn(key))),
+            resource: None,
+            excludes: Vec::new(),
+            property: Property::Other,
+            defaults: key == "_defaults",
+            tags: None,
+            argument_indent: None,
+            arguments: Vec::new(),
+            factory: None,
+            has_factory: false,
             class: None,
             property_indent: None,
-            calls_indent: None,
             item: None,
             names: Vec::new(),
         }
     }
 
-    fn finish(self, sites: &mut Vec<CallSite>) {
-        let Some(class) = self.class.or(self.key_class) else {
+    fn finish(
+        mut self,
+        content: &str,
+        sites: &mut Vec<CallSite>,
+        bindings: &mut Bindings,
+        spans: &mut Vec<SymbolSpan>,
+    ) {
+        if self.defaults {
+            bindings.defaults.extend(self.arguments);
+            return;
+        }
+        let class = self.class.or(self.key_class);
+        let target = if let Some(factory) = self.factory {
+            let target = Target::Method {
+                owner: atom(&factory.class),
+                method: atom(&content[factory.start..factory.end]),
+            };
+            sites.push(factory);
+            Some(target)
+        } else if self.has_factory || (self.arguments.is_empty() && !bindings.collect_targets) {
+            None
+        } else if let (Some(namespace), Some(directory)) = (self.namespace, self.resource) {
+            Some(Target::Resource {
+                namespace,
+                directory,
+                excludes: self.excludes,
+            })
+        } else {
+            class.as_ref().map(|class| Target::Method {
+                owner: atom(class),
+                method: atom("__construct"),
+            })
+        };
+        if let Some(target) = target {
+            if !self.arguments.is_empty() {
+                argument_spans(content, self.arguments, Arc::from([target.clone()]), spans);
+            }
+            if bindings.collect_targets {
+                bindings.targets.push(target);
+            }
+        }
+        let Some(class) = class else {
             return;
         };
+        if let Some(tags) = self.tags {
+            super::tags::listener_methods(&content[tags.clone()], tags.start, &mut self.names);
+        }
         for (start, end) in self.names {
             sites.push(CallSite {
                 class: class.clone(),
+                is_static: false,
                 start,
                 end,
             });
@@ -137,25 +233,93 @@ impl Service {
         let property_indent = *self.property_indent.get_or_insert(indent);
         let trimmed = text.trim();
         // YAML lets a sequence's entries sit at its key's own indentation.
-        let compact_entry =
-            indent == property_indent && self.calls_indent.is_some() && trimmed.starts_with('-');
+        let compact_entry = indent == property_indent
+            && matches!(
+                self.property,
+                Property::Calls | Property::Tags | Property::Excludes
+            )
+            && trimmed.starts_with('-');
         if indent <= property_indent && !compact_entry {
-            self.calls_indent = None;
+            self.property = Property::Other;
+            self.argument_indent = None;
             self.item = None;
             if indent < property_indent {
                 return;
             }
-            let Some((key, value, _)) = mapping_entry(trimmed) else {
+            let Some((key, value, value_offset)) = mapping_entry(trimmed) else {
                 return;
             };
             match key {
                 "class" => self.class = class_name(value),
-                "calls" if value.is_empty() => self.calls_indent = Some(indent),
+                "resource" if self.namespace.is_some() => {
+                    self.resource = Some(atom(crate::framework::strip_yaml_quotes(value).0))
+                }
+                "exclude" if self.namespace.is_some() => {
+                    if value.is_empty() {
+                        self.property = Property::Excludes;
+                    } else {
+                        if let Some(list) =
+                            value.strip_prefix('[').and_then(|v| v.strip_suffix(']'))
+                        {
+                            self.excludes
+                                .extend(list.split(',').map(|v| {
+                                    atom(crate::framework::strip_yaml_quotes(v.trim()).0)
+                                }));
+                        } else {
+                            self.excludes
+                                .push(atom(crate::framework::strip_yaml_quotes(value).0));
+                        }
+                    }
+                }
+                "tags" => {
+                    self.property = Property::Tags;
+                    self.tags = Some(line_start..line_start + text.len());
+                }
+                "factory" => {
+                    self.has_factory = true;
+                    self.factory = factory_site(value, line_start + indent + value_offset);
+                }
+                "arguments" | "bind" => {
+                    if value.is_empty() {
+                        self.property = Property::Arguments;
+                    } else if value.starts_with('{') {
+                        let (keys, _) = super::validation::flow_mapping_keys(value, 0);
+                        for (start, end) in keys {
+                            argument_key(
+                                &value[start..end],
+                                line_start + indent + value_offset + start,
+                                &mut self.arguments,
+                            );
+                        }
+                    }
+                }
+                "calls" if value.is_empty() => self.property = Property::Calls,
                 _ => {}
             }
             return;
         }
-        if self.calls_indent.is_none() {
+        if self.property == Property::Excludes
+            && let Some(value) = trimmed.strip_prefix("- ")
+        {
+            self.excludes
+                .push(atom(crate::framework::strip_yaml_quotes(value.trim()).0));
+        }
+        if self.property == Property::Tags
+            && let Some(range) = &mut self.tags
+        {
+            range.end = line_start + text.len();
+        }
+        if self.property == Property::Arguments
+            && indent == *self.argument_indent.get_or_insert(indent)
+            && let Some((key, _, _)) = mapping_entry(text)
+        {
+            argument_key(
+                key,
+                line_start + super::resources::offset_within(text, key),
+                &mut self.arguments,
+            );
+        }
+        if self.property != Property::Calls {
             return;
         }
 
@@ -245,7 +409,42 @@ fn name_site(raw: &str, start: usize) -> (usize, usize) {
     (start + quote, start + quote + name.len())
 }
 
-fn yaml_call_sites(content: &str) -> Vec<CallSite> {
+/// The receiver and method a service's factory calls. A receiver beginning
+/// with @ is resolved through the live container index at request time.
+fn factory_site(value: &str, start: usize) -> Option<CallSite> {
+    let (value_text, _) = crate::framework::strip_yaml_quotes(value);
+    let (owner, raw_method) = if let Some(list) = value_text
+        .strip_prefix('[')
+        .and_then(|list| list.strip_suffix(']'))
+    {
+        list.split_once(',')?
+    } else {
+        value_text.split_once("::")?
+    };
+    let (owner, _) = crate::framework::strip_yaml_quotes(owner.trim());
+    let class = if let Some(id) = owner.strip_prefix('@') {
+        if !super::resources::is_container_key(id) && class_name(id).is_none() {
+            return None;
+        }
+        crate::framework::normalize_framework_fqn(owner)
+    } else {
+        class_name(owner)?
+    };
+    let raw = raw_method.trim();
+    let (start, end) = name_site(raw, start + super::resources::offset_within(value, raw));
+    Some(CallSite {
+        is_static: !class.starts_with('@'),
+        class,
+        start,
+        end,
+    })
+}
+
+fn yaml_call_sites(content: &str, spans: &mut Vec<SymbolSpan>) -> Vec<CallSite> {
+    let mut bindings = Bindings {
+        collect_targets: content.contains("_defaults") && content.contains("bind"),
+        ..Bindings::default()
+    };
     let mut sites = Vec::new();
     // The indentation of `services:` and of its entries.
     let mut section: Option<(usize, Option<usize>)> = None;
@@ -265,7 +464,7 @@ fn yaml_call_sites(content: &str) -> Vec<CallSite> {
         if service.as_ref().is_some_and(|open| indent <= open.indent)
             && let Some(done) = service.take()
         {
-            done.finish(&mut sites);
+            done.finish(content, &mut sites, &mut bindings, spans);
         }
         if let Some(open) = service.as_mut() {
             open.read(text, line_start, indent);
@@ -273,6 +472,7 @@ fn yaml_call_sites(content: &str) -> Vec<CallSite> {
         }
 
         if trimmed == "services:" {
+            bindings.finish(content, spans);
             section = Some((indent, None));
             instanceof = None;
             continue;
@@ -291,20 +491,21 @@ fn yaml_call_sites(content: &str) -> Vec<CallSite> {
         };
         if indent == entry_indent {
             instanceof = (key == "_instanceof").then_some((indent, None));
-            if value.is_empty() && !key.starts_with('_') {
-                service = Some(Service::new(indent, class_name(key)));
+            if (value.is_empty() || value == "~") && (!key.starts_with('_') || key == "_defaults") {
+                service = Some(Service::new(indent, key));
             }
         } else if let Some((instanceof_indent, entries)) = instanceof.as_mut()
             && indent > *instanceof_indent
             && indent == *entries.get_or_insert(indent)
             && value.is_empty()
         {
-            service = Some(Service::new(indent, class_name(key)));
+            service = Some(Service::new(indent, key));
         }
     }
     if let Some(done) = service {
-        done.finish(&mut sites);
+        done.finish(content, &mut sites, &mut bindings, spans);
     }
+    bindings.finish(content, spans);
     sites
 }
 
@@ -347,12 +548,43 @@ fn xml_call_sites(content: &str) -> Vec<CallSite> {
                     .and_then(|(value, _, _)| class_name(&value));
                 services.push(class);
             }
-            "call" if !closing => {
+            "call" | "tag"
+                if !closing
+                    && (name == "call"
+                        || attribute(&["name"])
+                            .is_some_and(|(tag, _, _)| tag == super::tags::EVENT_LISTENER_TAG)) =>
+            {
                 if let Some(Some(class)) = services.last()
                     && let Some((_, start, end)) = attribute(&["method"])
                 {
                     sites.push(CallSite {
                         class: class.clone(),
+                        is_static: false,
+                        start,
+                        end,
+                    });
+                }
+            }
+            // `<factory class="App\Factory" method="create"/>` calls a static
+            // method, `<factory service="id" method="create"/>` one on a service.
+            "factory" if !closing => {
+                let owner = attribute(&["class"])
+                    .and_then(|(value, _, _)| class_name(&value))
+                    .or_else(|| {
+                        attribute(&["service"])
+                            .filter(|(id, _, _)| {
+                                super::resources::is_container_key(id) || class_name(id).is_some()
+                            })
+                            .map(|(id, _, _)| {
+                                format!("@{}", crate::framework::normalize_framework_fqn(&id))
+                            })
+                    });
+                if let Some(class) = owner
+                    && let Some((_, start, end)) = attribute(&["method"])
+                {
+                    sites.push(CallSite {
+                        is_static: !class.starts_with('@'),
+                        class,
                         start,
                         end,
                     });
@@ -369,7 +601,7 @@ mod tests {
     use super::*;
 
     fn named(uri: &str, content: &str) -> Vec<(String, String)> {
-        call_sites(uri, content)
+        sites(uri, content, &mut Vec::new())
             .into_iter()
             .map(|site| (site.class, content[site.start..site.end].to_string()))
             .collect()
@@ -380,6 +612,32 @@ mod tests {
             .iter()
             .map(|(class, name)| (class.to_string(), name.to_string()))
             .collect()
+    }
+
+    #[test]
+    fn unsupported_factories_and_positional_keys_are_not_parameter_sites() {
+        let yaml = r"services:
+  unknown.factory:
+    factory: ['@bad id', make]
+    arguments: { 0: zero, $0bad: value }
+  App\:
+    resource: ../src/
+    exclude: ['../src/One', '../src/Two']
+  App\Elsewhere\:
+    resource: ../elsewhere/
+    exclude: '../elsewhere/Skip'
+  _defaults:
+    bind: { Type: value, $path: value }
+";
+        let spans = service_call_spans("file:///p/config/services.yaml", yaml);
+        assert_eq!(spans.len(), 1);
+        let span = &spans[0];
+        assert_eq!(&yaml[span.start as usize..span.end as usize], "$path");
+        assert!(
+            matches!(&span.kind, SymbolKind::ServiceArgument { targets, .. }
+            if matches!(targets.as_ref(), [Target::Resource { excludes: first, .. }, Target::Resource { excludes: second, .. }]
+                if first.len() == 2 && second.len() == 1))
+        );
     }
 
     #[test]
@@ -449,7 +707,7 @@ mod tests {
     #[test]
     fn a_name_being_typed_is_a_site() {
         let yaml = "services:\n  App\\Mailer:\n    calls:\n      - [set\n      - \n";
-        let sites = call_sites("file:///p/config/services.yaml", yaml);
+        let sites = sites("file:///p/config/services.yaml", yaml, &mut Vec::new());
         assert_eq!(sites.len(), 2);
         assert_eq!(&yaml[sites[0].start..sites[0].end], "set");
         assert_eq!(sites[1].start, sites[1].end);

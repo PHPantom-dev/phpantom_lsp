@@ -240,7 +240,7 @@ fn collect_hits(
                     {
                         return WalkState::Continue;
                     }
-                    match std::fs::read(source) {
+                    match crate::util::read_file(source) {
                         Ok(bytes) => match String::from_utf8(bytes) {
                             Ok(text) => std::borrow::Cow::Owned(text),
                             Err(_) => return WalkState::Continue,

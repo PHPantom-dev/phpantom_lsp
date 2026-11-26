@@ -485,7 +485,7 @@ impl Backend {
             if *change_type == FileChangeType::Deleted {
                 self.clear_file_maps(uri);
                 self.forget_twig_source(uri);
-            } else if let Ok(content) = std::fs::read_to_string(path) {
+            } else if let Ok(content) = crate::util::read_file_to_string(path) {
                 self.update_resource_symbol_index(uri, &content);
             }
         }

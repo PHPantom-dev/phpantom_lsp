@@ -115,7 +115,7 @@ impl Backend {
         let vendor_dirs = self.workspace.vendor_dir_paths.lock().clone();
         for vendor_dir in &vendor_dirs {
             let installed = vendor_dir.join("composer").join("installed.json");
-            if let Ok(content) = std::fs::read_to_string(&installed) {
+            if let Ok(content) = crate::util::read_file_to_string(&installed) {
                 for fqn in crate::virtual_members::laravel::parse_installed_providers(&content) {
                     push(&mut providers, fqn, ProviderOrigin::Package);
                 }

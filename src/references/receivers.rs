@@ -133,6 +133,18 @@ impl Backend {
             is_static,
             docblock_ref,
         } = receiver;
+        if let Some(service) = subject_text.strip_prefix('@')
+            && ctx
+                .uri
+                .as_deref()
+                .is_some_and(|uri| self.is_resource_uri(uri))
+        {
+            return self
+                .symfony_service_classes(service)
+                .into_iter()
+                .map(|class| class.to_string())
+                .collect();
+        }
         // A repository's entity can be bound by a type argument
         // (`EntityRepository<User>`), which a class name loses.
         if docblock_ref == DocblockMemberRef::EntityField {

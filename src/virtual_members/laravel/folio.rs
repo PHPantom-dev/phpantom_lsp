@@ -88,7 +88,7 @@ pub(crate) fn discover_folio_mounts(backend: &Backend) -> Vec<FolioMount> {
     // `bootstrap/app.php`, which is not a service provider and so is never
     // reached by the provider scan that populates `folio_mounts` above.
     let bootstrap_path = workspace_root.join("bootstrap/app.php");
-    if let Ok(content) = std::fs::read_to_string(&bootstrap_path) {
+    if let Ok(content) = crate::util::read_file_to_string(&bootstrap_path) {
         let arena = LocalArena::new();
         let file_id = FileId::new(b"input.php");
         let program = mago_syntax::parser::parse_file_content(&arena, file_id, content.as_bytes());
@@ -119,7 +119,7 @@ pub(crate) fn discover_folio_mounts(backend: &Backend) -> Vec<FolioMount> {
 /// a project that merely happens to have a `resources/views/pages`
 /// directory is left alone.
 fn folio_in_use(workspace_root: &Path) -> bool {
-    if let Ok(composer) = std::fs::read_to_string(workspace_root.join("composer.json"))
+    if let Ok(composer) = crate::util::read_file_to_string(workspace_root.join("composer.json"))
         && composer.contains("laravel/folio")
     {
         return true;
@@ -282,7 +282,7 @@ pub(crate) fn enumerate_folio_routes(backend: &Backend) -> Vec<(RouteEntry, Path
         let mut pages = Vec::new();
         collect_page_files(&mount.directory, &mount.directory, &mut pages);
         for (relative, path) in pages {
-            let Ok(content) = std::fs::read_to_string(&path) else {
+            let Ok(content) = crate::util::read_file_to_string(&path) else {
                 continue;
             };
             let Some((page_name, offset)) = extract_page_route_name(&content) else {

@@ -171,7 +171,7 @@ pub(crate) fn read_extension(path: &Path) -> Option<Extension> {
         .to_str()?
         .strip_suffix(".info.yml")?
         .to_string();
-    let content = std::fs::read_to_string(path).ok()?;
+    let content = crate::util::read_file_to_string(path).ok()?;
     let kind = content.lines().find_map(|line| {
         let value = line.strip_prefix("type:")?.trim();
         let value = crate::framework::strip_yaml_quotes(value).0;

@@ -278,6 +278,30 @@ impl Backend {
                 }
                 locations
             }
+            SymbolKind::ServiceArgument {
+                name,
+                targets,
+                native_type,
+            } => {
+                let mut locations = Vec::new();
+                for declaration in
+                    self.service_argument_declarations(uri, name, targets, *native_type)
+                {
+                    if let Some(location) = declaration.location(self)
+                        && let Some(source) = self.reference_file_content_arc(&declaration.uri)
+                        && let Some(references) = self.find_references_inner(
+                            &declaration.uri,
+                            &source,
+                            location.range.start,
+                            include_declaration,
+                            mode,
+                        )
+                    {
+                        locations.extend(references);
+                    }
+                }
+                locations
+            }
             SymbolKind::NamedArgument { .. } => {
                 // A label stands for the parameter it binds, so asking for a
                 // label's references asks for that parameter's: its

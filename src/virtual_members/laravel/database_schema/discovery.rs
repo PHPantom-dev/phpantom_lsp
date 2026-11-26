@@ -13,7 +13,7 @@ pub(super) struct DatabaseConfig {
 }
 
 pub(super) fn read_database_config(app_root: &Path) -> Option<DatabaseConfig> {
-    let content = std::fs::read_to_string(app_root.join("config/database.php")).ok()?;
+    let content = crate::util::read_file_to_string(app_root.join("config/database.php")).ok()?;
     let tree = parse_config_tree(&content)?;
     let default_connection = tree
         .value_at(&["default"])
@@ -92,7 +92,7 @@ pub(super) fn load_migration_plan(
         .into_iter()
         .map(|path| {
             let basename = migration_basename(&path);
-            let content = std::fs::read_to_string(&path)?;
+            let content = crate::util::read_file_to_string(&path)?;
             Ok(MigrationFile {
                 path,
                 basename,

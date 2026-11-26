@@ -265,7 +265,7 @@ impl Backend {
             if self.is_resource_uri(&uri) {
                 let content = match open {
                     Some(content) => content,
-                    None => match std::fs::read_to_string(&path) {
+                    None => match crate::util::read_file_to_string(&path) {
                         Ok(content) => Arc::new(content),
                         Err(_) => continue,
                     },

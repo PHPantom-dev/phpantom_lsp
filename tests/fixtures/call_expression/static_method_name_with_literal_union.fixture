@@ -1,0 +1,20 @@
+// test: a static method name holding one of several literal strings returns what any of those methods can
+// feature: hover
+// expect_hover: $result => Brush
+// expect_hover: $result => Pencil
+---
+<?php
+
+class Brush {}
+class Pencil {}
+
+class Kit {
+    public static function brush(): Brush { return new Brush(); }
+    public static function pencil(): Pencil { return new Pencil(); }
+}
+
+/** @param 'brush'|'pencil' $which */
+function pick(string $which): void {
+    $result = Kit::$which();
+    echo $res<>ult;
+}

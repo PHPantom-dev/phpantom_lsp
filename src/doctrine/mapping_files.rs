@@ -152,7 +152,7 @@ impl crate::Backend {
             let uri = crate::util::path_to_uri(&path);
             let content = match self.open_buffer_at_path(&path) {
                 Some(content) => content,
-                None => match std::fs::read_to_string(&path) {
+                None => match crate::util::read_file_to_string(&path) {
                     Ok(content) => Arc::new(content),
                     Err(_) => continue,
                 },

@@ -562,7 +562,8 @@ impl SymbolMap {
                         .or_default()
                         .push(index);
                 }
-                SymbolKind::NamedArgument { name, .. } => {
+                SymbolKind::NamedArgument { name, .. }
+                | SymbolKind::ServiceArgument { name, .. } => {
                     self.named_argument_indices
                         .entry(*name)
                         .or_default()

@@ -620,7 +620,7 @@ fn read_phpstorm_stubs_map(
     dir: &Path,
     origin: crate::ClassCompletionOrigin,
 ) -> Option<WorkspaceScanResult> {
-    let content = std::fs::read_to_string(dir.join(PHPSTORM_STUBS_MAP)).ok()?;
+    let content = crate::util::read_file_to_string(dir.join(PHPSTORM_STUBS_MAP)).ok()?;
     let section = |name: &str| -> (
         HashMap<String, PathBuf>,
         HashMap<String, crate::ClassCompletionOrigin>,

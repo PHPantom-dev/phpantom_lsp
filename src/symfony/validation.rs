@@ -567,7 +567,10 @@ fn walk_flow_mapping(
 
 /// The keys of the YAML flow mapping opening at `open`, unquoted, and where
 /// it closes, if it does.
-fn flow_mapping_keys(content: &str, open: usize) -> (Vec<(usize, usize)>, Option<usize>) {
+pub(super) fn flow_mapping_keys(
+    content: &str,
+    open: usize,
+) -> (Vec<(usize, usize)>, Option<usize>) {
     let mut keys = Vec::new();
     let close = walk_flow_mapping(
         content,

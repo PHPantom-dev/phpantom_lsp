@@ -4,6 +4,10 @@ parameters:
   app.support_email: support@example.com
 
 services:
+  _defaults:
+    bind:
+      # Try: jump to the QueryBus constructor parameter.
+      $queryBus: '@query.bus'
   App\:
     resource: '../src/'
   App\Service\WelcomeMailer:
@@ -13,6 +17,7 @@ services:
     calls:
       - [setSender, ['%app.sender_name%']]
   App\EventListener\OrderPlacedListener:
+    # Try: jump from onOrderPlaced to the listener method.
     tags:
       - { name: kernel.event_listener, event: app.order.placed, method: onOrderPlaced }
   app.slugger:
@@ -22,7 +27,13 @@ services:
     # CachingSlugger for it, so a lookup of app.slugger is typed as either
     # class (see DemoController).
     decorates: app.slugger
-    arguments: ['@.inner']
+    arguments:
+      # Try: jump to the parameter of CachingSlugger's constructor.
+      $inner: '@.inner'
+  app.config_tree:
+    class: Symfony\Component\Config\Definition\Builder\TreeBuilder
+    # Try: jump to getConfigTreeBuilder on the configuration service.
+    factory: ['@App\DependencyInjection\Configuration', 'getConfigTreeBuilder']
   # Try: go-to-definition on app.welcome_mailer below. It is declared in
   # config/services.php, and find references on it lists every file that
   # names it.

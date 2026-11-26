@@ -324,7 +324,7 @@ impl MixManifest {
     /// Read the project's manifest, if it has one that parses.
     fn read(root: &Path) -> Option<Self> {
         let path = root.join("public").join("mix-manifest.json");
-        let content = std::fs::read_to_string(&path).ok()?;
+        let content = crate::util::read_file_to_string(&path).ok()?;
         let entries = serde_json::from_str(&content).ok()?;
         Some(Self { path, entries })
     }

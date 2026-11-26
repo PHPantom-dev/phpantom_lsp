@@ -198,8 +198,8 @@ impl Backend {
         let finder = memchr::memmem::Finder::new(b"TwigF");
         let mut found = VendorCallables::default();
         for (uri, is_core) in uris {
-            let Some(content) =
-                crate::util::uri_to_path(&uri).and_then(|path| std::fs::read_to_string(path).ok())
+            let Some(content) = crate::util::uri_to_path(&uri)
+                .and_then(|path| crate::util::read_file_to_string(path).ok())
             else {
                 continue;
             };
@@ -286,7 +286,7 @@ impl Backend {
     pub(crate) fn twig_callable_declaration(&self, callable: &TwigCallable) -> Option<Location> {
         let content = self.get_file_content_arc(&callable.uri).or_else(|| {
             crate::util::uri_to_path(&callable.uri)
-                .and_then(|path| std::fs::read_to_string(path).ok())
+                .and_then(|path| crate::util::read_file_to_string(path).ok())
                 .map(Arc::new)
         })?;
         Some(Location {

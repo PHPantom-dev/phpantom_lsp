@@ -190,7 +190,7 @@ pub(crate) struct PackageDefinitionFile {
 fn read_package_definition_files(paths: &[PathBuf]) -> Vec<PackageDefinitionFile> {
     let mut files = Vec::new();
     for path in paths {
-        let Ok(content) = std::fs::read_to_string(path) else {
+        let Ok(content) = crate::util::read_file_to_string(path) else {
             continue;
         };
         if !content.contains("::class") {
