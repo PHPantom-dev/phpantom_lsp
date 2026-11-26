@@ -285,8 +285,9 @@ fn constant_call(
 /// `compact('a', ['b'])`: a shape keyed by the named variables, each holding
 /// the variable's type here.
 ///
-/// A name whose variable has no type in scope may be undefined, which
-/// `compact()` skips, so its key is optional. A name that is not written as
+/// A name whose variable is not in scope, or was assigned on only some of
+/// the paths reaching the call, may be undefined, which `compact()` skips,
+/// so its key is optional. A name that is not written as
 /// a literal (or a nested array of literals) could be anything, giving
 /// `array<string, mixed>`.
 fn compact_call(
@@ -316,10 +317,22 @@ fn compact_call(
         let entries = names
             .into_iter()
             .map(|var| {
-                let types = resolve_var_types(&format!("${var}"), ctx, offset);
+                let name = format!("${var}");
+                let types = resolve_var_types(&name, ctx, offset);
+                // A variable in scope with no type is one that holds
+                // something we cannot spell, not one that may be missing.
+                let in_scope = match ctx.scope_contains_resolver {
+                    Some(contains) => contains(&name),
+                    None => !types.is_empty(),
+                };
+                let maybe_undefined = ctx.scope_proofs.is_some_and(|proofs| {
+                    proofs
+                        .maybe_undefined
+                        .contains_key(&crate::atom::atom(&name))
+                });
                 crate::php_type::ShapeEntry {
                     key: Some(var.to_string()),
-                    optional: types.is_empty(),
+                    optional: !in_scope || maybe_undefined,
                     value_type: if types.is_empty() {
                         PhpType::mixed()
                     } else {

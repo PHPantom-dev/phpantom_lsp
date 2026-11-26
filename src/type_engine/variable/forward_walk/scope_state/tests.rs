@@ -64,6 +64,53 @@ fn a_variable_only_one_path_binds_is_kept_as_a_possible_type() {
     assert_eq!(type_strings(&a, "$y"), vec!["int"]);
 }
 
+fn maybe_undefined(scope: &ScopeState, var: &str) -> bool {
+    scope.locals.maybe_undefined().contains_key(&atom(var))
+}
+
+#[test]
+fn a_variable_only_one_path_binds_may_be_undefined_at_the_join() {
+    let mut a = ScopeState::new();
+    a.set("$x", typed(PhpType::string()));
+    let mut b = a.clone();
+    b.set("$y", typed(PhpType::int()));
+
+    a.merge_branch(&b);
+
+    assert!(!maybe_undefined(&a, "$x"));
+    assert!(maybe_undefined(&a, "$y"));
+}
+
+#[test]
+fn a_maybe_undefined_variable_stays_so_until_assigned() {
+    let mut a = ScopeState::new();
+    let mut b = a.clone();
+    b.set("$y", typed(PhpType::int()));
+    a.merge_branch(&b);
+    let mut c = a.clone();
+
+    // Both paths hold `$y`, but one of them may not have it at all.
+    let mut d = a.clone();
+    d.set("$y", typed(PhpType::int()));
+    c.merge_branch(&d);
+    assert!(maybe_undefined(&c, "$y"));
+
+    c.set("$y", typed(PhpType::string()));
+    assert!(!maybe_undefined(&c, "$y"));
+}
+
+#[test]
+fn an_unreachable_path_leaves_no_variable_maybe_undefined() {
+    let mut a = ScopeState::new();
+    a.set("$y", typed(PhpType::int()));
+    let mut b = ScopeState::new();
+    b.unreachable = true;
+
+    a.merge_branch(&b);
+
+    assert!(!maybe_undefined(&a, "$y"));
+}
+
 #[test]
 fn a_variable_untyped_on_one_path_is_untyped_at_the_join() {
     let mut a = ScopeState::new();

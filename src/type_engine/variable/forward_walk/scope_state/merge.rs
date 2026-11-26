@@ -25,6 +25,7 @@ impl ScopeState {
         same: fn(&[ResolvedType], &[ResolvedType]) -> bool,
     ) -> bool {
         if self.locals.len() != other.locals.len()
+            || self.locals.maybe_undefined() != other.locals.maybe_undefined()
             || self.unresolved != other.unresolved
             || self.assertions != other.assertions
             || self.non_null_implications != other.non_null_implications
@@ -104,7 +105,8 @@ impl ScopeState {
     ///   is reported where it happened, and the join has no more reason
     ///   to spread it than an unreachable path has to contribute types.
     /// - Present in only one: keep it with the existing types (variable
-    ///   was assigned in only one branch — it *might* have those types).
+    ///   was assigned in only one branch — it *might* have those types),
+    ///   and mark it [maybe undefined](Locals::maybe_undefined).
     ///
     /// After merging, subsumed entries are removed.  When one entry's
     /// type is a subset of another (e.g. `string|null` ⊆
@@ -157,6 +159,9 @@ impl ScopeState {
         let implications = join_non_null_implications(self, other, &differing);
         let narrowings = join_implied_narrowings(self, other, &differing);
         let exclusions = join_ruled_out(self, other);
+        let maybe_undefined = self
+            .locals
+            .joined_maybe_undefined(&other.locals, &differing);
 
         // Likewise for a stored match outcome: a path that never ran the
         // call, or reassigned either half of it, leaves the boolean
@@ -202,6 +207,7 @@ impl ScopeState {
             }
         }
 
+        self.locals.set_maybe_undefined(maybe_undefined);
         self.non_null_implications = implications;
         self.implied_narrowings = narrowings;
         self.ruled_out = exclusions;

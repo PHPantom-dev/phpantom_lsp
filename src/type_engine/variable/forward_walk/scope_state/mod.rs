@@ -182,6 +182,10 @@ pub(crate) struct ScopeProofs<'a> {
     pub non_null_implications: &'a ProofMap<Vec<Atom>>,
     pub implied_narrowings: &'a ProofMap<Vec<ImpliedNarrowing>>,
     pub preg_outcomes: &'a ProofMap<PregOutcome>,
+    /// The variables some path into this point never assigned; see
+    /// [`Locals::maybe_undefined`].  Not a proof a condition reads, so
+    /// [`ScopeState::adopt_proofs`] leaves it behind.
+    pub maybe_undefined: &'a AtomTrie<()>,
 }
 
 impl ScopeProofs<'_> {
@@ -465,6 +469,7 @@ impl ScopeState {
             non_null_implications: &self.non_null_implications,
             implied_narrowings: &self.implied_narrowings,
             preg_outcomes: &self.preg_outcomes,
+            maybe_undefined: self.locals.maybe_undefined(),
         }
     }
 

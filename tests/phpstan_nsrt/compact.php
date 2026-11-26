@@ -13,7 +13,7 @@ function (string $dolor): void {
 		$lorem = 'ipsum';
 	}
 	assertType('array{foo: \'bar\', bar: \'baz\'}', compact('foo', ['bar']));
-	assertType('array{foo: \'bar\', bar: \'baz\', lorem?: \'ipsum\'}', compact([['foo']], 'bar', 'lorem')); // SKIP: a variable assigned on only one branch is not known to be maybe-undefined
+	assertType('array{foo: \'bar\', bar: \'baz\', lorem?: \'ipsum\'}', compact([['foo']], 'bar', 'lorem'));
 
 	assertType('array<string, mixed>', compact($dolor));
 	assertType('array<string, mixed>', compact([$dolor]));

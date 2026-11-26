@@ -13,10 +13,16 @@ use crate::types::ResolvedType;
 /// key a reassignment or a call invalidates is one of those, so the
 /// invalidation passes visit the index instead of every variable the
 /// scope holds.
+///
+/// It also keeps the bare variables some path into this point never
+/// assigned: a variable written on only one side of an `if` is held with
+/// that side's types, but `compact()` and `isset()` see that it may not
+/// exist at all.  Any write to the key clears the mark.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct Locals {
     map: AtomTrie<Vec<ResolvedType>>,
     compound: AtomTrie<()>,
+    maybe_undefined: AtomTrie<()>,
 }
 
 /// Whether `key` is anything other than a bare variable name.
@@ -50,6 +56,9 @@ impl Locals {
         if is_compound(&key) && !self.compound.contains_key(&key) {
             self.compound.insert(key, ());
         }
+        if !self.maybe_undefined.is_empty() {
+            self.maybe_undefined.remove(&key);
+        }
         self.map.insert(key, types);
     }
 
@@ -64,7 +73,44 @@ impl Locals {
     pub fn remove(&mut self, key: &Atom) {
         if self.map.remove(key) {
             self.compound.remove(key);
+            if !self.maybe_undefined.is_empty() {
+                self.maybe_undefined.remove(key);
+            }
         }
+    }
+
+    /// The bare variables held here that some path into this point never
+    /// assigned.
+    pub fn maybe_undefined(&self) -> &AtomTrie<()> {
+        &self.maybe_undefined
+    }
+
+    /// The [`Self::maybe_undefined`] marks a join of this map and `other`
+    /// carries: every mark either side has, and every bare variable only
+    /// one side holds.  `differing` lists the keys the two maps do not
+    /// share an entry for, which is where any variable held on only one
+    /// side is found.
+    pub fn joined_maybe_undefined(&self, other: &Locals, differing: &[Atom]) -> AtomTrie<()> {
+        let mut marks = self.maybe_undefined.clone();
+        for key in other.maybe_undefined.keys() {
+            if !marks.contains_key(key) {
+                marks.insert(*key, ());
+            }
+        }
+        for key in differing {
+            if !is_compound(key)
+                && self.map.contains_key(key) != other.map.contains_key(key)
+                && !marks.contains_key(key)
+            {
+                marks.insert(*key, ());
+            }
+        }
+        marks
+    }
+
+    /// Replace the [`Self::maybe_undefined`] marks with `marks`.
+    pub fn set_maybe_undefined(&mut self, marks: AtomTrie<()>) {
+        self.maybe_undefined = marks;
     }
 
     /// Keep only the compound keys `keep` accepts; bare variables are

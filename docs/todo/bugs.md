@@ -33,21 +33,6 @@ No outstanding items.
 
 ## Standard-library return types
 
-### B775. A variable assigned on only some paths is not known to be maybe-undefined
-
-**Impact: Low · Complexity: Medium**
-
-```php
-$foo = 'bar';
-if (rand(0, 1)) {
-    $lorem = 'ipsum';
-}
-compact('foo', 'lorem');   // array{foo: 'bar', lorem: 'ipsum'}, should be array{foo: 'bar', lorem?: 'ipsum'}
-```
-
-The forward walker keeps a variable's type after a branch that assigned it
-but not whether every path did, so `compact()` (and anything else asking)
-treats it as always defined. `// SKIP` line in `tests/phpstan_nsrt/compact.php`.
 ### B778. Other builtins over literal arguments are not folded
 
 **Impact: Low · Complexity: Low-Medium**

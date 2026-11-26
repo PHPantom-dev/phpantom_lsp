@@ -446,164 +446,179 @@ fn enter_arrow_function_body<'b>(
 
 /// Recursively search an expression for a closure/arrow function
 /// containing the cursor.
+///
+/// The last sub-expression searched (a call's receiver, a property
+/// access's object) is followed in a loop rather than by recursion, so a
+/// generated fluent chain thousands of links long costs one stack frame.
 pub(crate) fn try_enter_closure_expr<'b>(
-    expr: &'b Expression<'b>,
+    mut expr: &'b Expression<'b>,
     scope: &mut ScopeState,
     ctx: &ForwardWalkCtx<'_>,
-    inferred_params: Option<&[PhpType]>,
+    mut inferred_params: Option<&[PhpType]>,
 ) -> bool {
-    match expr {
-        Expression::Closure(closure) => {
-            return try_enter_closure_body(closure, scope, ctx, inferred_params, false);
-        }
-        Expression::ArrowFunction(arrow) => {
-            let body_span = arrow.expression.span();
-            if ctx.cursor_offset >= body_span.start.offset
-                && ctx.cursor_offset <= body_span.end.offset
-            {
-                enter_arrow_function_body(arrow, scope, ctx, inferred_params);
-                return true;
+    loop {
+        match expr {
+            Expression::Closure(closure) => {
+                return try_enter_closure_body(closure, scope, ctx, inferred_params, false);
             }
-        }
-        // Recurse into sub-expressions that might contain closures.
-        Expression::Parenthesized(inner) => {
-            return try_enter_closure_expr(inner.expression, scope, ctx, None);
-        }
-        Expression::Assignment(assignment) => {
-            // A closure the cursor sits in has to be written on the
-            // right-hand side, and only then is processing the assignment
-            // first (so the left-hand side is in scope for it) worth
-            // anything.  Every other cursor position would apply the
-            // assignment a second time — `process_statement` walks it too
-            // — and `$x = $x->format()` would resolve against the string
-            // the first pass already stored rather than the object.
-            let rhs_span = assignment.rhs.span();
-            if ctx.cursor_offset < rhs_span.start.offset || ctx.cursor_offset > rhs_span.end.offset
-            {
-                return false;
-            }
-            process_assignment_expr(expr, scope, ctx);
-            return try_enter_closure_expr(assignment.rhs, scope, ctx, None);
-        }
-        Expression::Call(call) => {
-            if let Call::Method(mc) = call
-                && let Some(mut call_scope) = closure_call_scope(mc, scope, ctx)
-                && try_enter_closure_expr(mc.object, &mut call_scope, ctx, None)
-            {
-                *scope = call_scope;
-                return true;
-            }
-            // An immediately invoked closure (`(function () { … })()`) is
-            // the callee itself.
-            if let Call::Function(fc) = call {
-                let entered = match crate::parser::unwrap_parens(fc.function) {
-                    Expression::Closure(closure) => {
-                        try_enter_closure_body(closure, scope, ctx, None, true)
-                    }
-                    callee => try_enter_closure_expr(callee, scope, ctx, None),
-                };
-                if entered {
+            Expression::ArrowFunction(arrow) => {
+                let body_span = arrow.expression.span();
+                if ctx.cursor_offset >= body_span.start.offset
+                    && ctx.cursor_offset <= body_span.end.offset
+                {
+                    enter_arrow_function_body(arrow, scope, ctx, inferred_params);
                     return true;
                 }
             }
-            // Check if any argument is a closure containing the cursor.
-            // Infer callable parameter types from the function/method
-            // signature so closure params get generic-substituted types
-            // (mirroring the diagnostic path's walk_closures_in_call).
-            let args = match call {
-                Call::Function(fc) => &fc.argument_list,
-                Call::Method(mc) => &mc.argument_list,
-                Call::NullSafeMethod(mc) => &mc.argument_list,
-                Call::StaticMethod(sc) => &sc.argument_list,
-            };
-            for (arg_idx, arg) in args.arguments.iter().enumerate() {
-                let arg_expr = match arg {
-                    Argument::Positional(a) => a.value,
-                    Argument::Named(a) => a.value,
-                };
-                if let Some(entries) = eager_callback_arguments(call, arg_idx, scope, ctx) {
-                    for entry in entries {
-                        if try_enter_closure_expr(
-                            entry.expression,
-                            scope,
-                            ctx,
-                            Some(&entry.parameters),
-                        ) {
-                            return true;
-                        }
-                    }
-                    continue;
-                }
-                let inferred = infer_callable_params_for_call(call, arg_idx, scope, ctx);
-                let inferred_opt = if inferred.is_empty() {
-                    None
-                } else {
-                    Some(inferred.as_slice())
-                };
-                let arg_span = arg_expr.span();
-                if matches!(
-                    arg_expr,
-                    Expression::Closure(_) | Expression::ArrowFunction(_)
-                ) && ctx.cursor_offset >= arg_span.start.offset
-                    && ctx.cursor_offset <= arg_span.end.offset
-                    && let Some(mut rebound) =
-                        closure_this_argument_scope(call, arg_idx, scope, ctx)
+            // Recurse into sub-expressions that might contain closures.
+            Expression::Parenthesized(inner) => {
+                expr = inner.expression;
+                inferred_params = None;
+                continue;
+            }
+            Expression::Assignment(assignment) => {
+                // A closure the cursor sits in has to be written on the
+                // right-hand side, and only then is processing the assignment
+                // first (so the left-hand side is in scope for it) worth
+                // anything.  Every other cursor position would apply the
+                // assignment a second time — `process_statement` walks it too
+                // — and `$x = $x->format()` would resolve against the string
+                // the first pass already stored rather than the object.
+                let rhs_span = assignment.rhs.span();
+                if ctx.cursor_offset < rhs_span.start.offset
+                    || ctx.cursor_offset > rhs_span.end.offset
                 {
-                    if try_enter_closure_expr(arg_expr, &mut rebound, ctx, inferred_opt) {
-                        *scope = rebound;
+                    return false;
+                }
+                process_assignment_expr(expr, scope, ctx);
+                expr = assignment.rhs;
+                inferred_params = None;
+                continue;
+            }
+            Expression::Call(call) => {
+                if let Call::Method(mc) = call
+                    && let Some(mut call_scope) = closure_call_scope(mc, scope, ctx)
+                    && try_enter_closure_expr(mc.object, &mut call_scope, ctx, None)
+                {
+                    *scope = call_scope;
+                    return true;
+                }
+                // An immediately invoked closure (`(function () { … })()`) is
+                // the callee itself.
+                if let Call::Function(fc) = call {
+                    let entered = match crate::parser::unwrap_parens(fc.function) {
+                        Expression::Closure(closure) => {
+                            try_enter_closure_body(closure, scope, ctx, None, true)
+                        }
+                        callee => try_enter_closure_expr(callee, scope, ctx, None),
+                    };
+                    if entered {
                         return true;
                     }
+                }
+                // Check if any argument is a closure containing the cursor.
+                // Infer callable parameter types from the function/method
+                // signature so closure params get generic-substituted types
+                // (mirroring the diagnostic path's walk_closures_in_call).
+                let args = match call {
+                    Call::Function(fc) => &fc.argument_list,
+                    Call::Method(mc) => &mc.argument_list,
+                    Call::NullSafeMethod(mc) => &mc.argument_list,
+                    Call::StaticMethod(sc) => &sc.argument_list,
+                };
+                for (arg_idx, arg) in args.arguments.iter().enumerate() {
+                    let arg_expr = match arg {
+                        Argument::Positional(a) => a.value,
+                        Argument::Named(a) => a.value,
+                    };
+                    if let Some(entries) = eager_callback_arguments(call, arg_idx, scope, ctx) {
+                        for entry in entries {
+                            if try_enter_closure_expr(
+                                entry.expression,
+                                scope,
+                                ctx,
+                                Some(&entry.parameters),
+                            ) {
+                                return true;
+                            }
+                        }
+                        continue;
+                    }
+                    let inferred = infer_callable_params_for_call(call, arg_idx, scope, ctx);
+                    let inferred_opt = if inferred.is_empty() {
+                        None
+                    } else {
+                        Some(inferred.as_slice())
+                    };
+                    let arg_span = arg_expr.span();
+                    if matches!(
+                        arg_expr,
+                        Expression::Closure(_) | Expression::ArrowFunction(_)
+                    ) && ctx.cursor_offset >= arg_span.start.offset
+                        && ctx.cursor_offset <= arg_span.end.offset
+                        && let Some(mut rebound) =
+                            closure_this_argument_scope(call, arg_idx, scope, ctx)
+                    {
+                        if try_enter_closure_expr(arg_expr, &mut rebound, ctx, inferred_opt) {
+                            *scope = rebound;
+                            return true;
+                        }
+                        continue;
+                    }
+                    if try_enter_closure_expr(arg_expr, scope, ctx, inferred_opt) {
+                        return true;
+                    }
+                }
+                // A closure passed to an earlier call in a chain
+                // (`$a->with(function () { … })->run()`) sits in the receiver.
+                expr = match call {
+                    Call::Method(mc) => mc.object,
+                    Call::NullSafeMethod(mc) => mc.object,
+                    Call::StaticMethod(sc) => sc.class,
+                    Call::Function(_) => return false,
+                };
+                inferred_params = None;
+                continue;
+            }
+            Expression::Access(access) => match access {
+                Access::Property(pa) => {
+                    expr = pa.object;
+                    inferred_params = None;
                     continue;
                 }
-                if try_enter_closure_expr(arg_expr, scope, ctx, inferred_opt) {
+                Access::NullSafeProperty(pa) => {
+                    expr = pa.object;
+                    inferred_params = None;
+                    continue;
+                }
+                _ => {}
+            },
+            Expression::Array(arr) => {
+                for elem in arr.elements.iter() {
+                    let elem_expr = match elem {
+                        ArrayElement::KeyValue(kv) => kv.value,
+                        ArrayElement::Value(val) => val.value,
+                        ArrayElement::Variadic(v) => v.value,
+                        ArrayElement::Missing(_) => continue,
+                    };
+                    if try_enter_closure_expr(elem_expr, scope, ctx, None) {
+                        return true;
+                    }
+                }
+            }
+            // The immediately indexed dispatch table
+            // (`['a' => fn (X $x) => …][$name]`) writes its closures inside
+            // the subscripted expression, so both halves are searched.
+            Expression::ArrayAccess(aa) => {
+                if try_enter_closure_expr(aa.array, scope, ctx, None) {
                     return true;
                 }
-            }
-            // A closure passed to an earlier call in a chain
-            // (`$a->with(function () { … })->run()`) sits in the receiver.
-            match call {
-                Call::Method(mc) => return try_enter_closure_expr(mc.object, scope, ctx, None),
-                Call::NullSafeMethod(mc) => {
-                    return try_enter_closure_expr(mc.object, scope, ctx, None);
-                }
-                Call::StaticMethod(sc) => {
-                    return try_enter_closure_expr(sc.class, scope, ctx, None);
-                }
-                Call::Function(_) => {}
-            }
-        }
-        Expression::Access(access) => match access {
-            Access::Property(pa) => {
-                return try_enter_closure_expr(pa.object, scope, ctx, None);
-            }
-            Access::NullSafeProperty(pa) => {
-                return try_enter_closure_expr(pa.object, scope, ctx, None);
+                expr = aa.index;
+                inferred_params = None;
+                continue;
             }
             _ => {}
-        },
-        Expression::Array(arr) => {
-            for elem in arr.elements.iter() {
-                let elem_expr = match elem {
-                    ArrayElement::KeyValue(kv) => kv.value,
-                    ArrayElement::Value(val) => val.value,
-                    ArrayElement::Variadic(v) => v.value,
-                    ArrayElement::Missing(_) => continue,
-                };
-                if try_enter_closure_expr(elem_expr, scope, ctx, None) {
-                    return true;
-                }
-            }
         }
-        // The immediately indexed dispatch table
-        // (`['a' => fn (X $x) => …][$name]`) writes its closures inside
-        // the subscripted expression, so both halves are searched.
-        Expression::ArrayAccess(aa) => {
-            if try_enter_closure_expr(aa.array, scope, ctx, None) {
-                return true;
-            }
-            return try_enter_closure_expr(aa.index, scope, ctx, None);
-        }
-        _ => {}
+        return false;
     }
-    false
 }

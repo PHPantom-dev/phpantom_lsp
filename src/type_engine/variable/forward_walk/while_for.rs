@@ -107,6 +107,13 @@ pub(crate) fn process_while<'b>(
         never_ran.merge_branch(&exited);
         exited = never_ran;
     }
+    // A `while (true)` never fails its test, so it leaves only through a
+    // `break`.  As with an `if` whose branches all exit, the joined types
+    // stay as the answer for a cursor in the dead code after a loop that
+    // never breaks.
+    if super::reachability::constant_condition_value(while_stmt.condition, ctx) == Some(true) {
+        exited.unreachable = true;
+    }
     *scope = exited;
 
     // A `break` leaves without re-testing the condition, so its state
