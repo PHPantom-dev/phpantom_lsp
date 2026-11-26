@@ -1,0 +1,20 @@
+// test: a property name holding one of several literal strings reads any of those properties
+// feature: hover
+// expect_hover: $result => Brush
+// expect_hover: $result => Pencil
+---
+<?php
+
+class Brush {}
+class Pencil {}
+
+class Kit {
+    public Brush $brush;
+    public Pencil $pencil;
+}
+
+/** @param 'brush'|'pencil' $which */
+function pick(Kit $kit, string $which): void {
+    $result = $kit->$which;
+    echo $res<>ult;
+}

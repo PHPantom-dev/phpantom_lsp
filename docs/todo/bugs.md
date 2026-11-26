@@ -2253,20 +2253,3 @@ function f(string $s, $mixed) {
 The string-operand bitwise rule (string op string => string) is not used when the other side is mixed.
 
 **Cases** (PHPStan `nsrt/`, 6 assertions): `bitwise.php` (6).
-
-### B898. A method or property named by a variable holding literal strings is not resolved
-
-**Impact: Low · Complexity: Low-Medium**
-
-```php
-/** @param 'foo'|'bar' $m */
-$a->{$m}();   // mixed, should be the union of foo()'s and bar()'s return types (int)
-```
-
-Dynamic method names are not resolved through the literal values of the name expression.
-
-It also shows as:
-
-- Variable variables and dynamic property names held in a literal-string variable are not resolved
-
-**Cases** (PHPStan `nsrt/`, 7 assertions): `bug-12875.php` (5), `bug-12398.php` (2).

@@ -30,6 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`is_callable()` keeps a string a string.** Inside `if (is_callable($name))` a string variable is a `callable-string`, and after the `if` it is a plain `string` again instead of `callable|string`.
 - **Missing properties on the left of `??` are no longer reported.** `$this->label ?? ''` and `$this->cache ??= []` read the property the way `isset()` does, so a property the class does not declare is not an error there. A missing method on that side is still reported.
 - **Undefined variables in a dynamic class constant fetch.** An undefined `$name` in `Foo::{$name}` is reported like any other read of it.
+- **Members and variables named by known strings resolve.** `$obj->{$name}()`, `$obj->$name`, `Foo::$name()` and `$$name` with a name typed `'foo'|'bar'` give what any of the named members or variables can, instead of `mixed`.
 - **Hover shows `readonly` properties.** A property declared `readonly`, promoted as one, or belonging to a `readonly` class shows the keyword in its hover.
 - **DNF types are spelled as PHP writes them.** A union holding an intersection shows as `(A&B)|null` in hover and anywhere else a type is written out, instead of `A&B|null`, which is not valid PHP.
 - **Parentheses around an assigned value no longer change its type.** `$last = (array_pop($items));` is typed like `$last = array_pop($items);`, instead of reading the array as if it had already been popped.

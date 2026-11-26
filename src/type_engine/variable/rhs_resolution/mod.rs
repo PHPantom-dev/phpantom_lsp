@@ -147,6 +147,38 @@ pub(super) fn runtime_named_member_type() -> Vec<ResolvedType> {
     vec![ResolvedType::from_type_string(PhpType::mixed())]
 }
 
+/// What a variable variable (`$$name`, `${expr}`) holds: the variable each
+/// known string its name can be names, joined.  Empty when the name is not
+/// made of known strings, or one of the variables it names is unknown.
+fn variable_variable_type(
+    variable: &Variable<'_>,
+    ctx: &VarResolutionCtx<'_>,
+) -> Vec<ResolvedType> {
+    let name_types = match variable {
+        Variable::Direct(dv) => {
+            return resolve_var_types(bytes_to_str(dv.name), ctx, ctx.cursor_offset);
+        }
+        Variable::Indirect(indirect) => resolve_rhs_expression(indirect.expression, ctx),
+        Variable::Nested(nested) => variable_variable_type(nested.variable, ctx),
+    };
+    let names = method_calls::literal_string_names(&name_types);
+    let mut results: Vec<ResolvedType> = Vec::new();
+    for name in names {
+        let var_name = format!("${name}");
+        if var_name == ctx.var_name {
+            return Vec::new();
+        }
+        let held = resolve_var_types(&var_name, ctx, ctx.cursor_offset);
+        if held.is_empty() {
+            return Vec::new();
+        }
+        for rt in held {
+            ResolvedType::push_unique(&mut results, rt);
+        }
+    }
+    results
+}
+
 /// A closure value of type `closure_ty` (`Closure(): T` or bare `Closure`).
 ///
 /// It is always resolved against the plain `Closure` class so that methods
@@ -496,6 +528,8 @@ fn resolve_rhs_expression_inner<'b>(
             }
             resolve_var_types(&rhs_var, ctx, ctx.cursor_offset)
         }
+        // ── Variable variable: `$$name`, `${'na' . 'me'}` ─────────────
+        Expression::Variable(variable) => variable_variable_type(variable, ctx),
         // ── Concatenation, arithmetic, bitwise: `"prefix" . $var` ────
         Expression::Binary(binary) if combines_operand_types(&binary.operator) => {
             resolve_operand_chain(binary, ctx)
