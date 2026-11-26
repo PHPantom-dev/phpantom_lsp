@@ -2276,17 +2276,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b898-a-method-or-property-named-by-a-variable-holding-literal-strings-is-not-resolved" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B898. A method or property named by a variable holding literal strings is not resolved
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -4179,17 +4168,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b898-a-method-or-property-named-by-a-variable-holding-literal-strings-is-not-resolved" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B898. A method or property named by a variable holding literal strings is not resolved
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -5771,17 +5749,6 @@ completion goes through the same path. <code>// SKIP</code> lines in
 </code></pre></div>
 <p>The string-operand bitwise rule (string op string =&gt; string) is not used when the other side is mixed.</p>
 <p><strong>Cases</strong> (PHPStan <code>nsrt/</code>, 6 assertions): <code>bitwise.php</code> (6).</p>
-<h3 id="b898-a-method-or-property-named-by-a-variable-holding-literal-strings-is-not-resolved">B898. A method or property named by a variable holding literal strings is not resolved<a class="headerlink" href="#b898-a-method-or-property-named-by-a-variable-holding-literal-strings-is-not-resolved" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-110-1" name="__codelineno-110-1" href="#__codelineno-110-1"></a><span class="x">/** @param 'foo'|'bar' $m */</span>
-<a id="__codelineno-110-2" name="__codelineno-110-2" href="#__codelineno-110-2"></a><span class="x">$a-&gt;{$m}();   // mixed, should be the union of foo()'s and bar()'s return types (int)</span>
-</code></pre></div>
-<p>Dynamic method names are not resolved through the literal values of the name expression.</p>
-<p>It also shows as:</p>
-<ul>
-<li>Variable variables and dynamic property names held in a literal-string variable are not resolved</li>
-</ul>
-<p><strong>Cases</strong> (PHPStan <code>nsrt/</code>, 7 assertions): <code>bug-12875.php</code> (5), <code>bug-12398.php</code> (2).</p>
 
 
 
