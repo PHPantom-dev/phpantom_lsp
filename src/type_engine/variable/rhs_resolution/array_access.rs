@@ -345,9 +345,9 @@ fn index_segment(
         return Some(element);
     }
 
-    if base.is_bare_array() || base.is_mixed() {
-        // Bare `array` and `mixed` have unknown element types; accessing
-        // any key yields `mixed`.
+    if base.is_bare_array() || base.is_named_ci("non-empty-array") || base.is_mixed() {
+        // Bare `array`, `non-empty-array` and `mixed` have unknown element
+        // types; accessing any key yields `mixed`.
         return Some(PhpType::mixed());
     }
     // A string offset is itself a one-character string, and a key that

@@ -1259,6 +1259,22 @@ fn join_shapes_key_order_is_first_side_then_new_keys() {
 }
 
 #[test]
+fn join_shapes_key_missing_from_one_side_keeps_its_place() {
+    let narrowed = PhpType::parse("array{a?: int, c?: int}");
+    let declared = PhpType::parse("array{a?: int, b: int, c?: int}");
+    assert_eq!(
+        narrowed.join_shapes(&declared),
+        Some(PhpType::parse("array{a?: int, b?: int, c?: int}"))
+    );
+    let narrowed = PhpType::parse("array{b: int}");
+    let declared = PhpType::parse("array{a: int, b: int}");
+    assert_eq!(
+        narrowed.join_shapes(&declared),
+        Some(PhpType::parse("array{a?: int, b: int}"))
+    );
+}
+
+#[test]
 fn union_folds_a_shape_wholly_covered_by_another_member() {
     // `array{mixed}` names the same one-entry array `array{0: mixed, 1?:
     // string|null}` already allows when key `1` is absent, so the union

@@ -446,7 +446,7 @@ fn capture_groups(pattern: &str) -> Option<Vec<CaptureGroup>> {
 /// PCRE allows leading whitespace before the delimiter, any non-alphanumeric
 /// non-backslash character as the delimiter, and bracket-style delimiters
 /// whose closing counterpart differs from the opener.
-fn split_delimiters(pattern: &str) -> Option<(&str, &str)> {
+pub(crate) fn split_delimiters(pattern: &str) -> Option<(&str, &str)> {
     let pattern = pattern.trim_start();
     let open = pattern.chars().next()?;
     // A non-ASCII delimiter is legal but rare, and the byte-level scan below

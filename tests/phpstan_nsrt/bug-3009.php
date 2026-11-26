@@ -22,7 +22,7 @@ class HelloWorld
 			$redirectServer['QUERY_STRING'] = $redirectUrlParts['query'];
 		}
 
-		assertType('array{scheme?: string, port?: int<0, 65535>, user?: string, pass?: string, path?: string, query?: string, fragment?: string}', $redirectUrlParts); // SKIP: a key a branch removed is re-added at the end of the shape after the merge
+		assertType('array{scheme?: string, port?: int<0, 65535>, user?: string, pass?: string, path?: string, query?: string, fragment?: string}', $redirectUrlParts);
 
 		return 'foo';
 	}

@@ -113,7 +113,7 @@ function probe(array $names, array $users, array $bare): void {
     assert_assigned_types(
         content,
         &[
-            ("$unique", "list<string>"),
+            ("$unique", "array<int<0, max>, string>"),
             ("$slice", "list<string>"),
             ("$merged", "list<string>"),
             ("$reversed", "list<string>"),
@@ -228,6 +228,8 @@ function probe(array $maybe, array $users, array $plain, callable $cb): void {
 /// leaves gaps in the numbering and the result is no longer a `list`. The
 /// renumbering functions around it are the ones that rebuild the promise, and
 /// a filter may drop every entry, so a `non-empty-` refinement goes too.
+/// `array_unique` keeps the key of each first occurrence, which leaves gaps
+/// the same way.
 #[test]
 fn array_filter_drops_the_list_promise_its_input_carried() {
     let content = r#"<?php
@@ -258,7 +260,7 @@ function probe(array $values, array $some, array $rows, array $keyed, callable $
             ("$unchanged", "array<string, int>"),
             ("$shape", "array<int, 1|2|3>"),
             ("$renumbered", "list<int>"),
-            ("$preserved", "list<int>"),
+            ("$preserved", "array<int<0, max>, int>"),
         ],
     );
 }
@@ -736,9 +738,9 @@ function probe(array $ids, array $byName): void {
     assert_assigned_types(
         content,
         &[
-            ("$batches", "list<list<string>>"),
-            ("$keyed", "list<array<string, int>>"),
-            ("$renumbered", "list<list<int>>"),
+            ("$batches", "list<non-empty-list<string>>"),
+            ("$keyed", "list<non-empty-array<string, int>>"),
+            ("$renumbered", "list<non-empty-list<int>>"),
         ],
     );
 }

@@ -18,7 +18,7 @@ function test(int $n, array $ids, array $parts, float $f): void {
     $lowerBound = max(1, $n);
     $upperBound = min($n, 10);
     $filled = array_fill(0, count($ids), 'WHEN ?');
-    $nonEmptyFill = array_fill(0, 3, 'WHEN ?');
+    $nonEmptyFill = array_fill(0, $lowerBound, 'WHEN ?');
     $joined = implode(' ', $filled);
     $path = implode('\\', $parts);
     $fixed = sprintf('%.2F', $f);

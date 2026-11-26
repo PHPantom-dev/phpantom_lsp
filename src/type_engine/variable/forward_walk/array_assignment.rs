@@ -4,7 +4,7 @@ use super::*;
 
 use mago_span::HasSpan;
 
-use crate::atom::bytes_to_str;
+use crate::atom::{atom, bytes_to_str};
 use crate::php_type::{PhpType, TypeKind};
 use crate::type_engine::resolver::VarResolutionCtx;
 use crate::type_engine::type_ops::condition_facts;
@@ -469,19 +469,46 @@ pub(crate) fn process_array_sort_call(expr: &Expression<'_>, scope: &mut ScopeSt
     }
     let base_name = bytes_to_str(dv.name);
     let base_types = scope.get(base_name);
-    if base_types.is_empty() {
-        return false;
+    // A variable of unknown type can only have been an array for the call
+    // to succeed, so a renumbering sort leaves some list.
+    if base_types.is_empty() || ResolvedType::types_joined(base_types).is_mixed() {
+        if !renumbers {
+            return false;
+        }
+        scope.set(
+            base_name,
+            vec![ResolvedType::from_type_string(PhpType::named(atom("list")))],
+        );
+        scope.invalidate_proofs(base_name);
+        return true;
     }
     let base_type = ResolvedType::types_joined(base_types);
-    if !base_type.is_array_like() {
+    if !base_type
+        .union_members()
+        .iter()
+        .all(|member| member.is_array_like())
+    {
         return false;
     }
     if !renumbers || base_type.is_empty_array_shape() {
         return true;
     }
-    let Some(value) = base_type.iterable_element_type() else {
+    // Each alternative's values, so a union of shapes sorts into a list of
+    // all of them.
+    let values: Option<Vec<PhpType>> = base_type
+        .union_members()
+        .into_iter()
+        .filter(|member| !member.is_empty_array_shape())
+        .map(|member| {
+            member
+                .iterable_element_type()
+                .or_else(|| member.is_array_like().then(PhpType::mixed))
+        })
+        .collect();
+    let Some(values) = values else {
         return false;
     };
+    let value = PhpType::join_runtime_value_types(values);
     let list = PhpType::list(value);
     let result = if base_type.is_provably_non_empty() {
         list.non_empty_array_form()

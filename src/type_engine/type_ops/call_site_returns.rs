@@ -43,6 +43,7 @@ use super::conditional::ArgTypeResolver;
 use crate::text_scan::{ScanStep, scan_top_level, split_top_level_commas};
 use crate::types::FunctionInfo;
 
+mod preg_split;
 mod wordpress;
 
 /// `JSON_THROW_ON_ERROR`, as defined by PHP's `ext/json/php_json.h`.
@@ -140,6 +141,7 @@ enum CallSiteFunction {
     GetType,
     GetDebugType,
     CurlGetinfo,
+    PregSplit,
     WordPress(wordpress::WordPressFunction),
 }
 
@@ -164,6 +166,8 @@ fn classify(func_name: &str) -> Option<CallSiteFunction> {
         Some(CallSiteFunction::GetDebugType)
     } else if name.eq_ignore_ascii_case("curl_getinfo") {
         Some(CallSiteFunction::CurlGetinfo)
+    } else if name.eq_ignore_ascii_case("preg_split") {
+        Some(CallSiteFunction::PregSplit)
     } else {
         wordpress::classify(name).map(CallSiteFunction::WordPress)
     }
@@ -231,6 +235,7 @@ pub(crate) fn call_site_return_type(
             type_name_return(&args, TypeNaming::GetDebugType, class_loader)
         }
         CallSiteFunction::CurlGetinfo => curl_getinfo_return(&args),
+        CallSiteFunction::PregSplit => preg_split::return_type(&args),
         CallSiteFunction::WordPress(function) => wordpress::return_type(function, &args),
     }
 }

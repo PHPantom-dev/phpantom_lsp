@@ -368,6 +368,14 @@ pub(super) fn resolve_member_call_on_receiver<'b>(
             {
                 return result;
             }
+            if let Some(ty) = dom_create_element_type(owner, &method_name, argument_list, ctx) {
+                return crate::type_engine::type_ops::resolution::resolved_types_for_hint(
+                    ty,
+                    "",
+                    ctx.file.all_classes,
+                    ctx.file.class_loader,
+                );
+            }
             if let Some(call) = shape_call
                 && let Some(shape) =
                     try_resolve_validated_shape(owner, call, object, &arg_refs, ctx)
@@ -565,6 +573,46 @@ pub(super) fn resolve_member_call_on_receiver<'b>(
     }
 
     union_results
+}
+
+/// `DOMDocument::createElement()` with a name that is one of known valid XML
+/// names: the declared type without its `false`.  Since PHP 8 an invalid
+/// name throws a `DOMException` instead of returning `false`, so the `false`
+/// only remains for a name that cannot be read or is not valid.
+fn dom_create_element_type(
+    owner: &ClassInfo,
+    method_name: &str,
+    argument_list: &ArgumentList<'_>,
+    ctx: &VarResolutionCtx<'_>,
+) -> Option<PhpType> {
+    if !method_name.eq_ignore_ascii_case("createElement")
+        || !crate::class_lookup::is_subtype_of(owner, "DOMDocument", ctx.file.class_loader)
+    {
+        return None;
+    }
+    let arg = crate::call_args::first_param_arg(argument_list, "localName")?;
+    let arg_ty = crate::type_engine::variable::resolution::resolve_arg_raw_type(arg.value(), ctx)?;
+    for member in arg_ty.union_members() {
+        if !is_xml_name(&member.as_literal()?.string_content()?) {
+            return None;
+        }
+    }
+    let TypeKind::Union(members) = owner.get_method(method_name)?.return_type.as_ref()?.kind()
+    else {
+        return None;
+    };
+    let kept: Vec<PhpType> = members.iter().filter(|m| !m.is_false()).cloned().collect();
+    (kept.len() < members.len()).then(|| PhpType::union(kept))
+}
+
+/// Whether `name` is a valid XML `Name`, as libxml checks it for
+/// `createElement()`.
+fn is_xml_name(name: &str) -> bool {
+    let mut chars = name.chars();
+    chars
+        .next()
+        .is_some_and(|c| c.is_alphabetic() || c == '_' || c == ':')
+        && chars.all(|c| c.is_alphanumeric() || matches!(c, '_' | ':' | '-' | '.' | '\u{B7}'))
 }
 
 /// The member a selector names: an identifier as written, or a variable

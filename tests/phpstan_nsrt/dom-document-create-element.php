@@ -15,11 +15,11 @@ class Foo
 
 	public function validConstantNames(DOMDocument $doc): void
 	{
-		assertType('DOMElement', $doc->createElement('div')); // SKIP: createElement() keeps its false for a valid literal name
-		assertType('DOMElement', $doc->createElement('my-element')); // SKIP: createElement() keeps its false for a valid literal name
-		assertType('DOMElement', $doc->createElement('ns:tag')); // SKIP: createElement() keeps its false for a valid literal name
-		assertType('DOMElement', $doc->createElement('_private')); // SKIP: createElement() keeps its false for a valid literal name
-		assertType('DOMElement', $doc->createElement('h1')); // SKIP: createElement() keeps its false for a valid literal name
+		assertType('DOMElement', $doc->createElement('div'));
+		assertType('DOMElement', $doc->createElement('my-element'));
+		assertType('DOMElement', $doc->createElement('ns:tag'));
+		assertType('DOMElement', $doc->createElement('_private'));
+		assertType('DOMElement', $doc->createElement('h1'));
 	}
 
 	public function invalidConstantNames(DOMDocument $doc): void
@@ -35,14 +35,14 @@ class Foo
 	 */
 	public function unions(DOMDocument $doc, string $validUnion, string $mixedUnion): void
 	{
-		assertType('DOMElement', $doc->createElement($validUnion)); // SKIP: createElement() keeps its false for a valid literal name
+		assertType('DOMElement', $doc->createElement($validUnion));
 		assertType('(DOMElement|false)', $doc->createElement($mixedUnion));
 	}
 
 	public function localVariable(DOMDocument $doc): void
 	{
 		$name = 'paragraph';
-		assertType('DOMElement', $doc->createElement($name)); // SKIP: createElement() keeps its false for a valid literal name
+		assertType('DOMElement', $doc->createElement($name));
 	}
 
 }

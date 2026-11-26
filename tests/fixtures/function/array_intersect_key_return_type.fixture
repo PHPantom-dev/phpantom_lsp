@@ -10,8 +10,8 @@ const FEEDS = [
 ];
 
 function test(string $only): void {
-    $feeds = $only !== '' ? array_intersect_key(FEEDS, [$only => true]) : FEEDS;
-    foreach ($feeds as $feed) {
+    $selected = $only !== '' ? array_intersect_key(FEEDS, [$only => true]) : FEEDS;
+    foreach ($selected as $feed) {
         $<>feed;
     }
 }

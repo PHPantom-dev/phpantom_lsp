@@ -59,6 +59,11 @@ pub(crate) fn apply_null_narrowing_truthy<'b>(
             narrow_to_null_in_scope(&var_name, scope);
         }
     }
+    // `($x ?? '') !== ''` — `$x` is set and not empty.
+    if let Some((var_name, empty, true)) = extract_coalesced_empty_value_check(condition) {
+        strip_null_from_subject(&var_name, scope, ctx);
+        refine_non_empty_in_scope(&var_name, empty, scope);
+    }
     // `$x !== ''` / `$x !== []` — refine to the non-empty counterpart, and
     // `$x === ''` to the empty one.
     if let Some((var_name, empty, non_empty)) = extract_empty_value_check(condition) {
@@ -274,6 +279,11 @@ pub(crate) fn apply_null_narrowing_inverse<'b>(
     if let Some(var_name) = expr_to_subject(condition) {
         seed_synthetic_key_if_needed(&var_name, scope, ctx);
         narrow_to_falsy_in_scope(&var_name, scope);
+    }
+    // `($x ?? '') === ''` failing — `$x` is set and not empty.
+    if let Some((var_name, empty, false)) = extract_coalesced_empty_value_check(condition) {
+        strip_null_from_subject(&var_name, scope, ctx);
+        refine_non_empty_in_scope(&var_name, empty, scope);
     }
     // `isset($x)` — inverse (else) means $x was null: narrow to null.
     for var_name in extract_isset_vars(condition) {

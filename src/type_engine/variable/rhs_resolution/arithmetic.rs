@@ -159,7 +159,7 @@ pub(super) fn combine_with_lhs<'b>(
 /// When both operands are strings, PHP applies bitwise ops
 /// character-by-character and returns a string.  Otherwise int — or the
 /// exact value, when both operands are known integers.
-fn bitwise_result_type(
+pub(crate) fn bitwise_result_type(
     op: BitwiseOp,
     lhs_types: &[ResolvedType],
     rhs_types: &[ResolvedType],
@@ -655,19 +655,6 @@ fn string_overload_result(
         operand_is_undecided(types) || types.iter().any(|rt| rt.type_string == undecided)
     };
     (is_undecided(lhs_types) && is_undecided(rhs_types)).then_some(undecided)
-}
-
-/// Infer what `&=`, `|=` or `^=` leaves in its target: the overloaded
-/// number class when a side is one; otherwise the operands decide it the
-/// way they decide the binary operator, and anything they do not settle
-/// is an int.
-pub(crate) fn infer_bitwise_assignment_result_type(
-    lhs_types: &[ResolvedType],
-    rhs_types: &[ResolvedType],
-) -> PhpType {
-    overloaded_number_result(lhs_types, rhs_types, true)
-        .or_else(|| string_overload_result(lhs_types, rhs_types))
-        .unwrap_or_else(PhpType::int)
 }
 
 /// The bitwise operator `operator` is, or `None` for every other binary

@@ -44,8 +44,7 @@ class Test {
 				$type = $otherTypes['range'];
 				assertType('array{default: PHPStan\Type\Type, range: PHPStan\Type\Type}', $otherTypes);
 			}
-			// Same shape; PHPantom lists the keys in the order the branches wrote them.
-			assertType('array{range: Type, default?: Type}', $otherTypes);
+			assertType('array{default?: PHPStan\Type\Type, range: PHPStan\Type\Type}', $otherTypes);
 		}
 		if ($exactType !== null) {
 			unset($otherTypes['default']);

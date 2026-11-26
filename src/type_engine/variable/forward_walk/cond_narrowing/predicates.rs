@@ -314,6 +314,40 @@ pub(crate) fn extract_empty_value_check(
     Some((name, empty, non_empty))
 }
 
+/// The subject of `($x ?? '') !== ''` (or `[]`), the kind of empty value
+/// on both sides, and whether the branch is the one where they differ.
+///
+/// The fallback can only make the comparison see the empty value, so where
+/// the two differ `$x` is set, not `null`, and not empty.
+pub(crate) fn extract_coalesced_empty_value_check(
+    expr: &Expression<'_>,
+) -> Option<(String, EmptyValue, bool)> {
+    let (inner, negated) = condition_facts::unwrap_condition_negation(expr);
+    let Expression::Binary(bin) = inner else {
+        return None;
+    };
+    let non_empty = match bin.operator {
+        BinaryOperator::NotIdentical(_) => !negated,
+        BinaryOperator::Identical(_) => negated,
+        _ => return None,
+    };
+    let (coalesced, empty) = match (empty_literal_kind(bin.rhs), empty_literal_kind(bin.lhs)) {
+        (Some(kind), _) => (bin.lhs, kind),
+        (_, Some(kind)) => (bin.rhs, kind),
+        _ => return None,
+    };
+    let Expression::Binary(coalesce) = coalesced.unparenthesized() else {
+        return None;
+    };
+    if !matches!(coalesce.operator, BinaryOperator::NullCoalesce(_))
+        || empty_literal_kind(coalesce.rhs) != Some(empty)
+    {
+        return None;
+    }
+    let name = expr_to_subject(coalesce.lhs)?;
+    Some((name, empty, non_empty))
+}
+
 /// Extract the subject of a strict comparison against a literal value:
 /// `$x === 0`, `0.0 === $x`, `$x !== []`, and their negations.
 ///

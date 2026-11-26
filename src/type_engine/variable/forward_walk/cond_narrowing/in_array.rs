@@ -85,6 +85,8 @@ fn narrow_key_existence(
         return;
     }
     mark_array_shape_key_present(base_key, &key_name, scope);
+    // A generic array holding the key is not empty either.
+    refine_non_empty_in_scope(base_key, EmptyValue::Array, scope);
     // Seed the element key after the shape is refined, so an offset
     // read consulting it sees the present-key type rather than the
     // optional one it would have resolved a moment earlier.

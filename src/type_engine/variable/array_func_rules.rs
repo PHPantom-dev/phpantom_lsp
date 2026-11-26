@@ -104,6 +104,61 @@ pub(in crate::type_engine) trait ArrayFuncArgs {
     }
 }
 
+/// A call's arguments with the one at `index` replaced by `ty`, so a rule
+/// for one value can run over each entry of an array argument.
+struct SwappedArg<'a> {
+    args: &'a dyn ArrayFuncArgs,
+    index: usize,
+    ty: PhpType,
+}
+
+impl ArrayFuncArgs for SwappedArg<'_> {
+    fn arg_raw_type(&self, index: usize) -> Option<PhpType> {
+        if index == self.index {
+            Some(self.ty.clone())
+        } else {
+            self.args.arg_raw_type(index)
+        }
+    }
+    fn bool_literal(&self, index: usize) -> Option<bool> {
+        (index != self.index)
+            .then(|| self.args.bool_literal(index))
+            .flatten()
+    }
+    fn has_arg(&self, index: usize) -> bool {
+        self.args.has_arg(index)
+    }
+    fn is_spread(&self, index: usize) -> bool {
+        self.args.is_spread(index)
+    }
+    fn is_named(&self, index: usize) -> bool {
+        self.args.is_named(index)
+    }
+    fn callback_declared_return_type(&self, index: usize) -> Option<PhpType> {
+        self.args.callback_declared_return_type(index)
+    }
+    fn callback_inferred_return_type(&self, index: usize, param_type: &PhpType) -> Option<PhpType> {
+        self.args.callback_inferred_return_type(index, param_type)
+    }
+    fn narrows(&self, inferred: &PhpType, declared: &PhpType) -> bool {
+        self.args.narrows(inferred, declared)
+    }
+    fn arg_atom_text(&self, index: usize) -> Option<String> {
+        (index != self.index)
+            .then(|| self.args.arg_atom_text(index))
+            .flatten()
+    }
+    fn callback_param_narrowing(
+        &self,
+        index: usize,
+        param_index: usize,
+        subject: &PhpType,
+    ) -> Option<PhpType> {
+        self.args
+            .callback_param_narrowing(index, param_index, subject)
+    }
+}
+
 /// For known array-producing functions, resolve the **raw output type**
 /// (e.g. `list<User>`) from the input arguments.
 ///
@@ -137,8 +192,60 @@ pub(in crate::type_engine) fn array_func_raw_type(
         return Some(keys);
     }
 
+    if ((func_name.eq_ignore_ascii_case("array_keys") && !args.has_arg(1))
+        || func_name.eq_ignore_ascii_case("array_values"))
+        && let Some(list) = keys_or_values_list(args, func_name.eq_ignore_ascii_case("array_keys"))
+    {
+        return Some(list);
+    }
+
     if func_name.eq_ignore_ascii_case("array_column") {
         return array_column_type(args);
+    }
+
+    if func_name.eq_ignore_ascii_case("str_split") || func_name.eq_ignore_ascii_case("mb_str_split")
+    {
+        return str_split_type(args, func_name.eq_ignore_ascii_case("mb_str_split"));
+    }
+
+    if func_name.eq_ignore_ascii_case("array_reverse") {
+        return array_reverse_type(args);
+    }
+
+    if func_name.eq_ignore_ascii_case("array_slice") {
+        return array_slice_type(args);
+    }
+
+    if func_name.eq_ignore_ascii_case("array_count_values") {
+        return array_count_values_type(args);
+    }
+
+    if func_name.eq_ignore_ascii_case("array_change_key_case") {
+        return array_change_key_case_type(args);
+    }
+
+    if func_name.eq_ignore_ascii_case("array_pad") {
+        return array_pad_type(args);
+    }
+
+    if func_name.eq_ignore_ascii_case("array_intersect_key")
+        && let Some(intersected) = array_intersect_key_type(args)
+    {
+        return Some(intersected);
+    }
+
+    if func_name.eq_ignore_ascii_case("array_replace") {
+        return array_replace_type(args);
+    }
+
+    if func_name.eq_ignore_ascii_case("array_combine") {
+        return array_combine_type(args);
+    }
+
+    if func_name.eq_ignore_ascii_case("array_fill_keys")
+        && let Some(filled) = array_fill_keys_type(args)
+    {
+        return Some(filled);
     }
 
     // Handed an array subject, the `preg_` replacers return its keys with
@@ -155,6 +262,42 @@ pub(in crate::type_engine) fn array_func_raw_type(
     } else {
         None
     };
+    // `str_replace()` handed a shape replaces in each entry, which then
+    // folds the way a string subject does.
+    if ["str_replace", "str_ireplace"]
+        .iter()
+        .any(|f| f.eq_ignore_ascii_case(func_name))
+        && let Some(entries) = args
+            .arg_raw_type(2)
+            .as_ref()
+            .and_then(explicit_key_shape_entries)
+    {
+        return Some(PhpType::array_shape(
+            entries
+                .into_iter()
+                .map(|entry| {
+                    let swapped = SwappedArg {
+                        args,
+                        index: 2,
+                        ty: entry.value_type.clone(),
+                    };
+                    let value_type = entry
+                        .value_type
+                        .is_string_subtype()
+                        .then(|| {
+                            super::string_func_rules::string_func_return_type(func_name, &swapped)
+                        })
+                        .flatten()
+                        .unwrap_or_else(PhpType::string);
+                    ShapeEntry {
+                        value_type,
+                        ..entry
+                    }
+                })
+                .collect(),
+        ));
+    }
+
     if let Some(subject) = preg_subject
         && let Some(entries) = args
             .arg_raw_type(subject)
@@ -216,27 +359,47 @@ pub(in crate::type_engine) fn array_func_raw_type(
                 // describes the result.
                 return Some(filter_callback_type(&raw, args).unwrap_or(raw));
             }
+            // Dropping duplicates keeps the first of each, under its key, so
+            // a list's keys may have gaps after it.
+            if func_name.eq_ignore_ascii_case("array_unique")
+                && let Some((form, _, value)) = generic_array_parts(&raw)
+                && form.is_list()
+            {
+                let array = PhpType::generic_array(PhpType::int_range("0", "max"), value);
+                return Some(if form.is_non_empty() {
+                    array.non_empty_array_form()
+                } else {
+                    array
+                });
+            }
+            // Comparing with a second array can drop any entry, the first
+            // one included: the result may be empty, and a list's keys
+            // may have gaps.
+            let lower = func_name.to_ascii_lowercase();
+            let compares = [
+                "array_diff",
+                "array_udiff",
+                "array_intersect",
+                "array_uintersect",
+            ]
+            .iter()
+            .any(|prefix| lower.starts_with(prefix));
+            if compares
+                && args.has_arg(1)
+                && let Some((form, key, value)) = generic_array_parts(&raw)
+            {
+                return Some(if form.is_list() {
+                    PhpType::generic_array(PhpType::int_range("0", "max"), value)
+                } else {
+                    PhpType::generic(form.name(false), key.into_iter().chain([value]).collect())
+                });
+            }
             return Some(raw);
         }
     }
 
-    // `array_chunk` is the one splitter that adds a level of nesting rather
-    // than rearranging entries: the result's elements are arrays of the
-    // input's elements. The chunks are renumbered from zero unless
-    // `$preserve_keys` asks for the original keys back.
     if func_name.eq_ignore_ascii_case("array_chunk") {
-        let raw = args.arg_raw_type(0)?.generalized_array();
-        let value = raw.extract_value_type(false)?.clone();
-        let chunk = if args.bool_literal(2) == Some(true) {
-            match array_key_domain(&raw) {
-                Some(key) => PhpType::generic_array(key, value),
-                None => PhpType::generic_array_val(value),
-            }
-        } else {
-            PhpType::list(value)
-        };
-        // The outer array is always renumbered, whatever the inner keys do.
-        return Some(PhpType::list(chunk));
+        return array_chunk_type(args);
     }
 
     // `range` builds its elements from the bounds rather than from an array
@@ -574,16 +737,51 @@ fn range_type(args: &dyn ArrayFuncArgs) -> Option<PhpType> {
     if args.has_arg(2) {
         bounds.push(args.arg_raw_type(2)?);
     }
+    // Integer bounds and step give the values themselves: PHP counts from
+    // the start towards the end by the step's size, whichever way that is.
+    let literals: Option<Vec<i64>> = bounds
+        .iter()
+        .map(|b| b.as_literal().and_then(LiteralValue::parse_i64))
+        .collect();
+    if let Some(literals) = literals {
+        let (start, end) = (literals[0], literals[1]);
+        let step = literals.get(2).copied().unwrap_or(1).unsigned_abs();
+        if step == 0 {
+            return None;
+        }
+        let count = start.abs_diff(end) / step + 1;
+        if count <= MAX_RANGE_ENTRIES {
+            let entries = (0..count as i64)
+                .map(|i| {
+                    let value = if start <= end {
+                        start + i * step as i64
+                    } else {
+                        start - i * step as i64
+                    };
+                    ShapeEntry {
+                        key: None,
+                        value_type: PhpType::literal_int(value.to_string()),
+                        optional: false,
+                    }
+                })
+                .collect();
+            return Some(PhpType::array_shape(entries));
+        }
+    }
+    // A range always holds at least its start.
     let int_ty = PhpType::int();
     if bounds.iter().all(|b| b.is_subtype_of(&int_ty)) {
-        return Some(PhpType::list(int_ty));
+        return Some(PhpType::list(int_ty).non_empty_array_form());
     }
     let float_ty = PhpType::float();
     bounds
         .iter()
         .all(|b| b.is_subtype_of(&float_ty))
-        .then(|| PhpType::list(float_ty))
+        .then(|| PhpType::list(float_ty).non_empty_array_form())
 }
+
+/// How many values a literal `range()` builds into a shape.
+const MAX_RANGE_ENTRIES: u64 = 64;
 
 /// The type `array_merge` builds from its arguments.
 ///
@@ -613,7 +811,7 @@ fn range_type(args: &dyn ArrayFuncArgs) -> Option<PhpType> {
 /// implicit `int` of a `T[]`, and turns a `T[]` a signature accepts today
 /// into an argument it rejects.
 fn array_merge_type(args: &dyn ArrayFuncArgs) -> Option<PhpType> {
-    if let Some(merged) = merge_shapes(args) {
+    if let Some(merged) = merge_shapes(args, true) {
         return Some(merged);
     }
     let int_ty = PhpType::int();
@@ -656,6 +854,176 @@ fn array_merge_type(args: &dyn ArrayFuncArgs) -> Option<PhpType> {
     Some(PhpType::generic_array(key, value))
 }
 
+/// `array_intersect_key($array, ...$arrays)`: the entries of `$array` whose
+/// key every other array also has.
+///
+/// A shape keeps each entry whose key the others may have, optional unless
+/// every other is a shape that certainly has it. A generic array keeps its
+/// values under the keys the arrays' key types share: none in common gives
+/// `array{}`, and a list intersected with lists stays one. Only a single
+/// array is returned unchanged, so a non-empty one may come back empty.
+fn array_intersect_key_type(args: &dyn ArrayFuncArgs) -> Option<PhpType> {
+    let mut arrays: Vec<(PhpType, bool)> = Vec::new();
+    let mut index = 0;
+    while args.has_arg(index) {
+        if args.is_named(index) {
+            return None;
+        }
+        let raw = args.arg_raw_type(index)?;
+        if args.is_spread(index) {
+            arrays.push((raw.iterable_element_type()?, true));
+        } else {
+            arrays.push((raw, false));
+        }
+        index += 1;
+    }
+    let ((first, _), others) = arrays.split_first()?;
+    // A lone array, or the arrays one spread holds, keep the values and
+    // key type of one of them.
+    if others.is_empty() {
+        return Some(first.clone());
+    }
+    if let TypeKind::ArrayShape(_) = first.kind() {
+        let entries = explicit_key_shape_entries(first)?;
+        let mut kept: Vec<ShapeEntry> = Vec::new();
+        'entries: for mut entry in entries {
+            let key = entry.key.as_deref()?;
+            let key_type = crate::php_type::shape_key_literal(key)?;
+            for (other, spread) in others {
+                if other.is_empty_array_shape() {
+                    continue 'entries;
+                }
+                match other.kind() {
+                    TypeKind::ArrayShape(_) if !spread => match other.shape_entry(key) {
+                        Some(found) => entry.optional |= found.optional,
+                        None => continue 'entries,
+                    },
+                    _ => {
+                        let domain = array_key_domain(&other.generalized_array());
+                        if domain.is_some_and(|d| !key_type.is_subtype_of(&d)) {
+                            continue 'entries;
+                        }
+                        entry.optional = true;
+                    }
+                }
+            }
+            kept.push(entry);
+        }
+        return Some(shape_with_implicit_keys(kept));
+    }
+    let container = first.generalized_array();
+    let (form, _, value) = generic_array_parts(&container)?;
+    let open_key = PhpType::union(vec![PhpType::int(), PhpType::string()]);
+    let written_key = array_key_domain(&container);
+    let mut key = written_key.clone().unwrap_or_else(|| open_key.clone());
+    let mut all_lists = form.is_list();
+    for (other, spread) in others {
+        if other.is_empty_array_shape() {
+            return Some(PhpType::array_shape(Vec::new()));
+        }
+        let generalized = other.generalized_array();
+        all_lists &= generic_array_parts(&generalized).is_some_and(|(form, _, _)| form.is_list());
+        // A shape's own keys, rather than the type they widen to.
+        let domain = match other.kind() {
+            TypeKind::ArrayShape(_) if !spread => {
+                shape_key_alternatives(other).and_then(|alternatives| {
+                    literal_key_union(alternatives.into_iter().flatten().map(|(key, _)| key))
+                })
+            }
+            _ => array_key_domain(&generalized),
+        };
+        let Some(domain) = domain.and_then(|domain| {
+            super::array_shape_writes::normalize_array_key_type_keeping_literals(&domain)
+        }) else {
+            continue;
+        };
+        key = match intersect_key_types(&key, &domain) {
+            Some(key) => key,
+            None => return Some(PhpType::array_shape(Vec::new())),
+        };
+    }
+    if all_lists {
+        return Some(PhpType::list(value));
+    }
+    // An array that never named its keys still does not, unless another
+    // array narrowed them.
+    if written_key.is_none() && key == open_key {
+        return Some(PhpType::generic_array_val(value));
+    }
+    Some(PhpType::generic_array(key, value))
+}
+
+/// The keys two key types share, member by member, or `None` when they
+/// share none.
+fn intersect_key_types(a: &PhpType, b: &PhpType) -> Option<PhpType> {
+    let mut shared: Vec<PhpType> = Vec::new();
+    for x in a.union_members() {
+        for y in b.union_members() {
+            let common = if y.is_subtype_of(x) {
+                y
+            } else if x.is_subtype_of(y) {
+                x
+            } else {
+                continue;
+            };
+            if !shared.contains(common) {
+                shared.push(common.clone());
+            }
+        }
+    }
+    (!shared.is_empty()).then(|| PhpType::join_runtime_value_types(shared))
+}
+
+/// `array_replace()`: every argument's entries, a later one replacing an
+/// earlier one of the same key. Unlike `array_merge()` no key is
+/// renumbered, so a list stays a list only when every argument is one.
+fn array_replace_type(args: &dyn ArrayFuncArgs) -> Option<PhpType> {
+    if let Some(replaced) = merge_shapes(args, false) {
+        return Some(replaced);
+    }
+    let mut values: Vec<PhpType> = Vec::new();
+    let mut keys: Vec<PhpType> = Vec::new();
+    let mut open_keys = false;
+    let mut all_lists = true;
+    let mut non_empty = false;
+    let mut index = 0;
+    while args.has_arg(index) {
+        let mut raw = args.arg_raw_type(index)?;
+        if args.is_spread(index) {
+            raw = raw.iterable_element_type()?;
+        } else {
+            non_empty |= raw.is_provably_non_empty();
+        }
+        index += 1;
+        if raw.is_empty_array_shape() {
+            continue;
+        }
+        let container = raw.generalized_array();
+        all_lists &= generic_array_parts(&container).is_some_and(|(form, _, _)| form.is_list());
+        values.push(container.iterable_element_type()?);
+        match array_key_domain(&container) {
+            Some(key) => keys.push(key),
+            None => open_keys = true,
+        }
+    }
+    if values.is_empty() {
+        return None;
+    }
+    let value = PhpType::join_runtime_value_types(values);
+    let result = if all_lists {
+        PhpType::list(value)
+    } else if open_keys {
+        PhpType::generic_array_val(value)
+    } else {
+        PhpType::generic_array(PhpType::join_runtime_value_types(keys), value)
+    };
+    Some(if non_empty {
+        result.non_empty_array_form()
+    } else {
+        result
+    })
+}
+
 /// `array_merge` over arguments that are all array shapes, entry by entry.
 ///
 /// A string key overwrites the entry an earlier argument gave it, in that
@@ -668,7 +1036,10 @@ fn array_merge_type(args: &dyn ArrayFuncArgs) -> Option<PhpType> {
 /// an argument of its own. An argument that may be one of several shapes is
 /// merged as the single shape they join into, a key only some of them have
 /// becoming optional.
-fn merge_shapes(args: &dyn ArrayFuncArgs) -> Option<PhpType> {
+///
+/// Without `renumber` (`array_replace`), an integer key overwrites the way
+/// a string key does.
+fn merge_shapes(args: &dyn ArrayFuncArgs, renumber: bool) -> Option<PhpType> {
     let mut arrays: Vec<PhpType> = Vec::new();
     let mut index = 0;
     while args.has_arg(index) {
@@ -700,7 +1071,7 @@ fn merge_shapes(args: &dyn ArrayFuncArgs) -> Option<PhpType> {
         };
         for entry in explicit_key_shape_entries(&array)? {
             let key = entry.key.as_deref().unwrap_or_default();
-            if canonical_int_key(key).is_some() {
+            if renumber && canonical_int_key(key).is_some() {
                 if entry.optional {
                     return None;
                 }
@@ -1083,6 +1454,1051 @@ fn array_column_shape(
     Some(shape_with_implicit_keys(entries))
 }
 
+/// `array_slice($array, $offset, $length, $preserve_keys)`.
+///
+/// A constant shape with a literal offset and length is sliced entry by
+/// entry, following PHPStan's `ConstantArrayType::sliceArray()`: an optional
+/// entry before the slice may push a later one into it, so entries near the
+/// edges become optional. Anything else keeps the array's key and value
+/// types, its int keys renumbered unless `$preserve_keys` is `true`, and
+/// may come back empty.
+fn array_slice_type(args: &dyn ArrayFuncArgs) -> Option<PhpType> {
+    if (0..4).any(|i| args.is_spread(i) || args.is_named(i)) {
+        return None;
+    }
+    let input = args.arg_raw_type(0)?;
+    let literal = |index: usize| {
+        args.arg_raw_type(index)
+            .and_then(|t| t.as_literal().and_then(LiteralValue::parse_i64))
+    };
+    let offset = literal(1);
+    let length = if args.has_arg(2) {
+        match args.arg_raw_type(2) {
+            Some(t) if t.is_null() => Some(None),
+            _ => literal(2).map(Some),
+        }
+    } else {
+        Some(None)
+    };
+    let preserve = args.has_arg(3) && args.bool_literal(3) == Some(true);
+    // A length that is at least one, whatever it is.
+    let length_positive = args.has_arg(2)
+        && args
+            .arg_raw_type(2)
+            .and_then(|t| crate::type_engine::type_ops::int_interval::IntInterval::of_int(&t))
+            .is_some_and(|range| range.min.is_some_and(|min| min >= 1));
+    if input.is_mixed() {
+        return Some(PhpType::generic_array(PhpType::mixed(), PhpType::mixed()));
+    }
+    if length == Some(Some(0)) {
+        return Some(PhpType::array_shape(Vec::new()));
+    }
+    if let (Some(offset), Some(length)) = (offset, length)
+        && input
+            .union_members()
+            .iter()
+            .all(|member| matches!(member.kind(), TypeKind::ArrayShape(_)))
+    {
+        let mut shapes: Vec<PhpType> = Vec::new();
+        let mut sliced_all = true;
+        for member in input.union_members() {
+            match explicit_key_shape_entries(member)
+                .and_then(|entries| slice_entries(entries, offset, length, preserve))
+            {
+                Some(shape) if !shapes.contains(&shape) => shapes.push(shape),
+                Some(_) => {}
+                None => sliced_all = false,
+            }
+        }
+        if sliced_all {
+            return Some(PhpType::union(shapes));
+        }
+    }
+    // A shape sliced where it cannot be told keeps its string keys, and its
+    // int keys too when they are preserved.
+    if let TypeKind::ArrayShape(entries) = input.kind() {
+        let mut keys: Vec<PhpType> = Vec::new();
+        for entry in explicit_key_shape_entries(&input)? {
+            let key = crate::php_type::shape_key_literal(entry.key.as_deref()?)?;
+            keys.push(if !preserve && key.is_int_literal() {
+                PhpType::int()
+            } else {
+                key
+            });
+        }
+        let values = PhpType::join_runtime_value_types(
+            entries.iter().map(|e| e.value_type.clone()).collect(),
+        );
+        return Some(match literal_key_union(keys) {
+            Some(key) => {
+                PhpType::generic_array(PhpType::join_runtime_value_types(vec![key]), values)
+            }
+            None => PhpType::array_shape(Vec::new()),
+        });
+    }
+    let mut results: Vec<PhpType> = Vec::new();
+    for member in input.generalized_array().union_members() {
+        let (form, key, value) = generic_array_parts(member).or_else(|| {
+            let value = member.iterable_element_type()?;
+            Some((ArrayForm::Array, array_key_domain(member), value))
+        })?;
+        // A slice from the start keeps the first entry when it takes any.
+        let keeps_first = form.is_non_empty()
+            && offset == Some(0)
+            && (length_positive || length.is_some_and(|length| length.is_none_or(|n| n > 0)));
+        // A list keeps its keys in sequence only from its start.
+        let stays_list = form.is_list() && (!preserve || offset == Some(0));
+        let result = if value.is_mixed() && key.is_none() && (stays_list || !form.is_list()) {
+            let name = if stays_list {
+                form.name(keeps_first)
+            } else {
+                ArrayForm::Array.name(keeps_first)
+            };
+            PhpType::named(crate::atom::atom(name))
+        } else if stays_list {
+            PhpType::generic(form.name(keeps_first), vec![value])
+        } else if form.is_list() {
+            PhpType::generic_array(PhpType::int_range("0", "max"), value)
+        } else {
+            let name = ArrayForm::Array.name(keeps_first);
+            match key {
+                // Renumbered int keys make a list.
+                Some(key) if !preserve && key.is_subtype_of(&PhpType::int()) => {
+                    PhpType::generic(ArrayForm::List.name(keeps_first), vec![value])
+                }
+                Some(key) => PhpType::generic(name, vec![key, value]),
+                None => PhpType::generic(name, vec![value]),
+            }
+        };
+        if !results.contains(&result) {
+            results.push(result);
+        }
+    }
+    Some(PhpType::union(results))
+}
+
+/// `array_reverse($array, $preserve_keys)`: the entries in reverse order,
+/// int keys renumbered unless `$preserve_keys` is `true`.
+fn array_reverse_type(args: &dyn ArrayFuncArgs) -> Option<PhpType> {
+    if (0..2).any(|i| args.is_spread(i) || args.is_named(i)) {
+        return None;
+    }
+    let input = args.arg_raw_type(0)?;
+    let preserve = args.bool_literal(1) == Some(true);
+    if input.is_mixed() {
+        return Some(PhpType::generic_array(PhpType::mixed(), PhpType::mixed()));
+    }
+    let members = input.union_members();
+    if members
+        .iter()
+        .all(|member| matches!(member.kind(), TypeKind::ArrayShape(_)))
+        && let Some(shapes) = members
+            .iter()
+            .map(|member| {
+                let mut entries = explicit_key_shape_entries(member)?;
+                entries.reverse();
+                renumber_slice(entries, preserve)
+            })
+            .collect::<Option<Vec<_>>>()
+    {
+        let mut distinct: Vec<PhpType> = Vec::new();
+        for shape in shapes {
+            if !distinct.contains(&shape) {
+                distinct.push(shape);
+            }
+        }
+        return Some(PhpType::union(distinct));
+    }
+    // Renumbered int keys always make a list, even where optional entries
+    // leave which value lands where open.
+    if !preserve
+        && members.iter().all(|member| {
+            explicit_key_shape_entries(member).is_some_and(|entries| {
+                entries
+                    .iter()
+                    .all(|e| e.key.as_deref().and_then(canonical_int_key).is_some())
+            })
+        })
+    {
+        let value = input.iterable_element_type()?;
+        let list = PhpType::list(value);
+        return Some(if input.is_provably_non_empty() {
+            list.non_empty_array_form()
+        } else {
+            list
+        });
+    }
+    let container = input.generalized_array();
+    // A reversed list keeps its keys only with them counting down.
+    if preserve
+        && let Some((form, _, value)) = generic_array_parts(&container)
+        && form.is_list()
+    {
+        let array = PhpType::generic_array(PhpType::int_range("0", "max"), value);
+        return Some(if form.is_non_empty() {
+            array.non_empty_array_form()
+        } else {
+            array
+        });
+    }
+    Some(container)
+}
+
+/// `array_chunk($array, $length, $preserve_keys)`: the array in pieces of
+/// `$length` entries, each piece non-empty, renumbered from zero unless
+/// `$preserve_keys` asks for the original keys.
+///
+/// A constant shape with a literal length is cut piece by piece; a piece
+/// that may be empty, because every entry in it is optional, is an optional
+/// entry of the result.
+fn array_chunk_type(args: &dyn ArrayFuncArgs) -> Option<PhpType> {
+    if (0..3).any(|i| args.is_spread(i) || args.is_named(i)) {
+        return None;
+    }
+    let input = args.arg_raw_type(0)?;
+    let preserve = args.bool_literal(2) == Some(true);
+    // Each length a literal (or a union of a few literals) may be.
+    let sizes: Option<Vec<i64>> = args.arg_raw_type(1).and_then(|t| {
+        let members = t.union_members();
+        (members.len() <= 4)
+            .then(|| {
+                members
+                    .into_iter()
+                    .map(|m| {
+                        m.as_literal()
+                            .and_then(LiteralValue::parse_i64)
+                            .filter(|&n| n >= 1)
+                    })
+                    .collect()
+            })
+            .flatten()
+    });
+    let members = input.union_members();
+    if let Some(sizes) = sizes
+        && members
+            .iter()
+            .all(|member| matches!(member.kind(), TypeKind::ArrayShape(_)))
+        && let Some(shapes) = members
+            .iter()
+            .flat_map(|member| {
+                sizes
+                    .iter()
+                    .map(|&size| chunk_shape(member, size, preserve))
+            })
+            .collect::<Option<Vec<_>>>()
+    {
+        let mut distinct: Vec<PhpType> = Vec::new();
+        for shape in shapes {
+            if !distinct.contains(&shape) {
+                distinct.push(shape);
+            }
+        }
+        return Some(PhpType::union(distinct));
+    }
+    let bare = matches!(input.kind(), TypeKind::Named(_));
+    let container = input.generalized_array();
+    let (form, key, value) = generic_array_parts(&container).or_else(|| {
+        // A union of arrays chunks into pieces of any of their entries.
+        let value = container.iterable_element_type()?;
+        let key = array_key_domain(&container);
+        Some((ArrayForm::Array, key, value))
+    })?;
+    let chunk = if bare {
+        PhpType::named(crate::atom::atom(if preserve {
+            "non-empty-array"
+        } else {
+            "non-empty-list"
+        }))
+    } else if preserve && !form.is_list() {
+        PhpType::generic("non-empty-array", key.into_iter().chain([value]).collect())
+    } else {
+        PhpType::generic("non-empty-list", vec![value])
+    };
+    let outer = PhpType::list(chunk);
+    Some(if input.is_provably_non_empty() {
+        outer.non_empty_array_form()
+    } else {
+        outer
+    })
+}
+
+fn chunk_shape(input: &PhpType, size: i64, preserve: bool) -> Option<PhpType> {
+    let entries = explicit_key_shape_entries(input)?;
+    let count = entries.len() as i64;
+    let mut chunks: Vec<ShapeEntry> = Vec::new();
+    let mut start = 0;
+    while start < count {
+        let chunk = slice_entries(entries.clone(), start, Some(size), true)?;
+        let mut chunk_entries = explicit_key_shape_entries(&chunk)?;
+        // Without the keys, every key is renumbered, which an optional
+        // entry before another leaves uncertain.
+        let chunk = if preserve {
+            chunk
+        } else {
+            if chunk_entries
+                .iter()
+                .rev()
+                .skip(1)
+                .any(|entry| entry.optional)
+            {
+                return None;
+            }
+            for (i, entry) in chunk_entries.iter_mut().enumerate() {
+                entry.key = Some(i.to_string());
+            }
+            shape_with_implicit_keys(chunk_entries.clone())
+        };
+        let optional = chunk_entries.iter().all(|entry| entry.optional);
+        // A piece after one that may be missing has no fixed position.
+        if chunks.last().is_some_and(|previous| previous.optional) && !optional {
+            return None;
+        }
+        chunks.push(ShapeEntry {
+            key: Some(chunks.len().to_string()),
+            value_type: chunk,
+            optional,
+        });
+        start += size;
+    }
+    Some(shape_with_implicit_keys(chunks))
+}
+
+/// [`array_slice_type`] over one shape's entries, keys spelled out. `None`
+/// when renumbering after an optional entry leaves a key uncertain.
+fn slice_entries(
+    mut entries: Vec<ShapeEntry>,
+    mut offset: i64,
+    length: Option<i64>,
+    preserve: bool,
+) -> Option<PhpType> {
+    let count = entries.len() as i64;
+    if count == 0 {
+        return Some(PhpType::array_shape(Vec::new()));
+    }
+    let mut length = length.unwrap_or(count);
+    // A negative offset or length cannot reach past the array's start.
+    if count + offset <= 0 {
+        offset = 0;
+    }
+    if count + length <= 0 {
+        length = 0;
+    }
+    if length == 0 || (offset < 0 && length < 0 && offset - length >= 0) {
+        return Some(PhpType::array_shape(Vec::new()));
+    }
+    if length < 0 {
+        // Drop the last entries; each optional one dropped may have been
+        // standing in for an earlier entry, which becomes optional.
+        let new_len = (count + length) as usize;
+        let mut removed_optional = entries[new_len..].iter().filter(|e| e.optional).count();
+        entries.truncate(new_len);
+        for entry in entries.iter_mut().rev() {
+            if removed_optional == 0 {
+                break;
+            }
+            if !entry.optional {
+                entry.optional = true;
+                removed_optional -= 1;
+            }
+        }
+        return slice_entries(entries, offset, None, preserve);
+    }
+    if offset < 0 {
+        // Slice the reversed entries from the left, then turn them back.
+        let back = -offset;
+        let reversed_length = length.min(back);
+        entries.reverse();
+        let sliced = slice_entries(entries, back - reversed_length, Some(reversed_length), true)?;
+        let mut sliced = explicit_key_shape_entries(&sliced)?;
+        sliced.reverse();
+        return renumber_slice(sliced, preserve);
+    }
+    if offset > 0 {
+        let skip = (offset as usize).min(entries.len());
+        let mut ignored_optional = entries[..skip].iter().filter(|e| e.optional).count();
+        let mut rest: Vec<ShapeEntry> = entries.split_off(skip);
+        for entry in &mut rest {
+            if ignored_optional == 0 {
+                break;
+            }
+            if !entry.optional {
+                entry.optional = true;
+                ignored_optional -= 1;
+            }
+        }
+        return slice_entries(rest, 0, Some(length), preserve);
+    }
+    let count = entries.len() as i64;
+    let mut sliced: Vec<ShapeEntry> = Vec::new();
+    let mut required = 0;
+    let mut has_optional = false;
+    for (i, mut entry) in entries.into_iter().enumerate() {
+        if required >= length {
+            break;
+        }
+        if entry.optional {
+            has_optional = true;
+        } else {
+            required += 1;
+        }
+        let last = required >= length || i as i64 + 1 >= count;
+        if last && length < count && has_optional {
+            entry.optional = true;
+        }
+        sliced.push(entry);
+    }
+    renumber_slice(sliced, preserve)
+}
+
+/// A sliced shape with its int keys renumbered from zero, unless kept.
+/// `None` when an optional int-keyed entry leaves a later key uncertain.
+fn renumber_slice(entries: Vec<ShapeEntry>, preserve: bool) -> Option<PhpType> {
+    if preserve {
+        return Some(shape_with_implicit_keys(entries));
+    }
+    let mut next = 0;
+    let mut renumbered = Vec::with_capacity(entries.len());
+    let mut uncertain = false;
+    for mut entry in entries {
+        if entry.key.as_deref().and_then(canonical_int_key).is_some() {
+            if uncertain {
+                return None;
+            }
+            entry.key = Some(next.to_string());
+            next += 1;
+            uncertain |= entry.optional;
+        }
+        renumbered.push(entry);
+    }
+    Some(shape_with_implicit_keys(renumbered))
+}
+
+/// How many pieces a literal `str_split()` folds into a shape.
+const MAX_SPLIT_PIECES: usize = 64;
+
+/// `str_split()` and (`multibyte`) `mb_str_split()`: the string in chunks
+/// of `$length` bytes or characters. Since PHP 8.2 the empty string gives
+/// `[]`, so every chunk is non-empty.
+fn str_split_type(args: &dyn ArrayFuncArgs, multibyte: bool) -> Option<PhpType> {
+    let length = if args.has_arg(1) {
+        args.arg_raw_type(1)
+            .and_then(|t| t.as_literal().and_then(LiteralValue::parse_i64))
+    } else {
+        Some(1)
+    };
+    // Another encoding counts characters differently.
+    let utf8 = !args.has_arg(2)
+        || args
+            .arg_raw_type(2)
+            .and_then(|t| t.as_literal()?.string_content().map(|c| c.into_owned()))
+            .is_some_and(|encoding| {
+                encoding.eq_ignore_ascii_case("UTF-8") || encoding.eq_ignore_ascii_case("UTF8")
+            });
+    let subject = args.arg_raw_type(0)?;
+    if let Some(length) = length.filter(|&n| n >= 1)
+        && (!multibyte || utf8)
+        && let Some(texts) = subject
+            .union_members()
+            .into_iter()
+            .map(|member| Some(member.as_literal()?.string_content()?.into_owned()))
+            .collect::<Option<Vec<String>>>()
+    {
+        let mut shapes: Vec<PhpType> = Vec::new();
+        for text in &texts {
+            let pieces: Vec<String> = if multibyte {
+                let chars: Vec<char> = text.chars().collect();
+                chars
+                    .chunks(length as usize)
+                    .map(|chunk| chunk.iter().collect())
+                    .collect()
+            } else {
+                text.as_bytes()
+                    .chunks(length as usize)
+                    .map(|chunk| std::str::from_utf8(chunk).ok().map(str::to_string))
+                    .collect::<Option<_>>()?
+            };
+            if pieces.len() > MAX_SPLIT_PIECES {
+                return None;
+            }
+            let shape = PhpType::array_shape(
+                pieces
+                    .iter()
+                    .map(|piece| ShapeEntry {
+                        key: None,
+                        value_type: PhpType::literal_string_value(piece),
+                        optional: false,
+                    })
+                    .collect(),
+            );
+            if !shapes.contains(&shape) {
+                shapes.push(shape);
+            }
+        }
+        return Some(PhpType::union(shapes));
+    }
+    let list = PhpType::list(PhpType::non_empty_string());
+    Some(if subject.is_subtype_of(&PhpType::non_empty_string()) {
+        list.non_empty_array_form()
+    } else {
+        list
+    })
+}
+
+/// `array_keys($array)` (`keys`) or `array_values($array)` of a generic
+/// array: a list of its keys or values, non-empty when the array is. A
+/// list's keys count up from zero.
+fn keys_or_values_list(args: &dyn ArrayFuncArgs, keys: bool) -> Option<PhpType> {
+    if args.is_spread(0) || args.is_named(0) {
+        return None;
+    }
+    let input = args.arg_raw_type(0)?;
+    let (form, key, value) = generic_array_parts(&input)?;
+    let element = if keys {
+        if form.is_list() {
+            PhpType::int_range("0", "max")
+        } else {
+            match key {
+                // `array-key` already names what a key can be.
+                Some(key) if key.is_array_key() => key,
+                Some(key) => {
+                    super::array_shape_writes::normalize_array_key_type_keeping_literals(&key)?
+                }
+                None => return None,
+            }
+        }
+    } else {
+        value
+    };
+    // A bare `list` stays bare; PHPStan spells the values of a bare `array`
+    // out as `list<mixed>`.
+    let list = if element.is_mixed() && form.is_list() && matches!(input.kind(), TypeKind::Named(_))
+    {
+        PhpType::named(crate::atom::atom("list"))
+    } else {
+        PhpType::list(element)
+    };
+    Some(if form.is_non_empty() {
+        list.non_empty_array_form()
+    } else {
+        list
+    })
+}
+
+/// The generic array forms a key-preserving function reads apart.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ArrayForm {
+    Array,
+    NonEmptyArray,
+    List,
+    NonEmptyList,
+}
+
+impl ArrayForm {
+    fn is_list(self) -> bool {
+        matches!(self, ArrayForm::List | ArrayForm::NonEmptyList)
+    }
+
+    fn is_non_empty(self) -> bool {
+        matches!(self, ArrayForm::NonEmptyArray | ArrayForm::NonEmptyList)
+    }
+
+    fn name(self, non_empty: bool) -> &'static str {
+        match (self.is_list(), non_empty) {
+            (true, true) => "non-empty-list",
+            (true, false) => "list",
+            (false, true) => "non-empty-array",
+            (false, false) => "array",
+        }
+    }
+}
+
+/// A generic array as its form, its written key type (`None` for the
+/// implicit one of `array<V>` and `V[]`) and its value type.
+fn generic_array_parts(ty: &PhpType) -> Option<(ArrayForm, Option<PhpType>, PhpType)> {
+    match ty.kind() {
+        TypeKind::Generic(generic) => {
+            let form = match generic.name.to_ascii_lowercase().as_str() {
+                "array" => ArrayForm::Array,
+                "non-empty-array" => ArrayForm::NonEmptyArray,
+                "list" => ArrayForm::List,
+                "non-empty-list" => ArrayForm::NonEmptyList,
+                _ => return None,
+            };
+            match generic.args.as_slice() {
+                [value] => Some((form, None, value.clone())),
+                [key, value] if !form.is_list() => Some((form, Some(key.clone()), value.clone())),
+                _ => None,
+            }
+        }
+        TypeKind::Array(element) => Some((ArrayForm::Array, None, element.clone())),
+        TypeKind::Named(name) => {
+            let form = match name.to_ascii_lowercase().as_str() {
+                "array" => ArrayForm::Array,
+                "non-empty-array" => ArrayForm::NonEmptyArray,
+                "list" => ArrayForm::List,
+                "non-empty-list" => ArrayForm::NonEmptyList,
+                _ => return None,
+            };
+            Some((form, None, PhpType::mixed()))
+        }
+        _ => None,
+    }
+}
+
+/// `array_count_values()`: how often each int and string value occurs,
+/// keyed by the value. PHP skips (with a warning) every other value, so an
+/// array of only those counts nothing.
+fn array_count_values_type(args: &dyn ArrayFuncArgs) -> Option<PhpType> {
+    let input = args.arg_raw_type(0)?;
+    let (values, non_empty) = match input.kind() {
+        TypeKind::ArrayShape(entries) => {
+            let counted = |value: &PhpType| value.is_int_subtype() || value.is_string_subtype();
+            let non_empty = entries
+                .iter()
+                .any(|entry| !entry.optional && counted(&entry.value_type));
+            let values: Vec<PhpType> = entries.iter().map(|e| e.value_type.clone()).collect();
+            (PhpType::union(values), non_empty)
+        }
+        _ => {
+            let (form, _, value) = generic_array_parts(&input)?;
+            (value, form.is_non_empty())
+        }
+    };
+    let mut kept: Vec<PhpType> = Vec::new();
+    let mut dropped = false;
+    for member in values.union_members() {
+        if member.is_int_subtype() || member.is_string_subtype() {
+            kept.push(member.clone());
+        } else if member.is_mixed() || member.is_array_key() || member.is_named_ci("scalar") {
+            return None;
+        } else {
+            dropped = true;
+        }
+    }
+    if kept.is_empty() {
+        return Some(PhpType::array_shape(Vec::new()));
+    }
+    let key = super::array_shape_writes::normalize_array_key_type_keeping_literals(
+        &PhpType::union(kept),
+    )?;
+    let non_empty = non_empty && (!dropped || matches!(input.kind(), TypeKind::ArrayShape(_)));
+    let name = if non_empty {
+        "non-empty-array"
+    } else {
+        "array"
+    };
+    Some(PhpType::generic(
+        name,
+        vec![key, PhpType::int_range("1", "max")],
+    ))
+}
+
+/// `CASE_LOWER` and `CASE_UPPER`.
+const CASE_LOWER: i64 = 0;
+const CASE_UPPER: i64 = 1;
+
+/// `array_change_key_case()`: the same entries with every string key
+/// lower- or upper-cased.
+///
+/// A mode that may be either gives the keys of both. `None` when two keys
+/// of a shape would collide, or the input is not an array this reads.
+fn array_change_key_case_type(args: &dyn ArrayFuncArgs) -> Option<PhpType> {
+    let modes: Vec<i64> = if args.has_arg(1) {
+        match args.arg_atom_text(1).as_deref() {
+            Some("CASE_LOWER") => vec![CASE_LOWER],
+            Some("CASE_UPPER") => vec![CASE_UPPER],
+            _ => match args
+                .arg_raw_type(1)
+                .as_ref()
+                .and_then(|t| t.as_literal()?.parse_i64())
+            {
+                Some(mode @ (CASE_LOWER | CASE_UPPER)) => vec![mode],
+                _ => vec![CASE_LOWER, CASE_UPPER],
+            },
+        }
+    } else {
+        vec![CASE_LOWER]
+    };
+    let input = args.arg_raw_type(0)?;
+    if let TypeKind::ArrayShape(_) = input.kind() {
+        let entries = explicit_key_shape_entries(&input)?;
+        if let [mode] = modes.as_slice() {
+            let mut changed: Vec<ShapeEntry> = Vec::with_capacity(entries.len());
+            for entry in entries {
+                let key = entry.key.as_deref()?;
+                let key = if canonical_int_key(key).is_some() {
+                    key.to_string()
+                } else {
+                    change_case(key, *mode)
+                };
+                if changed
+                    .iter()
+                    .any(|e| e.key.as_deref() == Some(key.as_str()))
+                {
+                    return None;
+                }
+                changed.push(ShapeEntry {
+                    key: Some(key),
+                    ..entry
+                });
+            }
+            return Some(shape_with_implicit_keys(changed));
+        }
+        let non_empty = entries.iter().any(|entry| !entry.optional);
+        let mut keys: Vec<PhpType> = Vec::new();
+        for entry in &entries {
+            let key = crate::php_type::shape_key_literal(entry.key.as_deref()?)?;
+            for &mode in &modes {
+                let changed = change_key_type_case(&key, mode)?;
+                if !keys.contains(&changed) {
+                    keys.push(changed);
+                }
+            }
+        }
+        let values =
+            PhpType::join_runtime_value_types(entries.into_iter().map(|e| e.value_type).collect());
+        let name = if non_empty {
+            "non-empty-array"
+        } else {
+            "array"
+        };
+        return Some(PhpType::generic(
+            name,
+            vec![literal_key_union(keys)?, values],
+        ));
+    }
+    let (form, key, value) = generic_array_parts(&input)?;
+    let Some(key) = key else {
+        return Some(input);
+    };
+    let mut keys: Vec<PhpType> = Vec::new();
+    for &mode in &modes {
+        let changed = if let [_] = modes.as_slice() {
+            change_key_type_case(&key, mode)?
+        } else {
+            unknown_case_key_type(&key)?
+        };
+        if !keys.contains(&changed) {
+            keys.push(changed);
+        }
+    }
+    Some(PhpType::generic(
+        form.name(form.is_non_empty()),
+        vec![PhpType::union(keys), value],
+    ))
+}
+
+fn change_case(key: &str, mode: i64) -> String {
+    // PHP changes the case of ASCII letters only.
+    if mode == CASE_UPPER {
+        key.to_ascii_uppercase()
+    } else {
+        key.to_ascii_lowercase()
+    }
+}
+
+/// A key type with its strings in the case `mode` asks for: a literal is
+/// recased, and any other string keeps its emptiness but takes the case.
+fn change_key_type_case(key: &PhpType, mode: i64) -> Option<PhpType> {
+    let case = if mode == CASE_UPPER {
+        "uppercase-string"
+    } else {
+        "lowercase-string"
+    };
+    let members: Vec<PhpType> = key
+        .union_members()
+        .into_iter()
+        .map(|member| {
+            if member.is_int_subtype() {
+                return Some(member.clone());
+            }
+            if let Some(content) = member.as_literal().and_then(|l| l.string_content()) {
+                return Some(PhpType::literal_string_value(change_case(&content, mode)));
+            }
+            if member.is_array_key() {
+                return Some(PhpType::union(vec![
+                    PhpType::int(),
+                    PhpType::named(crate::atom::atom(case)),
+                ]));
+            }
+            if !member.is_string_subtype() {
+                return None;
+            }
+            let mut parts: Vec<PhpType> = string_emptiness(member).into_iter().collect();
+            parts.push(PhpType::named(crate::atom::atom(case)));
+            Some(if parts.len() == 1 {
+                parts.pop()?
+            } else {
+                PhpType::intersection(parts)
+            })
+        })
+        .collect::<Option<_>>()?;
+    Some(PhpType::union(members))
+}
+
+/// A key type whose strings may come out in either case: a literal gives
+/// both spellings, and any other string keeps only its emptiness.
+fn unknown_case_key_type(key: &PhpType) -> Option<PhpType> {
+    let mut members: Vec<PhpType> = Vec::new();
+    for member in key.union_members() {
+        if member.is_int_subtype() || member.is_array_key() {
+            members.push(member.clone());
+        } else if member.as_literal().is_some() {
+            for mode in [CASE_LOWER, CASE_UPPER] {
+                members.push(change_key_type_case(member, mode)?);
+            }
+        } else if member.is_string_subtype() {
+            members.push(string_emptiness(member).unwrap_or_else(PhpType::string));
+        } else {
+            return None;
+        }
+    }
+    Some(PhpType::union(members))
+}
+
+/// `non-falsy-string` or `non-empty-string` when a string type promises
+/// it, which changing the case of its letters keeps.
+fn string_emptiness(ty: &PhpType) -> Option<PhpType> {
+    let names = ["non-falsy-string", "truthy-string", "non-empty-string"];
+    let has = |name: &str| match ty.kind() {
+        TypeKind::Named(n) => {
+            n.eq_ignore_ascii_case(name)
+                || (name == "non-empty-string"
+                    && (n.eq_ignore_ascii_case("non-empty-lowercase-string")
+                        || n.eq_ignore_ascii_case("non-empty-uppercase-string")))
+        }
+        TypeKind::Intersection(members) => members
+            .iter()
+            .any(|m| matches!(m.kind(), TypeKind::Named(n) if n.eq_ignore_ascii_case(name))),
+        _ => false,
+    };
+    if has(names[0]) || has(names[1]) {
+        Some(PhpType::named(crate::atom::atom("non-falsy-string")))
+    } else if has(names[2]) {
+        Some(PhpType::non_empty_string())
+    } else {
+        None
+    }
+}
+
+/// `array_pad($array, $length, $value)`: the array with `$value` added as
+/// needed, under new int keys. A length other than zero always leaves an
+/// entry.
+fn array_pad_type(args: &dyn ArrayFuncArgs) -> Option<PhpType> {
+    let input = args.arg_raw_type(0)?;
+    let pad = args.arg_raw_type(2)?;
+    let (form, key, value) = generic_array_parts(&input.generalized_array())?;
+    let non_zero = args.arg_raw_type(1).is_some_and(|length| {
+        length
+            .union_members()
+            .into_iter()
+            .all(|member| member.is_subtype_of(&PhpType::parse("positive-int|negative-int")))
+    });
+    let value = PhpType::join_runtime_value_types(vec![value, pad]);
+    let non_empty = form.is_non_empty() || non_zero;
+    if form.is_list() {
+        return Some(PhpType::generic(form.name(non_empty), vec![value]));
+    }
+    let key = key.unwrap_or_else(|| PhpType::union(vec![PhpType::int(), PhpType::string()]));
+    let key = PhpType::join_runtime_value_types(vec![key, PhpType::int()]);
+    Some(PhpType::generic(form.name(non_empty), vec![key, value]))
+}
+
+/// How many alternative pairs of shapes `array_combine()` folds before it
+/// falls back to the arrays' element types.
+const MAX_COMBINED_SHAPES: usize = 16;
+
+/// `array_combine($keys, $values)`: each value under the key at the same
+/// position.
+///
+/// Two constant arrays give a shape for every pair of their alternatives
+/// whose lengths agree; PHP throws a `ValueError` for any other pair, so
+/// none agreeing gives `never`. Anything else gives an array keyed by what
+/// `$keys` holds.
+fn array_combine_type(args: &dyn ArrayFuncArgs) -> Option<PhpType> {
+    let keys = args.arg_raw_type(0)?;
+    let values = args.arg_raw_type(1)?;
+    if keys.is_mixed() || values.is_mixed() {
+        return Some(PhpType::array());
+    }
+    let shape_entries = |ty: &PhpType| -> Option<Vec<Vec<ShapeEntry>>> {
+        ty.union_members()
+            .into_iter()
+            .map(|member| match member.kind() {
+                TypeKind::ArrayShape(entries) if entries.iter().all(|e| !e.optional) => {
+                    Some(entries.to_vec())
+                }
+                _ => None,
+            })
+            .collect()
+    };
+    if let (Some(key_shapes), Some(value_shapes)) = (shape_entries(&keys), shape_entries(&values))
+        && key_shapes.len() * value_shapes.len() <= MAX_COMBINED_SHAPES
+        && let Some(combined) = combine_shapes(&key_shapes, &value_shapes)
+    {
+        return Some(combined);
+    }
+    let key = fill_key_type(&keys.iterable_element_type()?)?;
+    let value = values.iterable_element_type()?;
+    let name = if keys.is_provably_non_empty() {
+        "non-empty-array"
+    } else {
+        "array"
+    };
+    Some(PhpType::generic(name, vec![key, value]))
+}
+
+/// One shape per pair of key and value alternatives of the same length, or
+/// `None` when a key cannot be read as one literal.
+fn combine_shapes(
+    key_shapes: &[Vec<ShapeEntry>],
+    value_shapes: &[Vec<ShapeEntry>],
+) -> Option<PhpType> {
+    let mut results: Vec<PhpType> = Vec::new();
+    for keys in key_shapes {
+        for values in value_shapes
+            .iter()
+            .filter(|values| values.len() == keys.len())
+        {
+            let mut combined: Vec<ShapeEntry> = Vec::new();
+            for (key, value) in keys.iter().zip(values) {
+                let key = literal_array_key(&fill_key_type(&key.value_type)?)?;
+                match combined.iter_mut().find(|e| e.key.as_deref() == Some(&key)) {
+                    Some(existing) => existing.value_type = value.value_type.clone(),
+                    None => combined.push(ShapeEntry {
+                        key: Some(key),
+                        value_type: value.value_type.clone(),
+                        optional: false,
+                    }),
+                }
+            }
+            let shape = shape_with_implicit_keys(combined);
+            if !results.contains(&shape) {
+                results.push(shape);
+            }
+        }
+    }
+    Some(if results.is_empty() {
+        PhpType::never()
+    } else {
+        PhpType::union(results)
+    })
+}
+
+/// `array_fill_keys($keys, $value)`: `$value` under each of the keys.
+///
+/// A constant array of keys gives a shape, one per alternative of a union
+/// of shapes, with a key optional when its entry is or when the entry may
+/// hold one of several keys. `None` when a key is an object (named by its
+/// `__toString()`), which leaves the stub's generic answer.
+fn array_fill_keys_type(args: &dyn ArrayFuncArgs) -> Option<PhpType> {
+    let keys = args.arg_raw_type(0)?;
+    let value = args.arg_raw_type(1)?;
+    if keys
+        .union_members()
+        .iter()
+        .all(|member| matches!(member.kind(), TypeKind::ArrayShape(_)))
+    {
+        let mut shapes: Vec<PhpType> = Vec::new();
+        for member in keys.union_members() {
+            let shape = fill_keys_shape(member, &value)?;
+            if !shapes.contains(&shape) {
+                shapes.push(shape);
+            }
+        }
+        return Some(PhpType::union(shapes));
+    }
+    let (form, _, element) = generic_array_parts(&keys.generalized_array())?;
+    let key = fill_key_type(&element)?;
+    let name = if form.is_non_empty() {
+        "non-empty-array"
+    } else {
+        "array"
+    };
+    Some(PhpType::generic(name, vec![key, value]))
+}
+
+fn fill_keys_shape(keys: &PhpType, value: &PhpType) -> Option<PhpType> {
+    let TypeKind::ArrayShape(entries) = keys.kind() else {
+        return None;
+    };
+    let mut filled: Vec<ShapeEntry> = Vec::new();
+    for entry in entries.iter() {
+        let members = entry.value_type.union_members();
+        let optional = entry.optional || members.len() > 1;
+        for member in members {
+            let key = fill_key_type(member)?;
+            let key = literal_array_key(&key)?;
+            match filled.iter_mut().find(|e| e.key.as_deref() == Some(&key)) {
+                Some(existing) => existing.optional &= optional,
+                None => filled.push(ShapeEntry {
+                    key: Some(key),
+                    value_type: value.clone(),
+                    optional,
+                }),
+            }
+        }
+    }
+    Some(shape_with_implicit_keys(filled))
+}
+
+/// The key `array_fill_keys()` stores a value of type `ty` under: an int
+/// as itself, anything else as the string it converts to, which PHP then
+/// stores as an int when it is a decimal integer. `None` for an object or a
+/// type whose string form cannot be told.
+fn fill_key_type(ty: &PhpType) -> Option<PhpType> {
+    let members: Vec<PhpType> = ty
+        .union_members()
+        .into_iter()
+        .map(|member| {
+            if member.is_int_subtype() {
+                return Some(vec![member.clone()]);
+            }
+            if member.is_true() {
+                return Some(vec![PhpType::literal_int("1")]);
+            }
+            if member.is_false() || member.is_null() {
+                return Some(vec![PhpType::literal_string_value("")]);
+            }
+            if member.is_bool() {
+                return Some(vec![
+                    PhpType::literal_string_value(""),
+                    PhpType::literal_int("1"),
+                ]);
+            }
+            if let Some(value) = member.as_literal().and_then(|l| l.parse_f64()) {
+                // Small values print the same in Rust as in PHP; larger
+                // ones switch to PHP's exponent form.
+                if !value.is_finite() || value.abs() >= 1e15 {
+                    return None;
+                }
+                let text = format!("{value}");
+                return Some(vec![match canonical_int_key(&text) {
+                    Some(n) => PhpType::literal_int(n.to_string()),
+                    None => PhpType::literal_string_value(text),
+                }]);
+            }
+            if member.is_float_subtype() {
+                return Some(vec![PhpType::intersection(vec![
+                    PhpType::named(crate::atom::atom("numeric-string")),
+                    PhpType::named(crate::atom::atom("uppercase-string")),
+                ])]);
+            }
+            if member.is_string_subtype() {
+                return super::array_shape_writes::normalize_array_key_type_keeping_literals(
+                    member,
+                )
+                .map(|key| vec![key]);
+            }
+            None
+        })
+        .collect::<Option<Vec<_>>>()?
+        .into_iter()
+        .flatten()
+        .collect();
+    Some(PhpType::join_runtime_value_types(members))
+}
+
 /// An array shape over `entries`, written positionally when they are the
 /// required `0, 1, 2, …` a positional shape stands for.
 fn shape_with_implicit_keys(mut entries: Vec<ShapeEntry>) -> PhpType {
@@ -1269,6 +2685,10 @@ fn min_max_type(args: &dyn ArrayFuncArgs, want_max: bool) -> Option<PhpType> {
 /// the entries are exactly the value's type, written-out value included.
 /// Counting from `0` makes it a list, and a `$count` that cannot be `0`
 /// leaves it non-empty.
+/// How many entries a literal `array_fill()` builds into a shape; a longer
+/// one is a table, typed as a list of the value.
+const MAX_FILLED_ENTRIES: i64 = 64;
+
 fn array_fill_type(args: &dyn ArrayFuncArgs) -> Option<PhpType> {
     use crate::type_engine::type_ops::int_interval::IntInterval;
 
@@ -1276,10 +2696,27 @@ fn array_fill_type(args: &dyn ArrayFuncArgs) -> Option<PhpType> {
         return None;
     }
     let value = args.arg_raw_type(2)?;
-    let from_zero = args
+    let start = args
         .arg_raw_type(0)
-        .and_then(|start| start.as_literal().and_then(LiteralValue::parse_i64))
-        == Some(0);
+        .and_then(|start| start.as_literal().and_then(LiteralValue::parse_i64));
+    // A literal start and count give the shape itself, its keys counting
+    // up from the start (from a negative one too, since PHP 8).
+    if let Some(start) = start
+        && let Some(count) = args
+            .arg_raw_type(1)
+            .and_then(|count| count.as_literal().and_then(LiteralValue::parse_i64))
+        && (0..=MAX_FILLED_ENTRIES).contains(&count)
+    {
+        let entries = (0..count)
+            .map(|i| ShapeEntry {
+                key: Some((start + i).to_string()),
+                value_type: value.clone(),
+                optional: false,
+            })
+            .collect();
+        return Some(shape_with_implicit_keys(entries));
+    }
+    let from_zero = start == Some(0);
     let filled = if from_zero {
         PhpType::list(value)
     } else {
@@ -1323,13 +2760,33 @@ fn extreme_number<'a>(
 fn extreme_int_range(args: &[PhpType], want_max: bool) -> Option<PhpType> {
     use crate::type_engine::type_ops::int_interval::IntInterval;
 
+    // `null` compares below every int but zero, so once another argument
+    // is at least one it can never be `max()`'s answer.
+    let null_loses = want_max
+        && args.iter().any(|arg| {
+            arg.union_members()
+                .into_iter()
+                .map(IntInterval::of_int)
+                .collect::<Option<Vec<_>>>()
+                .is_some_and(|members| {
+                    IntInterval::hull_of(&members)
+                        .min
+                        .is_some_and(|min| min >= 1)
+                })
+        });
     let mut intervals = args.iter().map(|arg| {
-        let members = arg
-            .union_members()
-            .into_iter()
-            .map(IntInterval::of_int)
-            .collect::<Option<Vec<_>>>()?;
-        Some(IntInterval::hull_of(&members))
+        let mut members = Vec::new();
+        for member in arg.union_members() {
+            let member = match member.kind() {
+                TypeKind::Nullable(inner) if null_loses => inner,
+                _ => member,
+            };
+            if null_loses && member.is_null() {
+                continue;
+            }
+            members.push(IntInterval::of_int(member)?);
+        }
+        (!members.is_empty()).then(|| IntInterval::hull_of(&members))
     });
     let first = intervals.next()??;
     // A `None` bound is unbounded, so on the side the extreme moves
@@ -1429,8 +2886,11 @@ fn array_map_container(element: PhpType, args: &dyn ArrayFuncArgs) -> PhpType {
 /// becomes what the callback returns for it, so `array{c: string}` maps to
 /// `array{c: T}` and a `list{…}` keeps its arity.
 ///
-/// Entries whose values widen to the same type share one callback
-/// inference, so a long homogeneous literal costs no more than a list.
+/// A short shape hands the callback each entry's own value, literals and
+/// all, so `array_map(fn ($k) => ['k' => $k], ['a', 'b'])` keeps `'a'` and
+/// `'b'`. In a longer one, entries whose values widen to the same type
+/// share one callback inference, so a long homogeneous literal costs no
+/// more than a list.
 fn array_map_shape(args: &dyn ArrayFuncArgs) -> Option<PhpType> {
     if args.has_arg(2) || args.is_spread(1) {
         return None;
@@ -1439,14 +2899,28 @@ fn array_map_shape(args: &dyn ArrayFuncArgs) -> Option<PhpType> {
     let TypeKind::ArrayShape(entries) = input.kind() else {
         return None;
     };
+    let exact = entries.len() <= MAX_EXACT_MAPPED_ENTRIES;
     let mut mapped_by_seed: Vec<(PhpType, PhpType)> = Vec::new();
     let mut mapped = Vec::with_capacity(entries.len());
     for entry in entries.iter() {
-        let seed = entry.value_type.widen_scalar_literals();
+        let seed = if exact {
+            entry.value_type.clone()
+        } else {
+            entry.value_type.widen_scalar_literals()
+        };
         let value = match mapped_by_seed.iter().find(|(s, _)| *s == seed) {
             Some((_, value)) => value.clone(),
             None => {
-                let value = array_map_value(array_map_element_type(args, Some(seed.clone()))?);
+                let result = array_map_element_type(args, Some(seed.clone()))?;
+                let value = if exact {
+                    if result.is_void() {
+                        PhpType::null()
+                    } else {
+                        result
+                    }
+                } else {
+                    array_map_value(result)
+                };
                 mapped_by_seed.push((seed, value.clone()));
                 value
             }
@@ -1462,6 +2936,10 @@ fn array_map_shape(args: &dyn ArrayFuncArgs) -> Option<PhpType> {
         PhpType::array_shape(mapped)
     })
 }
+
+/// How many entries a shape may have for `array_map` to run the callback
+/// over each one's exact value.
+const MAX_EXACT_MAPPED_ENTRIES: usize = 16;
 
 /// A callback result as the value `array_map` stores: literals widened,
 /// and a `void` callback's missing return read as the `null` it produces.

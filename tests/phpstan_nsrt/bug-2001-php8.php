@@ -26,7 +26,7 @@ class HelloWorld
 		}
 
 		if (array_key_exists('fragment', $parsedUrl)) {
-			assertType('array{scheme?: string, port?: int<0, 65535>, user?: string, pass?: string, path?: string, query?: string, fragment: string}', $parsedUrl); // SKIP: a key a branch removed is re-added at the end of the shape after the merge
+			assertType('array{scheme?: string, port?: int<0, 65535>, user?: string, pass?: string, path?: string, query?: string, fragment: string}', $parsedUrl);
 			$redirectUrl .= '#' . $parsedUrl['query'];
 		}
 

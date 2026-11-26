@@ -723,7 +723,7 @@ function test(bool $flag, string $key, $iterator, $union_iterator) {
     );
     assert_eq!(
         resolve_literal_test_var(content, "$mapped"),
-        "array{string}"
+        "array{'mapped'}"
     );
     assert_eq!(
         resolve_literal_test_var(content, "$converted"),

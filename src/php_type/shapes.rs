@@ -352,6 +352,7 @@ impl PhpType {
                 optional,
             };
         let mut joined: Vec<ShapeEntry> = Vec::with_capacity(a.len().max(b.len()));
+        let mut joined_keys: Vec<&String> = Vec::with_capacity(joined.capacity());
         for (ea, key) in a.iter().zip(&keys_a) {
             match keys_b.iter().position(|other| other == key) {
                 Some(index) => joined.push(entry(
@@ -362,11 +363,27 @@ impl PhpType {
                 )),
                 None => joined.push(entry(ea, key, ea.value_type.clone(), true)),
             }
+            joined_keys.push(key);
         }
-        for (eb, key) in b.iter().zip(&keys_b) {
-            if !keys_a.contains(key) {
-                joined.push(entry(eb, key, eb.value_type.clone(), true));
+        // A key only `b` holds fills the gap it leaves in `a` when its
+        // neighbours in `b` sit next to each other in `a`, so a shape one
+        // branch narrowed by removing a key joins back to the order it was
+        // declared in. Otherwise (the two sides hold different keys at that
+        // spot) it follows `a`'s keys. A positional entry after the gap would
+        // count its index from the inserted key, so then it is appended too.
+        let mut insert_at = 0;
+        for (index, (eb, key)) in b.iter().zip(&keys_b).enumerate() {
+            if let Some(pos) = joined_keys.iter().position(|k| *k == key) {
+                insert_at = pos + 1;
+                continue;
             }
+            let successor = keys_b[index + 1..].iter().find(|k| keys_a.contains(k));
+            let fills_gap = joined_keys.get(insert_at).copied() == successor
+                && joined[insert_at..].iter().all(|e| e.key.is_some());
+            let at = if fills_gap { insert_at } else { joined.len() };
+            joined.insert(at, entry(eb, key, eb.value_type.clone(), true));
+            joined_keys.insert(at, key);
+            insert_at = at + 1;
         }
         Some(joined)
     }

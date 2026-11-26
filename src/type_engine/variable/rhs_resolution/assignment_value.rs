@@ -6,11 +6,12 @@ use mago_syntax::cst::assignment::AssignmentOperator;
 
 use crate::php_type::PhpType;
 use crate::type_engine::resolver::VarResolutionCtx;
+use crate::type_engine::type_ops::const_fold::BitwiseOp;
 use crate::types::ResolvedType;
 
 use super::arithmetic::{
-    ArithmeticOpKind, infer_addition_result_type, infer_arithmetic_result_type,
-    infer_bitwise_assignment_result_type, infer_modulo_result_type, overloaded_number_result,
+    ArithmeticOpKind, bitwise_result_type, infer_addition_result_type,
+    infer_arithmetic_result_type, infer_modulo_result_type,
 };
 use super::resolve_rhs_expression;
 use super::scalar_fold::concat_result;
@@ -128,12 +129,28 @@ pub(crate) fn compound_assignment_result(
     match operator {
         AssignmentOperator::Concat(_) => Some(concat_result(&lhs_types(), rhs_types)),
         AssignmentOperator::Modulo(_) => Some(infer_modulo_result_type(&lhs_types(), &rhs_types())),
-        AssignmentOperator::LeftShift(_) | AssignmentOperator::RightShift(_) => Some(
-            overloaded_number_result(&lhs_types(), &rhs_types(), true).unwrap_or_else(PhpType::int),
-        ),
-        AssignmentOperator::BitwiseAnd(_)
-        | AssignmentOperator::BitwiseOr(_)
-        | AssignmentOperator::BitwiseXor(_) => Some(infer_bitwise_assignment_result_type(
+        AssignmentOperator::LeftShift(_) => Some(bitwise_result_type(
+            BitwiseOp::LeftShift,
+            &lhs_types(),
+            &rhs_types(),
+        )),
+        AssignmentOperator::RightShift(_) => Some(bitwise_result_type(
+            BitwiseOp::RightShift,
+            &lhs_types(),
+            &rhs_types(),
+        )),
+        AssignmentOperator::BitwiseAnd(_) => Some(bitwise_result_type(
+            BitwiseOp::And,
+            &lhs_types(),
+            &rhs_types(),
+        )),
+        AssignmentOperator::BitwiseOr(_) => Some(bitwise_result_type(
+            BitwiseOp::Or,
+            &lhs_types(),
+            &rhs_types(),
+        )),
+        AssignmentOperator::BitwiseXor(_) => Some(bitwise_result_type(
+            BitwiseOp::Xor,
             &lhs_types(),
             &rhs_types(),
         )),

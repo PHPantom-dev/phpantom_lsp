@@ -267,20 +267,6 @@ json_decode($mixed, null, 512, JSON_OBJECT_AS_ARRAY); // mixed, should be mixed~
 With objects decoded as arrays the result of an unknown string can never be
 an object. `// SKIP` lines in `tests/phpstan_nsrt/json-decode-json_object_as_array.php`
 and `json-decode-narrow_type_with_force_array.php`.
-### B830. `DOMDocument::createElement()` with a valid literal name keeps `|false`
-
-**Impact: Low · Complexity: Low**
-
-```php
-$doc->createElement('div');   // DOMElement|false, should be DOMElement
-```
-
-PHP 8 throws on an invalid element name, so a literal name that is a valid
-XML name cannot produce `false`. PHPStan keeps the `false` only for a name it
-cannot read or one that is not valid. A method has no call-site return rule
-to read the argument with.
-
-**Cases** (PHPStan `nsrt/`, 7 assertions): `dom-document-create-element.php` (7), `// SKIP` lines.
 
 ### B907. `get_debug_type()` of an object built with `new` returns `string`
 
@@ -296,58 +282,51 @@ since a variable typed with a class may hold a subclass instance. An object
 built with `new` is exactly that class, but its type does not say so.
 `// SKIP` line in `tests/phpstan_nsrt/get-debug-type.php`.
 
-### B908. Joining branches puts a key one branch removed at the end of the shape
-
-**Impact: Low · Complexity: Low**
-
-```php
-/** @var array{a?: int, b?: int, c?: int} $x */
-if (array_key_exists('b', $x)) { /* ... */ }
-$x;   // array{a?: int, c?: int, b?: int}, should keep the declared order
-```
-
-The branch where the check failed dropped the optional key, and the join
-re-adds it after the keys both branches share. The type is the same; only
-the spelling differs. `// SKIP` lines in `tests/phpstan_nsrt/bug-3009.php`
-and `bug-2001-php8.php`.
-
-### B832. Key-preserving array functions return a plain `array`
-
-**Impact: Medium · Complexity: Low-Medium**
-
-```php
-array_count_values([1, 2, 2, 3]); // got array, should be non-empty-array<1|2|3, int<1, max>>
-```
-
-The result's keys are the input's int and string values (numeric strings cast to int, other types dropped), and its values are counts.
-
-It also shows as:
-
-- Several array functions return a generic `array` where their inputs determine the result
-- `array_fill()` and `array_fill_keys()` with literal arguments do not build the exact shape in some cases
-- `str_replace()` and `preg_replace_callback()` on an array subject lose its shape
-
-**Fix:** add rules to `array_func_rules.rs` that carry the input's key and value types (and a constant input's shape) through.
-
-**Cases** (PHPStan `nsrt/`, 210 assertions): `array-change-key-case.php` (48), `array-functions.php` (32), `array_pad.php` (32), `array-intersect-key.php` (18), `array-replace.php` (16), `array-fill-keys.php` (16), `array-combine-php8.php` (13), `array-count-values.php` (7), `array-intersect-key-constant.php` (5), `iterator_to_array.php` (5), `bug-7580-php82.php` (4), `replaceFunctions.php` (4), 7 more.
-
-### B833. Slicing or reordering a constant array loses its shape
+### B832. Array functions lose a shape merged with a generic array, an object key, or an array-or-string subject
 
 **Impact: Low · Complexity: Low-Medium**
 
 ```php
-foreach (array_chunk(range(0, 10), 60) as $chunk) { $chunk; } // got list<int>, should be array{0, 1, ..., 10}
+/** @param array{foo: '1'} $a @param array<string, int> $b */
+array_replace($a, $b);   // non-empty-array<string, '1'|int>, should also keep `foo`
+array_fill_keys([new Foo()], 'b');   // array<Foo, 'b'>, should be array{foo: 'b'} from __toString()
+$s = rand() ? [] : 'foo';
+str_replace('a', 'b', $s);   // array<array-key, string>|string, should be array{}|string
 ```
 
-UNCLEAR whether `range(0, 10)` or `array_chunk()` loses the shape.
+The key-preserving array functions read shapes and generic arrays, but:
 
-It also shows as:
+- A shape replaced or intersected with a generic array keeps none of the
+  shape's keys (PHPStan's `hasOffset()`), so the result reads as a plain
+  generic array.
+- `array_fill_keys()` and `array_combine()` do not read an object key's
+  `__toString()`.
+- `str_replace()` and the `preg_` replacers on a subject that may be an array
+  or a string lose the array's shape, and `preg_replace()` drops its
+  subject's string refinements.
 
-- `sort()` and `shuffle()` do not turn a union of shapes or a non-list argument into a list
-- `array_unique()` returns a list
-- `array_slice()` of a literal array with numeric-string keys, then an append, loses the shape
+`// SKIP` lines in `tests/phpstan_nsrt/array-replace.php`,
+`array-intersect-key.php`, `array-fill-keys.php`, `array-combine-php8.php`
+and `replaceFunctions.php`.
 
-**Cases** (PHPStan `nsrt/`, 141 assertions): `array-slice.php` (41), `array-functions.php` (19), `array-chunk.php` (19), `array-reverse.php` (18), `php73_functions.php` (12), `shuffle.php` (11), `bug-10721.php` (9), `bug-8956.php` (3), `bug-6138.php` (3), `sort.php` (3), `get-defined-vars.php` (2), `array-chunk-php81.php`.
+**Upstream cases** (PHPStan `nsrt/`): `array-functions.php` (32), not yet ported.
+
+### B833. Shuffling or chunking a constant array forgets how many entries it had
+
+**Impact: Low · Complexity: Low-Medium**
+
+```php
+$arr = ['a' => 1, 'b' => 2, 'c' => 3];
+shuffle($arr);
+array_keys($arr);   // non-empty-list<int<0, max>>, should be non-empty-list<0|1|2>
+```
+
+`shuffle()` and `sort()` turn a shape into a list of its values, losing its
+size, so the keys read back afterwards are any non-negative int. The same
+gap shows when `array_chunk()` is handed a length range (`int<2, 3>`) rather
+than a literal, and when `array_reverse()` renumbers a list shape with
+optional entries. `// SKIP` lines in `tests/phpstan_nsrt/shuffle.php`,
+`bug-6138.php`, `bug-10721.php`, `array-chunk.php` and `array-reverse.php`.
 
 ### B834. `array_filter()` with a callback neither filters a shape entry by entry nor narrows by the callback
 
@@ -369,19 +348,6 @@ It also shows as:
 - An inline `array_find()` callback's key parameter is `string`, not the array's literal keys (`// SKIP` line in `tests/phpstan_nsrt/array-find.php`)
 
 **Cases** (PHPStan `nsrt/`, 31 assertions): `bug-11730.php` (15), `bug-3132.php` (4), `array-filter-constant.php` (3), `array-filter-arrow-functions.php` (3), `array-functions.php` (2), `bug-7993.php`, `bug-11570.php`, `bug-6006.php`, `bug-7909.php`.
-
-### B836. `preg_split()` ignores its flags and literal arguments
-
-**Impact: Low · Complexity: Low-Medium**
-
-```php
-preg_split('/-/', '1-2-3');                    // array<string>|false, should be array{'1', '2', '3'}
-preg_split($p, $s, -1, PREG_SPLIT_OFFSET_CAPTURE); // array<string>|false, should be list<array{string, int}>|false
-```
-
-`PREG_SPLIT_OFFSET_CAPTURE` changes the element type and literal arguments fix the result.
-
-**Cases** (PHPStan `nsrt/`, 43 assertions): `preg_split.php` (37), `preg_filter.php` (6).
 
 ## Reachability
 
@@ -1953,6 +1919,23 @@ rewrite those tests.
 No outstanding items.
 
 ## Miscellaneous
+
+### B909. Hover on an assignment reads an arithmetic argument less precisely than the walker
+
+**Impact: Low · Complexity: Low-Medium**
+
+```php
+/** @param list<int> $ids */
+function f(array $ids): void {
+    $filled = array_fill(0, count($ids) + 1, 'a');
+    // hover on $filled: list<'a'>; at a later statement: non-empty-list<'a'>
+}
+```
+
+Hovering the variable at its assignment resolves the call's arguments
+through a different path than the forward walker, and `count($ids) + 1`
+is not read as `int<1, max>` there. Any array rule that reads the
+argument's range sees less than it does from the next statement on.
 
 ### B792. A static property read through `$object::` has no type
 

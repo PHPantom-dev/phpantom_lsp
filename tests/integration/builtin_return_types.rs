@@ -447,10 +447,10 @@ function probe(string $text, mixed $unknown): void {
     assert_assigned_types(
         content,
         &[
-            ("$ints", "list<int>"),
-            ("$steppedInts", "list<int>"),
-            ("$floats", "list<float>"),
-            ("$fractionalStep", "list<float>"),
+            ("$ints", "array{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}"),
+            ("$steppedInts", "array{0, 2, 4, 6, 8, 10}"),
+            ("$floats", "non-empty-list<float>"),
+            ("$fractionalStep", "non-empty-list<float>"),
             ("$chars", "list<string>"),
             ("$either", "list<string>|list<int|float>"),
         ],
@@ -820,9 +820,9 @@ function probe(): void {
     assert_assigned_types(
         content,
         &[
-            ("$ints", "array{int, int, int}"),
+            ("$ints", "array{1, 2, 3}"),
             ("$keyed", "array{c: RuntimeException}"),
-            ("$mixed", "array{a: int, b: string}"),
+            ("$mixed", "array{a: 1, b: 'x'}"),
             ("$nulls", "array{null, null}"),
             ("$voids", "list<null>"),
         ],

@@ -1,0 +1,20 @@
+// test: a `??` fallback compared away proves its left side set and not empty
+// feature: hover
+// expect_hover: $part => non-empty-string
+// expect_hover: $checked => non-empty-string
+---
+<?php
+
+/**
+ * @param array{0: string, 3?: string} $match
+ */
+function test(array $match, ?string $name): void {
+    if (($match[3] ?? '') !== '') {
+        $part = $match[3];
+    }
+    if (($name ?? '') === '') {
+        return;
+    }
+    $checked = $name;
+    $<>checked;
+}
