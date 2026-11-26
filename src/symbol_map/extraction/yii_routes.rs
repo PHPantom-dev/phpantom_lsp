@@ -437,6 +437,7 @@ mod tests {
             php,
             &names,
             crate::symbol_map::extraction::Frameworks {
+                laravel: false,
                 symfony: false,
                 service_container: false,
                 drupal: false,

@@ -185,6 +185,7 @@ struct ExtractionCtx<'a> {
     /// `get()` and `set()` would otherwise record all over any other
     /// project.
     symfony: bool,
+    laravel: bool,
     /// Whether the project builds a Symfony service container, as Symfony
     /// and Drupal both do.  Gates the container lookups recorded for the
     /// type engine to confirm as naming a service or a parameter.
@@ -453,7 +454,8 @@ pub(crate) use drupal::{hook_invocation, is_entity_type_attribute};
 pub(crate) use symfony::{
     configurator_function_kind, is_autowire_attribute, is_bus_name_stamp,
     is_event_listener_attribute, is_message_handler_attribute, is_template_attribute,
-    is_translatable_message, is_translate_function, symfony_receiver_method,
+    is_translatable_message, is_translate_function, placeholder_arguments_from,
+    symfony_receiver_method,
 };
 pub(crate) use yii::{chain_view_base, class_view_base, yii_view_parameters_argument};
 
@@ -480,6 +482,9 @@ fn descend_unhandled<'a>(node: Node<'a, 'a>, ctx: &mut ExtractionCtx<'a>, scope_
 /// uses.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Frameworks {
+    /// The project is a Laravel application, which gates recording the
+    /// variables `env()` and `Env::get()` read.
+    pub laravel: bool,
     /// The project is a Symfony application.
     pub symfony: bool,
     /// The project builds a Symfony service container: a Symfony or a
@@ -502,6 +507,7 @@ pub(crate) struct Frameworks {
 impl Frameworks {
     /// Every framework, for tests that do not care which project they are in.
     pub(crate) const ALL: Self = Self {
+        laravel: true,
         symfony: true,
         service_container: true,
         drupal: true,
@@ -600,6 +606,7 @@ fn extract_symbol_map_inner(
 ) -> SymbolMap {
     let Frameworks {
         symfony,
+        laravel,
         service_container,
         drupal,
         twig,
@@ -667,6 +674,7 @@ fn extract_symbol_map_inner(
         in_mailable: false,
         covers_default_class: None,
         symfony,
+        laravel,
         service_container,
         drupal,
         drupal_attached: drupal && memchr::memmem::find(content.as_bytes(), b"#attached").is_some(),

@@ -89,6 +89,35 @@ impl Backend {
             return Some(response);
         }
 
+        if self.is_symfony_project()
+            && literal.contains("%env(")
+            && let Some((StringKeyKind::Env, start)) = open_placeholder(literal)
+            && let Some(call) = detect_string_call_context(content, cursor, code)
+            && let Some(subject) = call.subject.as_deref()
+            && crate::symbol_map::extraction::placeholder_arguments_from(&call.method_name)
+                .is_some_and(|from| call.arg_index >= from)
+            && self.receiver_key_for(
+                subject,
+                (
+                    crate::symbol_map::ReceiverClass::ConfiguratorEnv,
+                    &call.method_name,
+                    call.arg_index,
+                ),
+                content,
+                cursor,
+                ctx,
+            ) == Some(StringKeyKind::Env)
+        {
+            return self.symfony_key_response(
+                uri,
+                StringKeyKind::Env,
+                content,
+                literal_start + start,
+                cursor,
+                position,
+            );
+        }
+
         let mut receiver_type = None;
         let (kind, prefix_start) = self
             .symfony_call_key(content, cursor, code, ctx, &mut receiver_type)
@@ -625,7 +654,11 @@ impl Backend {
         cursor: usize,
         position: Position,
     ) -> Option<CompletionResponse> {
-        let names = self.symfony_declared_names_except(kind, Some((uri, prefix_start as u32)));
+        let names = if kind == StringKeyKind::Env {
+            crate::virtual_members::laravel::enumerate_env_keys(self)
+        } else {
+            self.symfony_declared_names_except(kind, Some((uri, prefix_start as u32)))
+        };
         self.symfony_names_response(kind, names, content, prefix_start, cursor, position)
     }
 
@@ -1067,13 +1100,16 @@ fn attribute_key(
     }
     match slot {
         ArgumentSlot::Named("service") => Some((StringKeyKind::ServiceId, literal_start)),
+        ArgumentSlot::Named("env") if is_symfony => Some((
+            StringKeyKind::Env,
+            literal_start + env_prefix_start(literal),
+        )),
         ArgumentSlot::Named("param") => Some((StringKeyKind::ContainerParameter, literal_start)),
         ArgumentSlot::Named("value") | ArgumentSlot::Positional(0) => {
             if literal.starts_with('@') && !literal.starts_with("@@") {
                 return Some((StringKeyKind::ServiceId, literal_start + 1));
             }
-            open_placeholder(literal)
-                .map(|start| (StringKeyKind::ContainerParameter, literal_start + start))
+            open_placeholder(literal).map(|(kind, start)| (kind, literal_start + start))
         }
         _ => None,
     }
@@ -1097,9 +1133,21 @@ fn handler_at(ctx: &FileContext, offset: u32) -> Option<String> {
 }
 
 /// Where the name of a `%placeholder%` the end of `text` is inside starts.
-fn open_placeholder(text: &str) -> Option<usize> {
+fn open_placeholder(text: &str) -> Option<(StringKeyKind, usize)> {
     let percents = text.bytes().filter(|byte| *byte == b'%').count();
-    (percents % 2 == 1).then(|| text.rfind('%').map(|index| index + 1))?
+    if percents % 2 == 0 {
+        return None;
+    }
+    let start = text.rfind('%')? + 1;
+    if let Some(expr) = text[start..].strip_prefix("env(") {
+        Some((StringKeyKind::Env, start + 4 + env_prefix_start(expr)))
+    } else {
+        Some((StringKeyKind::ContainerParameter, start))
+    }
+}
+
+fn env_prefix_start(expr: &str) -> usize {
+    expr.rfind(':').map_or(0, |at| at + 1)
 }
 
 /// The event a listener tag subscribes to, or the bus a handler tag or the
@@ -1126,10 +1174,10 @@ fn resource_key_at(content: &str, cursor: usize) -> Option<(StringKeyKind, usize
     let is_name_byte =
         |byte: u8| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'.' | b'-');
 
-    if let Some(start) = open_placeholder(line)
+    if let Some((kind, start)) = open_placeholder(line)
         && line[start..].bytes().all(is_name_byte)
     {
-        return Some((StringKeyKind::ContainerParameter, line_start + start));
+        return Some((kind, line_start + start));
     }
 
     let name_start = line

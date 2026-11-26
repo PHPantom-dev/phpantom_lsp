@@ -4064,6 +4064,7 @@ class SettingsForm {
             php,
             &names,
             crate::symbol_map::extraction::Frameworks {
+                laravel: false,
                 symfony: false,
                 service_container: true,
                 drupal: true,
@@ -4130,6 +4131,7 @@ class SettingsForm {
             php,
             &names,
             crate::symbol_map::extraction::Frameworks {
+                laravel: false,
                 symfony: false,
                 service_container: true,
                 drupal: true,
@@ -4215,6 +4217,7 @@ class Reader {
                 php,
                 &names,
                 crate::symbol_map::extraction::Frameworks {
+                    laravel: false,
                     symfony: false,
                     service_container: drupal,
                     drupal,
@@ -4323,6 +4326,7 @@ class Note {
             php,
             &names,
             crate::symbol_map::extraction::Frameworks {
+                laravel: false,
                 symfony: false,
                 service_container: true,
                 drupal: true,
@@ -4378,6 +4382,7 @@ class Note {
             php,
             &names,
             crate::symbol_map::extraction::Frameworks {
+                laravel: false,
                 symfony: false,
                 service_container: false,
                 drupal: true,
@@ -4426,6 +4431,7 @@ class Note {
             php,
             &names,
             crate::symbol_map::extraction::Frameworks {
+                laravel: false,
                 symfony: false,
                 service_container: true,
                 drupal: true,
@@ -4517,6 +4523,7 @@ trait LayoutRoutes {
             php,
             &names,
             crate::symbol_map::extraction::Frameworks {
+                laravel: false,
                 symfony: false,
                 service_container: true,
                 drupal: true,
@@ -4606,6 +4613,7 @@ abstract class Base {
             php,
             &names,
             crate::symbol_map::extraction::Frameworks {
+                laravel: false,
                 symfony: false,
                 service_container: true,
                 drupal: true,
@@ -4750,6 +4758,7 @@ final class About {
             php,
             &names,
             crate::symbol_map::extraction::Frameworks {
+                laravel: false,
                 symfony: false,
                 service_container: true,
                 drupal: true,
@@ -4849,6 +4858,7 @@ class NodeRouteProvider extends DefaultHtmlRouteProvider {
                 php,
                 &names,
                 crate::symbol_map::extraction::Frameworks {
+                    laravel: false,
                     symfony: false,
                     service_container: true,
                     drupal: true,
@@ -4899,6 +4909,7 @@ class NodeRouteProvider extends DefaultHtmlRouteProvider {
             php,
             &names,
             crate::symbol_map::extraction::Frameworks {
+                laravel: false,
                 symfony: false,
                 service_container: false,
                 drupal: true,
@@ -5503,6 +5514,7 @@ class Entry {}
             php,
             &names,
             crate::symbol_map::extraction::Frameworks {
+                laravel: false,
                 symfony: false,
                 service_container: drupal,
                 drupal,

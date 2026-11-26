@@ -636,6 +636,7 @@ fn read_dql_builder_methods(uri: &str, content: &str) -> SymbolMap {
         content,
         &names,
         crate::symbol_map::extraction::Frameworks {
+            laravel: false,
             symfony: false,
             service_container: false,
             drupal: false,

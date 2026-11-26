@@ -114,6 +114,7 @@ pub(crate) fn hook_firings(content: &str) -> Vec<Firing> {
         content,
         &names,
         crate::symbol_map::extraction::Frameworks {
+            laravel: false,
             symfony: false,
             service_container: false,
             drupal: false,

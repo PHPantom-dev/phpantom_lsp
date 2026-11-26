@@ -368,7 +368,7 @@ pub(in crate::symbol_map::extraction) fn emit_laravel_static_call_spans<'a>(
     }
     // `Env::get('APP_NAME')` reads the same variable the `env()`
     // helper it backs does.
-    if is_env_key_call(clean_subject, member_name) {
+    if ctx.laravel && is_env_key_call(clean_subject, member_name) {
         try_emit_laravel_string_span(
             crate::symbol_map::StringKeyKind::Env,
             argument_list,

@@ -145,6 +145,7 @@ fn read_extension_file(uri: &str, content: &str) -> Vec<TwigCallable> {
         content,
         &names,
         crate::symbol_map::extraction::Frameworks {
+            laravel: false,
             symfony: false,
             service_container: false,
             drupal: false,

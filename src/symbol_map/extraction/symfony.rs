@@ -847,7 +847,7 @@ fn record_configured_decoration(
 /// placeholders in its arguments from `from` on: a service's arguments,
 /// bindings, method calls, properties, and factory, and the value a
 /// `set()` gives a parameter or the class it gives a service.
-fn placeholder_arguments_from(member_name: &str) -> Option<usize> {
+pub(crate) fn placeholder_arguments_from(member_name: &str) -> Option<usize> {
     let is = |name: &str| member_name.eq_ignore_ascii_case(name);
     if is("set") {
         Some(1)
@@ -886,7 +886,7 @@ fn record_configurator_placeholders(
         let Some(text) = ctx.content.get(start as usize..end as usize) else {
             continue;
         };
-        crate::symfony::resources::for_each_parameter_placeholder(text, |name, offset| {
+        crate::symfony::resources::for_each_parameter_placeholder(text, |kind, name, offset| {
             let start = start + offset as u32;
             ctx.typed_receiver_sites.push(TypedReceiverSite {
                 start,
@@ -895,7 +895,11 @@ fn record_configurator_placeholders(
                 is_write: false,
                 is_optional: false,
                 guards: 0,
-                receiver: ReceiverClass::ConfiguratorArgument,
+                receiver: if kind == StringKeyKind::Env {
+                    ReceiverClass::ConfiguratorEnv
+                } else {
+                    ReceiverClass::ConfiguratorArgument
+                },
             });
         });
     }
@@ -1410,6 +1414,8 @@ pub(crate) fn configurator_function_kind(resolved: &str) -> Option<StringKeyKind
     let name = &resolved[CONFIGURATOR_NS.len()..];
     if name.eq_ignore_ascii_case("service") || name.eq_ignore_ascii_case("service_closure") {
         Some(StringKeyKind::ServiceId)
+    } else if name.eq_ignore_ascii_case("env") {
+        Some(StringKeyKind::Env)
     } else if name.eq_ignore_ascii_case("param") {
         Some(StringKeyKind::ContainerParameter)
     } else {
@@ -1489,6 +1495,18 @@ pub(in crate::symbol_map::extraction) fn emit_autowire_attribute_spans(
                 ctx.content,
                 &mut ctx.spans,
             ),
+            "env" => {
+                if let Some((raw, _, end)) = string_literal_at_range(value, ctx.content)
+                    && let Some(name) = crate::symfony::resources::env_name(raw)
+                {
+                    ctx.spans.push(crate::symfony::resources::key_span(
+                        StringKeyKind::Env,
+                        name,
+                        end as usize - name.len(),
+                        false,
+                    ));
+                }
+            }
             "value" => emit_autowire_value_spans(value, ctx.content, &mut ctx.spans),
             _ => {}
         }
@@ -2813,41 +2831,18 @@ fn emit_autowire_value_spans(value: &Expression<'_>, content: &str, spans: &mut 
     let Some((raw, start, _)) = string_literal_at_range(value, content) else {
         return;
     };
-    let push = |spans: &mut Vec<SymbolSpan>, kind, name: &str, offset: usize| {
-        spans.push(SymbolSpan {
-            start: start + offset as u32,
-            end: start + (offset + name.len()) as u32,
-            kind: SymbolKind::StringKey {
-                kind,
-                key: name.to_string(),
-                is_write: false,
-                is_optional: false,
-            },
-        });
-    };
     if let Some(id) = raw.strip_prefix('@') {
         if !id.is_empty() && !id.starts_with(['@', '=']) && !id.contains('\\') {
-            push(spans, StringKeyKind::ServiceId, id, 1);
+            spans.push(crate::symfony::resources::key_span(
+                StringKeyKind::ServiceId,
+                id,
+                start as usize + 1,
+                false,
+            ));
         }
         return;
     }
-    let mut cursor = 0usize;
-    while let Some(open) = raw[cursor..].find('%').map(|n| cursor + n) {
-        let Some(close) = raw[open + 1..].find('%').map(|n| open + 1 + n) else {
-            break;
-        };
-        let name = &raw[open + 1..close];
-        if !name.is_empty()
-            && name
-                .bytes()
-                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'.' | b'-'))
-        {
-            push(spans, StringKeyKind::ContainerParameter, name, open + 1);
-            cursor = close + 1;
-        } else {
-            cursor = if name.is_empty() { close + 1 } else { close };
-        }
-    }
+    crate::symfony::resources::scan_parameter_placeholders(raw, start as usize, spans);
 }
 
 #[cfg(test)]
@@ -2866,6 +2861,7 @@ mod tests {
             php,
             &names,
             crate::symbol_map::extraction::Frameworks {
+                laravel: false,
                 symfony: true,
                 service_container: true,
                 drupal: false,
@@ -2876,6 +2872,21 @@ mod tests {
             },
             None,
         )
+    }
+
+    #[test]
+    fn only_the_configurator_env_helper_reads_dotenv_in_symfony() {
+        let php = r"<?php
+namespace Other;
+use function Symfony\Component\DependencyInjection\Loader\Configurator\env as configured;
+function env(string $s) {}
+env('UNRELATED');
+configured('UPLOAD_DIR');
+";
+        assert_eq!(
+            keys_of(&map_of(php), crate::symbol_map::StringKeyKind::Env),
+            vec![("UPLOAD_DIR".into(), false)]
+        );
     }
 
     fn receivers(map: &SymbolMap) -> Vec<(&str, ReceiverClass, bool)> {
@@ -3702,6 +3713,7 @@ class RefundSubscriber {
             php,
             &names,
             crate::symbol_map::extraction::Frameworks {
+                laravel: false,
                 symfony: false,
                 service_container: false,
                 drupal: false,
@@ -3728,6 +3740,7 @@ class RefundSubscriber {
             php,
             &names,
             crate::symbol_map::extraction::Frameworks {
+                laravel: false,
                 symfony: false,
                 service_container: true,
                 drupal: false,
@@ -3760,6 +3773,7 @@ class RefundSubscriber {
             php,
             &names,
             crate::symbol_map::extraction::Frameworks {
+                laravel: false,
                 symfony: false,
                 service_container: false,
                 drupal: false,

@@ -185,6 +185,7 @@ fn read_php_file(uri: &str, content: &str) -> SymbolMap {
         content,
         &names,
         crate::symbol_map::extraction::Frameworks {
+            laravel: false,
             symfony: true,
             service_container: true,
             drupal: false,

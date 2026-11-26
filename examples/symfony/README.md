@@ -36,6 +36,11 @@ catalogues together, the way a real Symfony project does.
   leads to `src/DependencyInjection/AcmeDemoExtension.php`. A `%name%`
   placeholder in a configurator's string, such as `app.greeting`'s, reads
   the parameter it names.
+- Environment variables navigate between the configuration that reads them
+  and the dotenv file that declares them. In `config/services.yaml`, go to
+  the definition of `UPLOAD_DIRECTORY` in `app.upload_directory`'s
+  `%env(resolve:…)%` to reach its line in `.env`, hover it for its value, or
+  find its references.
 - Route names navigate between their `#[Route]` attribute or
   `config/routes.yaml` entry and the controllers and Twig templates that
   link to them. In `templates/demo/index.html.twig`, go to the definition of

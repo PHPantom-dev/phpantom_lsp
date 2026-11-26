@@ -163,7 +163,10 @@ fn declares_symfony_keys(map: &SymbolMap, enabled: impl Fn(StringKeyKind) -> boo
         | KeyFramework::Twig
         | KeyFramework::Yii
         | KeyFramework::Drupal => enabled(kind),
-        KeyFramework::Laravel | KeyFramework::WordPress | KeyFramework::Tempest => false,
+        KeyFramework::Dotenv
+        | KeyFramework::Laravel
+        | KeyFramework::WordPress
+        | KeyFramework::Tempest => false,
     };
     (!map.messenger_handlers.is_empty() && enabled(StringKeyKind::MessengerBus))
         || !map.tempest_routes.is_empty()
@@ -213,6 +216,9 @@ impl Backend {
     /// this project uses.
     pub(crate) fn string_key_kind_enabled(&self, kind: StringKeyKind) -> bool {
         match kind.framework() {
+            KeyFramework::Dotenv => {
+                self.is_symfony_project() || self.resolved_class_cache.read().laravel().is_enabled()
+            }
             KeyFramework::Laravel => self.resolved_class_cache.read().laravel().is_enabled(),
             KeyFramework::ServiceContainer => self.reads_service_container(),
             KeyFramework::Symfony => self.is_symfony_project(),
@@ -369,7 +375,7 @@ impl Backend {
         // hooks, but hooks have an index of their own (see
         // `crate::drupal::hooks`), which is not read here.
         let needs_typed = match kind.framework() {
-            KeyFramework::Drupal => false,
+            KeyFramework::Dotenv | KeyFramework::Drupal => false,
             KeyFramework::ServiceContainer => self.is_symfony_project(),
             KeyFramework::Laravel
             | KeyFramework::Symfony

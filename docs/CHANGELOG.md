@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Flux and Filament components.** Flux's `<flux:button>` tags complete, offer the attributes the component declares, jump to its template in the package, and are reported when no component has the name. Components a package registers by directory, such as Flux's, now work under their `<x-prefix::…>` spelling too.
 
+#### Symfony
+
+- **Environment variables.** The variable a `%env(…)%` placeholder or `#[Autowire(env: …)]` reads completes, jumps to the line of the dotenv file that declares it, shows its value on hover, and lists its uses across YAML, XML and PHP configuration. Contributed by @shuvroroy.
 #### Laravel
 
 - **Mass assignment on totally guarded models.** PHPantom warns when a call such as `Post::create($attributes)` can throw `MassAssignmentException` because the model uses Eloquent's default guards. Contributed by @shuvroroy.

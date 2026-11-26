@@ -207,6 +207,7 @@ fn read_package_definition_files(paths: &[PathBuf]) -> Vec<PackageDefinitionFile
             &content,
             &names,
             crate::symbol_map::extraction::Frameworks {
+                laravel: false,
                 symfony: false,
                 service_container: false,
                 drupal: false,
@@ -493,7 +494,11 @@ mod tests {
     fn a_package_lists_its_definition_files() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join("config/di")).unwrap();
-        std::fs::write(dir.path().join("config/di/a.php"), "<?php").unwrap();
+        std::fs::write(
+            dir.path().join("config/di/a.php"),
+            "<?php return [Logger::class => Logger::class];",
+        )
+        .unwrap();
         std::fs::write(dir.path().join("config/di/b.txt"), "").unwrap();
         let package = serde_json::json!({
             "extra": {
@@ -507,6 +512,9 @@ mod tests {
         });
         let mut files = package_definition_files(&package, dir.path());
         files.sort();
+        let definitions = read_package_definition_files(&files);
+        assert_eq!(definitions.len(), 1);
+        assert_eq!(definitions[0].sites[0].class.as_str(), "Logger");
         let config = dir.path().join("config");
         assert_eq!(
             files,

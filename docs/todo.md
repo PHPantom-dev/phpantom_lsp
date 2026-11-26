@@ -80,7 +80,6 @@ ships, remove every row that names it.
 | T68 | [A DQL field is typed by its property, not its column's type](todo/type-inference.md#t68-a-dql-field-is-typed-by-its-property-not-its-columns-type) | Low         | Medium      |
 | T69 | [`IDENTITY()` in a DQL `SELECT` is `mixed`](todo/type-inference.md#t69-identity-in-a-dql-select-is-mixed) | Low         | Low-Medium  |
 | T65 | [The expression builder's fragments are not literal strings](todo/type-inference.md#t65-the-expression-builders-fragments-are-not-literal-strings) | Low         | Low-Medium  |
-| F48 | [Symfony environment variables](todo/lsp-features.md#f48-symfony-environment-variables) | Medium      | Low-Medium  |
 | F24 | [Doctrine lenses miss attribute mappings and generic repositories](todo/lsp-features.md#f24-doctrine-lenses-miss-attribute-mappings-and-generic-repositories) | Medium      | Medium      |
 | F25 | [Names a PHP configurator spells as strings](todo/lsp-features.md#f25-names-a-php-configurator-spells-as-strings) | Medium      | Medium      |
 | F45 | [Symfony events named by their class or a constant](todo/lsp-features.md#f45-symfony-events-named-by-their-class-or-a-constant) | Medium      | Medium      |
