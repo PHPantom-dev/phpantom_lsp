@@ -845,6 +845,37 @@ function f(Customer $c, array $map, string $type): void {
     }
 }
 
+/// `new $obj` builds another instance of the object's class.
+#[test]
+fn member_access_on_new_from_an_instance_resolves_its_class() {
+    let backend = create_test_backend_with_full_stubs();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+namespace App;
+
+class Customer {
+    public function name(): string { return ''; }
+}
+
+function f(Customer $c, ?Customer $maybe): void {
+    echo (new $c())->name();
+    (new $c())->missingA();
+    if ($maybe !== null) {
+        (new $maybe())->missingB();
+    }
+}
+"#;
+    backend.update_ast(uri, text);
+    let mut out = Vec::new();
+    backend.collect_slow_diagnostics(uri, text, &mut out);
+    let mut messages: Vec<&str> = out.iter().map(|d| message_text(&d.message)).collect();
+    messages.sort_unstable();
+    assert_eq!(messages.len(), 2, "got: {messages:?}");
+    for (message, name) in messages.iter().zip(["missingA", "missingB"]) {
+        assert!(message.contains(name), "got: {messages:?}");
+    }
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Magic method suppression
 // ═══════════════════════════════════════════════════════════════════════════

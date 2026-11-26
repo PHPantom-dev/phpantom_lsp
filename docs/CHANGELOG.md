@@ -34,6 +34,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **A closure's return type comes from its whole body.** Every `return` counts, including those inside `if`/`else`, locals assigned in the body, and a bare `return;`. A closure that returns nothing is `void`, and one that always throws or calls a `never` function is `never`. Generator closures keep their yielded literals, follow `yield from`, and refine a declared `Generator` or `iterable` return.
+- **`new $class` always builds an object.** When the variable holds a plain string, a `class-string`, `mixed` or an object, the result is `object`, or the variable's own class when it holds an instance, instead of having no type.
 - **Livewire 4's view locations are view roots.** Templates in the directories Livewire 4's `component_locations` and `component_namespaces` settings name (by default `resources/views/livewire` and `pages::`) are views by those names, so `view()` and `@include` calls naming them are no longer reported as unknown. A `<livewire:…>` tag is checked against the components in every location the config names.
 - **`$app` is defined in every Blade template.** Laravel shares the application with all views, so `{{ $app->getLocale() }}` is no longer reported as an undefined variable and its members complete.
 - **No unknown-component report for a bare tag a package path answers.** `<x-badge>` reaches a template a package registered with `Blade::anonymousComponentPath()` under a prefix, as Laravel resolves it, so it is no longer reported as unknown.

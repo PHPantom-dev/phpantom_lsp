@@ -76,14 +76,95 @@ pub(crate) fn instances_built_by_new(
         }
     }
 
-    let mut classes: Vec<Arc<ClassInfo>> = Vec::new();
+    let mut built = BuiltByNew::default();
     for rt in operand {
-        ClassInfo::extend_unique_arc(
-            &mut classes,
-            classes_named_by_type(&rt.type_string, owning_class, all_classes, class_loader),
+        collect_built_by_new(
+            &rt.type_string,
+            owning_class,
+            all_classes,
+            class_loader,
+            &mut built,
         );
     }
-    ResolvedType::from_classes(classes)
+    // `Foo|object` is just `object`: one of the values may name a class
+    // nothing is known about.
+    if built.any_object {
+        return vec![ResolvedType::from_type_string(PhpType::object())];
+    }
+    ResolvedType::from_classes(built.classes)
+}
+
+/// What `new $x` builds from each kind of value `$x` can hold.
+#[derive(Default)]
+struct BuiltByNew {
+    classes: Vec<Arc<ClassInfo>>,
+    /// Some value builds an object of a class the type does not name: a
+    /// plain string or `class-string`, `mixed`, or an `object`.
+    any_object: bool,
+}
+
+/// Fold what `new $x` builds when `$x` holds a value of type `ty` into
+/// `built`, the way PHPStan reads the operand: a class name builds that
+/// class, an instance builds its own class, and any other string, an
+/// `object` or `mixed` builds some object. Values `new` rejects (`null`,
+/// `int`, arrays) build nothing.
+fn collect_built_by_new(
+    ty: &PhpType,
+    owning_class: &str,
+    all_classes: &[Arc<ClassInfo>],
+    class_loader: &ResolvedClassLoader<'_>,
+    built: &mut BuiltByNew,
+) {
+    match ty.kind() {
+        TypeKind::ClassString(None) => built.any_object = true,
+        TypeKind::ClassString(Some(_)) | TypeKind::Literal(_) => {
+            let classes = classes_named_by_type(ty, owning_class, all_classes, class_loader);
+            if classes.is_empty() {
+                built.any_object |= ty.is_string_subtype();
+            } else {
+                ClassInfo::extend_unique_arc(&mut built.classes, classes);
+            }
+        }
+        TypeKind::Nullable(inner) => {
+            collect_built_by_new(inner, owning_class, all_classes, class_loader, built);
+        }
+        TypeKind::Union(members) => {
+            for member in members {
+                collect_built_by_new(member, owning_class, all_classes, class_loader, built);
+            }
+        }
+        // Each member narrows the same value, so the classes any member
+        // names are what the whole builds: `class-string<Foo>&literal-string`
+        // builds a `Foo`.
+        TypeKind::Intersection(members) => {
+            let mut inner = BuiltByNew::default();
+            for member in members {
+                collect_built_by_new(member, owning_class, all_classes, class_loader, &mut inner);
+            }
+            if inner.classes.is_empty() {
+                built.any_object |= inner.any_object;
+            } else {
+                ClassInfo::extend_unique_arc(&mut built.classes, inner.classes);
+            }
+        }
+        _ if ty.is_mixed() || ty.is_object() || ty.is_string_subtype() => {
+            built.any_object = true;
+        }
+        _ if ty.is_object_like() => {
+            let classes = crate::type_engine::type_resolution::type_hint_to_classes_typed(
+                ty,
+                owning_class,
+                all_classes,
+                class_loader,
+            );
+            if classes.is_empty() {
+                built.any_object = true;
+            } else {
+                ClassInfo::extend_unique_arc(&mut built.classes, classes);
+            }
+        }
+        _ => {}
+    }
 }
 
 /// The classes a value of type `ty` names where PHP reads a value as a

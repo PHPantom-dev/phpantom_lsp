@@ -2168,22 +2168,41 @@ argument paths (template binding from a closure argument, and the
 callback return inference behind `array_map`/`array_filter`) re-read a
 nested callback once per enclosing level instead of sharing one answer.
 
-### B895. `new $var()` has no type unless `$var` is a `class-string<T>`
+### B913. `method_exists()` does not narrow its subject to `hasMethod()`
+
+**Impact: Low · Complexity: Medium**
+
+```php
+function f(object $foo) {
+    if (method_exists($foo, 'doFoo')) {
+        $foo;   // object, should be object&hasMethod(doFoo)
+    }
+}
+```
+
+There is no `hasMethod()` accessory type, so a `method_exists()` guard
+leaves the object as it was and `$foo->doFoo()` reads as an unknown
+member.
+
+**Cases** (PHPStan `nsrt/`, 1 assertion): `bug-4579.php`.
+
+### B914. `class_exists()` widens a string literal to `class-string`
 
 **Impact: Low · Complexity: Low**
 
 ```php
-/** @param mixed $a */
-function f($a, string $s) {
-    new $a();   // no type, should be object
-    new $s();   // no type, should be object
+$c = \stdClass::class;
+if (class_exists($c)) {
+    $c;   // class-string<stdClass>, should stay 'stdClass'
+}
+$n = 'NonexistentClass';
+if (class_exists($n)) {
+    $n;   // class-string, should stay 'NonexistentClass'
 }
 ```
 
-`new` on class-string<Foo> works, but a mixed/string/object/plain class-string operand yields nothing instead of object.
+The guard replaces a literal with a `class-string` type instead of
+keeping the more precise literal, and for a class that does not exist
+it drops the class name entirely.
 
-It also shows as:
-
-- `new $class` has no type when `$class` is a plain string or an intersection with `class-string`
-
-**Cases** (PHPStan `nsrt/`, 9 assertions): `generic-class-string.php` (6), `bug-4579.php` (2), `bug-7374.php`.
+**Cases** (PHPStan `nsrt/`, 2 assertions): `generic-class-string.php` (2).
