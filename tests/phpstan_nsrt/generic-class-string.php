@@ -136,12 +136,12 @@ function testClassExists(string $str)
 
 	$existentClass = \stdClass::class;
 	if (class_exists($existentClass)) {
-		assertType('\'stdClass\'', $existentClass); // SKIP: `class_exists()` widens a string literal to `class-string`
+		assertType('\'stdClass\'', $existentClass); // SKIP: `Foo::class` is typed `class-string<Foo>` instead of the literal `'Foo'`
 	}
 
 	$nonexistentClass = 'NonexistentClass';
 	if (class_exists($nonexistentClass)) {
-		assertType('\'NonexistentClass\'', $nonexistentClass); // SKIP: `class_exists()` widens a string literal to `class-string`
+		assertType('\'NonexistentClass\'', $nonexistentClass);
 	}
 }
 

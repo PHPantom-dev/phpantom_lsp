@@ -246,6 +246,7 @@ pub(crate) fn apply_class_string_guard_narrowing<'b>(
                         || resolved_fqn
                             .as_deref()
                             .is_some_and(|fqn| names_only_subclasses_of(&rt.type_string, fqn, ctx))
+                        || (resolved_fqn.is_none() && is_string_literal_union(&rt.type_string))
                     {
                         continue;
                     }
@@ -261,6 +262,20 @@ pub(crate) fn apply_class_string_guard_narrowing<'b>(
             }
         }
     }
+}
+
+/// Whether every alternative of `ty` is a string literal.
+///
+/// A generic `*_exists()` guard proves only that the name is declared.
+/// The literal already says which name it is, so it is more precise than
+/// the bare `class-string` the guard would put in its place.
+fn is_string_literal_union(ty: &PhpType) -> bool {
+    ty.union_members().iter().all(|member| {
+        member
+            .as_literal()
+            .and_then(LiteralValue::string_content)
+            .is_some()
+    })
 }
 
 /// Whether every alternative of `ty` is a class name already known to be

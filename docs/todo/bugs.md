@@ -2187,23 +2187,22 @@ member.
 
 **Cases** (PHPStan `nsrt/`, 1 assertion): `bug-4579.php`.
 
-### B914. `class_exists()` widens a string literal to `class-string`
+### B915. `Foo::class` is typed `class-string<Foo>` instead of the literal `'Foo'`
 
-**Impact: Low · Complexity: Low**
+**Impact: Low · Complexity: Medium**
 
 ```php
 $c = \stdClass::class;
-if (class_exists($c)) {
-    $c;   // class-string<stdClass>, should stay 'stdClass'
-}
-$n = 'NonexistentClass';
-if (class_exists($n)) {
-    $n;   // class-string, should stay 'NonexistentClass'
-}
+$c;   // class-string<stdClass>, should be 'stdClass'
 ```
 
-The guard replaces a literal with a `class-string` type instead of
-keeping the more precise literal, and for a class that does not exist
-it drops the class name entirely.
+PHPStan types a `::class` fetch on a named class as the string literal
+of that name (a literal that is also a class string), so it keeps
+comparing and printing as the exact name. PHPantom types it as
+`class-string<Foo>`, which loses the literal: `===` against another
+literal, array keys, and string functions see only a class string.
+Making the literal work everywhere a `class-string<Foo>` works today
+(`new $c`, `$c::method()`, `is_a()` checks, template inference) is what
+keeps this from being a one-line change.
 
-**Cases** (PHPStan `nsrt/`, 2 assertions): `generic-class-string.php` (2).
+**Cases** (PHPStan `nsrt/`, 1 assertion): `generic-class-string.php`.
