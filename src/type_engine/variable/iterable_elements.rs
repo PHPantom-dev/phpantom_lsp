@@ -384,6 +384,10 @@ pub(crate) fn extract_iterable_element_type_from_class(
         return Some(value);
     }
 
+    if let Some(value) = aggregate_iteration_slot(class, class_loader, IterSlot::Value) {
+        return Some(value);
+    }
+
     // 3. Fall back to the `current()` return type when the class
     //    implements `Iterator` directly (not `IteratorAggregate`) without
     //    a generic annotation. `SimpleXMLElement` is the prototypical
@@ -453,7 +457,7 @@ fn declared_iterable_arg(
     pick: fn(&[PhpType]) -> Option<&PhpType>,
 ) -> Option<PhpType> {
     let usable = |args: &[PhpType]| {
-        let arg = resolve_own_template_arg(pick(args)?, class);
+        let arg = resolve_own_template_arg(pick(args)?, class).replace_self_declared(&class.fqn());
         (!is_unbounded_template_placeholder(&arg)).then_some(arg)
     };
     let is_known = |name: &str| ITERABLE_IFACE_NAMES.contains(&short_name(name));
@@ -625,6 +629,10 @@ pub(in crate::type_engine) fn extract_iterable_key_type_from_class(
         return Some(key);
     }
 
+    if let Some(key) = aggregate_iteration_slot(class, class_loader, IterSlot::Key) {
+        return Some(key);
+    }
+
     // A single-argument traversal binding (`IteratorAggregate<User>`)
     // names the value alone, which leaves the key `mixed` unless the
     // class's own `key()` says more.
@@ -646,7 +654,97 @@ pub(in crate::type_engine) fn extract_iterable_key_type_from_class(
         return Some(return_type.replace_self(&class.fqn()));
     }
 
-    value_only_traversal.then(PhpType::mixed)
+    // A Traversable's keys are whatever its iterator yields, not limited
+    // to the `int|string` an array allows.
+    (value_only_traversal || class_directly_implements(class, class_loader, "Traversable"))
+        .then(PhpType::mixed)
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum IterSlot {
+    Key,
+    Value,
+}
+
+/// The key or value an `IteratorAggregate` iterates as, read from the
+/// declared return type of its `getIterator()`, for a class that does not
+/// bind the interface's generics itself.
+///
+/// `foreach` over an aggregate iterates whatever `getIterator()` hands
+/// back, so the answer is that type's own iteration type, followed through
+/// as many aggregates as it takes to reach an `Iterator`.  An aggregate
+/// whose iterator leads back to itself says nothing, and neither does a
+/// `mixed` placeholder left by the unbound stub generics; both answer
+/// `None` so the caller's own fallbacks still get their turn.
+fn aggregate_iteration_slot(
+    class: &ClassInfo,
+    class_loader: &ResolvedClassLoader<'_>,
+    slot: IterSlot,
+) -> Option<PhpType> {
+    let mut visited = std::collections::HashSet::new();
+    aggregate_iteration_slot_inner(class, class_loader, slot, &mut visited)
+        .filter(|ty| !is_unbounded_template_placeholder(ty))
+}
+
+fn aggregate_iteration_slot_inner(
+    class: &ClassInfo,
+    class_loader: &ResolvedClassLoader<'_>,
+    slot: IterSlot,
+    visited: &mut std::collections::HashSet<String>,
+) -> Option<PhpType> {
+    if !visited.insert(class.fqn().to_string())
+        || !class_directly_implements(class, class_loader, "IteratorAggregate")
+    {
+        return None;
+    }
+    let iterator = class
+        .get_method("getIterator")?
+        .return_type
+        .as_ref()?
+        .replace_self_declared(&class.fqn());
+    let iterator = match iterator.kind() {
+        TypeKind::Nullable(inner) => (*inner).clone(),
+        _ => iterator,
+    };
+
+    if let Some((key, value)) = declared_traversal_of_generic(&iterator, class_loader) {
+        return match slot {
+            IterSlot::Key => key,
+            IterSlot::Value => Some(value),
+        };
+    }
+    if let TypeKind::Generic(generic) = iterator.kind() {
+        // `iterable<V>`, `Traversable<K, V>`, `Generator<K, V, …>` and the
+        // like follow the `<TKey, TValue>` convention.
+        let args = generic.args.as_slice();
+        return match slot {
+            IterSlot::Key => iterable_key_arg(args).cloned(),
+            IterSlot::Value => iterable_value_arg(args).cloned(),
+        };
+    }
+
+    let name = iterator.base_name()?;
+    let inner = class_loader(Fqn::new(name))?;
+    if visited.contains(&inner.fqn().to_string()) {
+        return None;
+    }
+    let inner = crate::virtual_members::resolve_class_fully_maybe_cached(
+        &inner,
+        class_loader,
+        crate::virtual_members::active_resolved_class_cache(),
+    );
+    if class_directly_implements(&inner, class_loader, "IteratorAggregate") {
+        let pick = match slot {
+            IterSlot::Key => iterable_key_arg,
+            IterSlot::Value => iterable_value_arg,
+        };
+        return declared_iterable_arg(&inner, class_loader, pick)
+            .or_else(|| aggregate_iteration_slot_inner(&inner, class_loader, slot, visited));
+    }
+    match slot {
+        IterSlot::Key => extract_iterable_key_type_from_class(&inner, class_loader),
+        IterSlot::Value => extract_iterable_element_type_from_class(&inner, class_loader),
+    }
 }
 
 /// Whether `short` names one of the interfaces whose generic arguments

@@ -2258,21 +2258,3 @@ C::u()(...);   // u(): A&E where A has __invoke(B $b): int
 The return type of `__invoke` is kept but its parameter list is not copied into the closure type (here through an intersection return type).
 
 **Cases** (PHPStan `nsrt/`, 4 assertions): `bug-14362.php` (4).
-
-### B900. `foreach` over an `IteratorAggregate` does not use `getIterator()`'s types
-
-**Impact: Medium · Complexity: Low**
-
-```php
-interface Agg extends \IteratorAggregate { public function getIterator(): MyIterator; }
-foreach ($agg as $k => $v) {}   // int|string and mixed, should be MyKey and MyValue
-```
-
-Without `@implements IteratorAggregate<K, V>` the key/value types should come from the declared `getIterator()` return (recursively); the fallback key `int|string` is also wrong for a Traversable, whose keys can be anything.
-
-It also shows as:
-
-- `foreach` over an `IteratorAggregate` misreads its value type
-
-**Cases** (PHPStan `nsrt/`, 5 assertions): `foreach-object-type.php` (3), `bug-4267.php` (2).
-
