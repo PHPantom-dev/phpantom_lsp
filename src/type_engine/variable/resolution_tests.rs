@@ -1536,9 +1536,8 @@ function test() {
     );
 }
 
-/// `array_sum` over an all-`int` array resolves to `int`, not the
-/// declared `int|float`: the float half is only reachable when a
-/// non-integer member can be summed in.
+/// `array_sum` over a literal array folds to the total, not the declared
+/// `int|float`.
 #[test]
 fn resolve_var_array_sum() {
     let content = r#"<?php
@@ -1580,10 +1579,10 @@ function test() {
 
     assert!(!results.is_empty(), "Should resolve $result to a type");
     let ts = ResolvedType::types_joined(&results).to_string();
-    assert_eq!(ts, "int", "array_sum over int literals should return int");
+    assert_eq!(ts, "60", "array_sum over int literals should fold");
 }
 
-/// `array_product` narrows the same way [`resolve_var_array_sum`] does.
+/// `array_product` folds the same way [`resolve_var_array_sum`] does.
 #[test]
 fn resolve_var_array_product() {
     let content = r#"<?php
@@ -1622,10 +1621,7 @@ function test() {
 
     assert!(!results.is_empty(), "Should resolve $result to a type");
     let ts = ResolvedType::types_joined(&results).to_string();
-    assert_eq!(
-        ts, "int",
-        "array_product over int literals should return int"
-    );
+    assert_eq!(ts, "24", "array_product over int literals should fold");
 }
 
 /// Resolve `var_name` at its last occurrence in `content`, with the classes

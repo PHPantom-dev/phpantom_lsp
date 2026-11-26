@@ -270,14 +270,15 @@ pub(super) fn strip_literal_from_type(ty: &PhpType, excluded: &PhpType) -> Optio
     (!ty.is_subtype_of(excluded)).then(|| ty.clone())
 }
 
-/// Rule the integer literal `excluded` out of the range `ty` (written as
-/// `int<a, b>` or as one of the named refinements like `non-negative-int`)
-/// by moving the edge it sits on: `int<0, max>` without `0` is
-/// `int<1, max>`, which is what `if (0 === $id) { throw; }` leaves behind.
+/// Rule the integer literal `excluded` out of the range `ty` (`int`,
+/// `int<a, b>` or one of the named refinements like `non-negative-int`):
+/// by moving the edge it sits on, so `int<0, max>` without `0` is
+/// `int<1, max>`, which is what `if (0 === $id) { throw; }` leaves behind,
+/// or by splitting the range around it.
 ///
 /// The outer `None` means the rule does not apply: `excluded` is not an
-/// integer literal, `ty` is not a bounded range, or the value is not one of
-/// its edges. The inner `None` means nothing is left.
+/// integer literal, `ty` is not an integer range, or the value is outside
+/// it. The inner `None` means nothing is left.
 fn strip_int_literal_from_range_edge(ty: &PhpType, excluded: &PhpType) -> Option<Option<PhpType>> {
     let TypeKind::Literal(literal) = excluded.kind() else {
         return None;
@@ -286,8 +287,29 @@ fn strip_int_literal_from_range_edge(ty: &PhpType, excluded: &PhpType) -> Option
         return None;
     }
     let value = literal.parse_i64()?;
-    let kept = IntInterval::of_int(ty)?.without_edge(value)?;
-    Some(kept.map(IntInterval::into_type))
+    let interval = IntInterval::of_int(ty)?;
+    if let Some(kept) = interval.without_edge(value) {
+        return Some(kept.map(IntInterval::into_type));
+    }
+    // A value strictly inside the range splits it in two: `int` without `0`
+    // is `int<min, -1>|int<1, max>`.
+    let inside =
+        interval.min.is_none_or(|min| min < value) && interval.max.is_none_or(|max| max > value);
+    if !inside {
+        return None;
+    }
+    let below = IntInterval {
+        min: interval.min,
+        max: Some(value - 1),
+    };
+    let above = IntInterval {
+        min: Some(value + 1),
+        max: interval.max,
+    };
+    Some(Some(PhpType::union(vec![
+        below.into_type(),
+        above.into_type(),
+    ])))
 }
 
 /// Rule the array literal `excluded` out of the sealed shape `ty`.

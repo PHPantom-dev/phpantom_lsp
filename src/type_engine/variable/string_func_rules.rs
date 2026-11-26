@@ -160,6 +160,7 @@ fn literal_type(name: &str, args: &dyn ArrayFuncArgs) -> Option<PhpType> {
                 .collect()
         }
         "sprintf" => vec![sprintf_fold(args)?],
+        "implode" | "join" => implode_fold(args)?,
         _ => return None,
     };
 
@@ -575,27 +576,143 @@ fn implode_type(args: &dyn ArrayFuncArgs) -> Option<PhpType> {
         return None;
     }
     let value = array.iterable_element_type()?;
-    let literal = is_literal_string_type(&separator) && is_literal_string_type(&value);
-    let emptiness = if !array.is_provably_non_empty() {
-        None
-    } else if value.is_subtype_of(&PhpType::non_falsy_string()) {
-        Some(PhpType::non_falsy_string())
-    } else if value.is_subtype_of(&PhpType::non_empty_string()) {
-        Some(PhpType::non_empty_string())
-    } else {
-        None
+    let mut joined = Piece {
+        literal: is_literal_string_type(&separator),
+        lowercase: separator.is_subtype_of(&PhpType::lowercase_string()),
+        uppercase: separator.is_subtype_of(&PhpType::uppercase_string()),
+        non_empty: true,
+        non_falsy: true,
     };
-    match (literal, emptiness) {
-        (false, emptiness) => emptiness,
-        (true, None) => Some(PhpType::literal_string()),
-        (true, Some(emptiness)) if emptiness == PhpType::non_empty_string() => {
-            Some(PhpType::non_empty_literal_string())
-        }
-        (true, Some(emptiness)) => Some(PhpType::intersection(vec![
-            PhpType::literal_string(),
-            emptiness,
-        ])),
+    for member in value.union_members() {
+        let piece = Piece::of(member);
+        joined.literal &= piece.literal;
+        joined.lowercase &= piece.lowercase;
+        joined.uppercase &= piece.uppercase;
+        joined.non_empty &= piece.non_empty;
+        joined.non_falsy &= piece.non_falsy;
     }
+    let non_empty_array = array.is_provably_non_empty();
+    let mut parts = Vec::new();
+    if joined.literal {
+        parts.push(PhpType::literal_string());
+    }
+    if joined.lowercase {
+        parts.push(PhpType::lowercase_string());
+    }
+    if joined.uppercase {
+        parts.push(PhpType::uppercase_string());
+    }
+    if non_empty_array && joined.non_falsy {
+        parts.push(PhpType::non_falsy_string());
+    } else if non_empty_array && joined.non_empty {
+        parts.push(PhpType::non_empty_string());
+    }
+    match parts.len() {
+        0 => None,
+        1 => parts.pop(),
+        _ => Some(PhpType::intersection(parts)),
+    }
+}
+
+/// What one `implode()` piece, as PHP converts it to a string, is known
+/// to be.
+struct Piece {
+    literal: bool,
+    lowercase: bool,
+    uppercase: bool,
+    non_empty: bool,
+    non_falsy: bool,
+}
+
+impl Piece {
+    fn of(member: &PhpType) -> Self {
+        use crate::type_engine::type_ops::int_interval::IntInterval;
+        use crate::type_engine::variable::rhs_resolution::is_literal_string_type;
+
+        // An integer's digits have no case and are never empty; only `0`
+        // spells the falsy `'0'`.
+        if let Some(interval) = IntInterval::of_int(member) {
+            return Self {
+                literal: member.as_literal().is_some(),
+                lowercase: true,
+                uppercase: true,
+                non_empty: true,
+                non_falsy: interval.min.is_some_and(|min| min > 0)
+                    || interval.max.is_some_and(|max| max < 0),
+            };
+        }
+        Self {
+            literal: is_literal_string_type(member),
+            lowercase: member.is_subtype_of(&PhpType::lowercase_string()),
+            uppercase: member.is_subtype_of(&PhpType::uppercase_string()),
+            non_empty: member.is_subtype_of(&PhpType::non_empty_string()),
+            non_falsy: member.is_subtype_of(&PhpType::non_falsy_string()),
+        }
+    }
+}
+
+/// `implode()` / `join()` of array shapes whose every value is a known
+/// scalar, joined by a literal separator: each string the entries can join
+/// into, an optional entry counted both present and absent.
+fn implode_fold(args: &dyn ArrayFuncArgs) -> Option<Vec<String>> {
+    use crate::type_engine::variable::rhs_resolution::php_string_of_type;
+
+    if (0..2).any(|index| args.is_spread(index) || args.is_named(index)) {
+        return None;
+    }
+    let (separator, array) = if args.has_arg(1) {
+        (single_literal_any(args, 0)?, args.arg_raw_type(1)?)
+    } else {
+        (String::new(), args.arg_raw_type(0)?)
+    };
+    let mut joined: Vec<String> = Vec::new();
+    for shape in array.union_members() {
+        if !matches!(
+            shape.kind(),
+            TypeKind::ArrayShape(_) | TypeKind::ListShape(_)
+        ) {
+            return None;
+        }
+        // Each partial join, paired with whether it holds a piece yet (an
+        // empty piece still takes a separator before the next one).
+        let mut partial: Vec<(String, bool)> = vec![(String::new(), false)];
+        for entry in shape.shape_entries()? {
+            let mut pieces: Vec<String> = Vec::new();
+            for value in entry.value_type.union_members() {
+                if value.is_bool() && !value.is_true() && !value.is_false() {
+                    pieces.extend(["1".to_string(), String::new()]);
+                } else {
+                    pieces.push(php_string_of_type(value)?);
+                }
+            }
+            let mut next: Vec<(String, bool)> = Vec::new();
+            if entry.optional {
+                next.clone_from(&partial);
+            }
+            for (prefix, started) in &partial {
+                for piece in &pieces {
+                    let candidate = if *started {
+                        (format!("{prefix}{separator}{piece}"), true)
+                    } else {
+                        (piece.clone(), true)
+                    };
+                    if !next.contains(&candidate) {
+                        next.push(candidate);
+                    }
+                }
+            }
+            if next.len() > MAX_ALTERNATIVES {
+                return None;
+            }
+            partial = next;
+        }
+        for (text, _) in partial {
+            if !joined.contains(&text) {
+                joined.push(text);
+            }
+        }
+    }
+    (!joined.is_empty() && joined.len() <= MAX_ALTERNATIVES).then_some(joined)
 }
 
 /// PHP removes path segments lexically: `a/./b` keeps `a/.` and

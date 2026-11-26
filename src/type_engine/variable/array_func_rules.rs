@@ -537,49 +537,150 @@ pub(in crate::type_engine) fn array_func_element_type(
             .flatten();
     }
 
-    if matches!(func_name, "array_sum" | "array_product") {
-        // An array nobody typed the elements of decides neither half, and
-        // the sum is then exactly what adding two `mixed` values is: the
-        // pair, benevolent, because it is a gap in what the code said
-        // rather than a value measured to be two things. Enforcing both
-        // halves reported `array_sum($bytes)` handed to an `int` parameter
-        // as a mismatch on code that is fine. PHPStan reaches the same
-        // answer by summing the element type with itself.
-        let undecided = || {
-            Some(PhpType::benevolent(PhpType::union(vec![
-                PhpType::int(),
-                PhpType::float(),
-            ])))
-        };
-        let Some(element) = args.arg_raw_type(0).and_then(|a| a.iterable_element_type()) else {
-            return undecided();
-        };
-        let members: Vec<&PhpType> = match element.kind() {
-            TypeKind::Union(m) => m.iter().collect(),
-            _ => vec![&element],
-        };
-        if members.iter().any(|m| m.is_mixed()) {
-            return undecided();
-        }
-        let (int_ty, float_ty) = (PhpType::int(), PhpType::float());
-        let all_int = members.iter().all(|m| m.is_subtype_of(&int_ty));
-        if all_int {
-            return Some(int_ty);
-        }
-        // `int` is a subtype of `float` here (PHP widens it silently), so
-        // a member has to be tested against both to tell `list<float>`
-        // apart from `list<int|float>` — the latter really can sum to
-        // either and keeps the declared union.
-        if members
-            .iter()
-            .all(|m| m.is_subtype_of(&float_ty) && !m.is_subtype_of(&int_ty))
-        {
-            return Some(float_ty);
-        }
-        return None;
+    let product = func_name.eq_ignore_ascii_case("array_product");
+    if product || func_name.eq_ignore_ascii_case("array_sum") {
+        return array_arithmetic_type(&args.arg_raw_type(0)?, product);
     }
 
     None
+}
+
+/// How many alternatives an `array_sum()`/`array_product()` total may carry
+/// while a shape is worked through entry by entry.
+const MAX_TOTAL_ALTERNATIVES: usize = 32;
+
+/// `array_sum()` / `array_product()`: the total of the array's values, worked
+/// out with the arithmetic `+` / `*` performs, so the declared `int|float`
+/// narrows as far as the values decide it. `None` for an array whose values
+/// say nothing the declared type does not.
+fn array_arithmetic_type(raw: &PhpType, product: bool) -> Option<PhpType> {
+    // An array nobody typed the elements of decides neither half, and the
+    // sum is then exactly what adding two `mixed` values is: the pair,
+    // benevolent, because it is a gap in what the code said rather than a
+    // value measured to be two things. Enforcing both halves reported
+    // `array_sum($bytes)` handed to an `int` parameter as a mismatch on code
+    // that is fine. PHPStan reaches the same answer by summing the element
+    // type with itself.
+    let undecided = || {
+        Some(PhpType::benevolent(PhpType::union(vec![
+            PhpType::int(),
+            PhpType::float(),
+        ])))
+    };
+    let mut results: Vec<PhpType> = Vec::new();
+    for array in raw.union_members() {
+        let total = if matches!(
+            array.kind(),
+            TypeKind::ArrayShape(_) | TypeKind::ListShape(_)
+        ) {
+            shape_total(array, product)?
+        } else {
+            let Some(element) = array.iterable_element_type() else {
+                return undecided();
+            };
+            if element.union_members().iter().any(|m| m.is_mixed()) {
+                return undecided();
+            }
+            element_total(&element, array.is_provably_non_empty(), product)?
+        };
+        if !results.contains(&total) {
+            results.push(total);
+        }
+    }
+    (!results.is_empty()).then(|| PhpType::union(results))
+}
+
+/// The total of a shape, each entry combined with the running total one
+/// alternative at a time (so `array{1, 2|3.4}` sums to `3|4.4`), an optional
+/// entry counted both present and absent.
+fn shape_total(shape: &PhpType, product: bool) -> Option<PhpType> {
+    use super::rhs_resolution::{ArithmeticOpKind, infer_arithmetic_result_type};
+    use crate::types::ResolvedType;
+
+    let (op, identity) = if product {
+        (ArithmeticOpKind::Multiplication, "1")
+    } else {
+        (ArithmeticOpKind::Addition, "0")
+    };
+    let mut totals = vec![PhpType::literal_int(identity)];
+    for entry in shape.shape_entries()? {
+        let mut next: Vec<PhpType> = Vec::new();
+        if entry.optional {
+            next.clone_from(&totals);
+        }
+        for value in entry.value_type.union_members() {
+            let value = [ResolvedType::from_type_string(value.clone())];
+            for total in &totals {
+                let total = [ResolvedType::from_type_string(total.clone())];
+                let combined = infer_arithmetic_result_type(&total, &value, op);
+                for member in combined.union_members() {
+                    if !next.contains(member) {
+                        next.push(member.clone());
+                    }
+                }
+            }
+        }
+        if next.len() > MAX_TOTAL_ALTERNATIVES {
+            return None;
+        }
+        totals = next;
+    }
+    Some(PhpType::union(totals))
+}
+
+/// The total of an array known only by its element type.
+///
+/// A sum of integers stays on the side of zero its elements are on: adding
+/// any number of `int<1, max>` gives `int<0, max>`, or `int<1, max>` when
+/// there is at least one. An array that may be empty sums to `0`, which an
+/// all-`float` array otherwise never produces. A product of integers is an
+/// integer and a product of floats a float.
+fn element_total(element: &PhpType, non_empty: bool, product: bool) -> Option<PhpType> {
+    use crate::type_engine::type_ops::int_interval::IntInterval;
+
+    let mut ints: Vec<IntInterval> = Vec::new();
+    let mut has_float = false;
+    for member in element.union_members() {
+        if member.is_float() || member.is_float_subtype() {
+            has_float = true;
+        } else {
+            ints.push(IntInterval::of_operand(member)?);
+        }
+    }
+    let mut parts: Vec<PhpType> = Vec::new();
+    if product {
+        if has_float && !ints.is_empty() {
+            return None;
+        }
+        parts.push(if has_float {
+            PhpType::float()
+        } else {
+            PhpType::int()
+        });
+        return Some(PhpType::union(parts));
+    }
+    if ints.is_empty() {
+        if !non_empty {
+            parts.push(PhpType::literal_int("0"));
+        }
+    } else {
+        let hull = IntInterval::hull_of(&ints);
+        let edge = |bound: Option<i64>, toward_zero: bool| match bound {
+            Some(bound) if toward_zero => Some(if non_empty { bound } else { 0 }),
+            _ => None,
+        };
+        parts.push(
+            IntInterval {
+                min: edge(hull.min, hull.min.is_some_and(|min| min >= 0)),
+                max: edge(hull.max, hull.max.is_some_and(|max| max <= 0)),
+            }
+            .into_type(),
+        );
+    }
+    if has_float {
+        parts.push(PhpType::float());
+    }
+    Some(PhpType::union(parts))
 }
 
 /// What an element function hands back for `raw`: an element, or the

@@ -95,6 +95,7 @@ mod unary_prefix;
 pub(crate) use magic_constants::file_magic_constant_type;
 pub(crate) use scalar_fold::{fold_concat_types, is_literal_string_type, php_string_of_type};
 
+pub(crate) use arithmetic::{ArithmeticOpKind, infer_arithmetic_result_type};
 use arithmetic::{combine_with_lhs, combines_operand_types, resolve_binary_result_type};
 use array_access::resolve_rhs_array_access;
 use assignment_value::resolve_assignment_as_value;

@@ -16,14 +16,14 @@ namespace PsalmTest_return_type_provider_sprintf_1 {
 namespace PsalmTest_return_type_provider_sprintf_2 {
     $val = sprintf("%s", implode("", array()));
 
-    assertType('string', $val);
+    assertType("''", $val);
 }
 
 // Test: sprintfStringArgnumPlaceholderStringParamsFormat
 namespace PsalmTest_return_type_provider_sprintf_3 {
     $val = sprintf("%2\$s%1\$s", "", implode("", array()));
 
-    assertType('string', $val);
+    assertType("''", $val);
 }
 
 // Test: sprintfStringPlaceholderIntStringParamFormat

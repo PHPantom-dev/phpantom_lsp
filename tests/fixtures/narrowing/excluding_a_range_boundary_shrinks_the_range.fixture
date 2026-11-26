@@ -1,12 +1,12 @@
-// test: ruling out the value at a range's edge moves that edge inward
+// test: ruling out a value at a range's edge moves that edge inward, and one inside it splits the range
 // feature: hover
 // expect_hover: $positive => $positive = int<1, max>
 // expect_hover: $fromProperty => $fromProperty = int<1, max>
 // expect_hover: $below => $below = int<min, -1>
 // expect_hover: $named => $named = int<1, max>
 // expect_hover: $single => $single = 1
-// expect_hover: $inner => $inner = int<0, 10>
-// expect_hover: $plain => $plain = int
+// expect_hover: $inner => $inner = int<0, 4>|int<6, 10>
+// expect_hover: $plain => $plain = int<min, -1>|int<1, max>
 ---
 <?php
 

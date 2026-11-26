@@ -312,7 +312,7 @@ function probe(array $ints, array $floats, array $either, array $strings, array 
         &[
             ("$total", "int"),
             ("$product", "int"),
-            ("$money", "float"),
+            ("$money", "0|float"),
             ("$mixed", "int|float"),
             ("$numeric", "int|float"),
             ("$unknown", "int|float"),

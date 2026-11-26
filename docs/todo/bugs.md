@@ -38,21 +38,20 @@ No outstanding items.
 **Impact: Low · Complexity: Low-Medium**
 
 ```php
-implode(',', ['12', '345']);   // literal-string, should be '12,345'
-array_sum([1, 2, 3]);          // int, should be 6
+date('N');   // string, should be '1'|'2'|'3'|'4'|'5'|'6'|'7'
 ```
 
 The string functions that rewrite a literal, the numeric conversions
 (`intval()` and friends, `abs()`, `pow()`), `str_increment()`,
-`str_decrement()` and `strlen()`/`mb_strlen()` fold, but `implode()` of a
-literal array, `array_sum()`, `date()` with a literal format and the rest
-below do not. `mb_strlen()` with an encoding other than UTF-8 is not
+`str_decrement()`, `strlen()`/`mb_strlen()`, `implode()` and
+`array_sum()`/`array_product()` fold, but `date()` with a literal format and
+the rest below do not. `mb_strlen()` with an encoding other than UTF-8 is not
 measured either (`// SKIP` lines in `tests/phpstan_nsrt/mb-strlen-php83.php`).
 
 **Fix:** fold each function over its literal arguments, one at a time; each
 upstream fixture is the spec for its function.
 
-**Upstream cases** (PHPStan `nsrt/`): `implode.php` (13), `date.php` (13), `array-sum.php` (13), `range-function.php` (11), `constantTypes.php` (8), `string-offsets.php` (8), 19 more.
+**Upstream cases** (PHPStan `nsrt/`): `date.php` (13), `range-function.php` (11), `constantTypes.php` (8), `string-offsets.php` (8), 19 more.
 
 ### B910. `**` does not work out its result from integer ranges or a trivial operand
 
@@ -100,10 +99,9 @@ mb_http_output();                    // string|bool, should be string
 gettimeofday(true);                  // array<int>|float, should be float
 $dt->format('');                     // string, should be ''
 $px->getColor(1);                    // array{r: int|float, ...}, should be array{r: float, ...}
-array_sum($floats);                  // float, should be 0|float
 ```
 
-No argument-aware return rules for: version_compare, microtime(null), mb_http_output/mb_regex_encoding/mb_internal_encoding/mb_encoding_aliases/mb_chr/mb_ord, gettimeofday, DateTimeInterface::format literals, ImagickPixel::getColor, fpm_get_status, sscanf scansets, proc_open's $pipes, getopt, CachingIterator::getCache, get_called_class, array_find_key on literal keys, array_sum of floats. Each needs its own rule; grouped because the mechanism (a per-function return rule) is the same.
+No argument-aware return rules for: version_compare, microtime(null), mb_http_output/mb_regex_encoding/mb_internal_encoding/mb_encoding_aliases/mb_chr/mb_ord, gettimeofday, DateTimeInterface::format literals, ImagickPixel::getColor, fpm_get_status, sscanf scansets, proc_open's $pipes, getopt, CachingIterator::getCache, get_called_class, array_find_key on literal keys. Each needs its own rule; grouped because the mechanism (a per-function return rule) is the same.
 
 It also shows as:
 
@@ -222,20 +220,6 @@ It also shows as:
 - An inline `(?n)` flag makes the `preg_match()` result a generic array
 
 **Cases** (PHPStan `nsrt/`, 20 assertions): `preg_match_shapes.php` (18), `preg_match_shapes_php80.php` (2).
-
-### B825. With `PREG_UNMATCHED_AS_NULL|PREG_OFFSET_CAPTURE` the whole match and required groups are not nullable
-
-**Impact: Low · Complexity: Low**
-
-```php
-preg_match('/(foo)(bar)(baz)/', $s, $m, PREG_OFFSET_CAPTURE|PREG_UNMATCHED_AS_NULL);
-$m[0];   // array{string, int<-1, max>}, should be array{string|null, int<-1, max>}
-$m[1];   // array{string, int<-1, max>}, should be array{'foo'|null, int<-1, max>}
-```
-
-Under PREG_UNMATCHED_AS_NULL only optional groups get |null; PHPStan (matching PHP's offset-capture behaviour) makes every entry, including index 0, nullable when combined with PREG_OFFSET_CAPTURE, and under PREG_SET_ORDER for required groups too. These rows also carry the literal-group gap.
-
-**Cases** (PHPStan `nsrt/`, 5 assertions): `preg_match_all_shapes.php` (3), `preg_match_shapes_php80.php`, `preg_replace_callback_shapes.php`.
 
 ### B829. `json_decode()` into arrays does not rule out objects
 

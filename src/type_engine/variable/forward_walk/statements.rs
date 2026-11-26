@@ -117,6 +117,16 @@ pub(crate) fn process_statement<'b>(
                                 scope.set(subject, vec![ResolvedType::from_type_string(updated)]);
                             };
                             unset_below(scope, &base_name, 0);
+                            // Removing an element changes the array as a
+                            // whole, and each level above it, so a check on
+                            // one of them (`count($list) !== 1`) no longer
+                            // holds.
+                            scope.invalidate_whole_value_proofs(&base_name);
+                            scope.invalidate_receiver_state(
+                                &base_name,
+                                None,
+                                &super::scope_state::MemberInvalidation::Calls,
+                            );
                             // A check on an element further up the chain
                             // (`!empty($a['list'])`) is recorded under its
                             // own key, which loses whatever emptiness
@@ -131,6 +141,7 @@ pub(crate) fn process_statement<'b>(
                                     break;
                                 };
                                 unset_below(scope, &prefix, depth);
+                                scope.invalidate_whole_value_proofs(&prefix);
                             }
                             let removed_from = super::array_assignment::array_write_synthetic_key(
                                 &base_name,
