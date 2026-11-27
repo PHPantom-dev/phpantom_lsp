@@ -2291,6 +2291,9 @@ connection, serves it, and exits when the client disconnects.</p>
 </code></pre></div>
 <p>This is especially handy with port <code>0</code>: the OS assigns an available
 port and the server tells you which one it picked.</p>
+<p>The socket has no authentication. Whoever connects first drives the
+server with your permissions, so keep it on <code>127.0.0.1</code> unless every
+machine that can reach the port is one you trust.</p>
 <h3 id="connecting">Connecting<a class="headerlink" href="#connecting" title="Permanent link">&para;</a></h3>
 <p>Any LSP client that supports TCP can connect. For quick manual testing:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="c1"># In one terminal, start the server:</span>
@@ -2470,6 +2473,10 @@ cleaned up in seconds rather than file by file.</p>
 <a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a>phpantom_lsp<span class="w"> </span>fix<span class="w"> </span>src/Foo.php<span class="w">                      </span><span class="c1"># fix a single file</span>
 <a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a>phpantom_lsp<span class="w"> </span>fix<span class="w"> </span>--project-root<span class="w"> </span>/path/to/app<span class="w">      </span><span class="c1"># explicit project root</span>
 </code></pre></div>
+<p>Only files inside the project root are rewritten. Code reached through a
+symlink out of the project, or through a PSR-4 or <code>[indexing] include</code>
+path outside it, is read for its declarations but left alone, unless you
+name it as the <code>PATH</code>. <code>format</code> follows the same rule.</p>
 <h3 id="options_3">Options<a class="headerlink" href="#options_3" title="Permanent link">&para;</a></h3>
 <table>
 <thead>
