@@ -566,11 +566,11 @@ fn resolve_returns_in_ast(
     Some(PhpType::union(members))
 }
 
-/// Parse a closure or arrow function literal in isolation, walk a closure's
-/// body with the parameters seeded from `param_types`, and hand `f` the
-/// resulting scope together with every `return` expression the body
-/// reaches (`None` for a bare `return;`). An arrow function has nothing to
-/// walk and returns its body expression.
+/// Walk a closure or arrow function literal's body with the parameters
+/// seeded from `param_types`, and hand `f` the resulting scope together
+/// with every `return` expression the body reaches (`None` for a bare
+/// `return;`). An arrow function has nothing to walk and returns its body
+/// expression.
 ///
 /// Resolving a return expression's text on its own knows nothing about
 /// the body's locals, so `$p = make(); return $p;` could not see `$p`, and
@@ -579,6 +579,12 @@ fn resolve_returns_in_ast(
 /// parameter's original shape. Running the body through
 /// [`walk_body_forward`] answers with what the body actually leaves
 /// behind, the same as any other consumer of the forward walker.
+///
+/// A literal written in the file being resolved is read from that file's
+/// own AST, so the closures nested in it are read from the same source
+/// too, and [`CLOSURE_TEXT_MEMO`] answers for each of them however many
+/// closures around it are read.  Text found nowhere in the file is parsed
+/// as a program of its own.
 ///
 /// Returns `None` when `closure_text` is neither.
 fn with_walked_closure<R>(
@@ -589,14 +595,33 @@ fn with_walked_closure<R>(
 ) -> Option<R> {
     let trimmed = closure_text.trim().trim_end_matches(';');
 
-    // The closure body is parsed and walked in complete isolation from
-    // the file the call site sits in: its own offsets are unrelated to
-    // (and may numerically collide with) the real file's, so neither the
+    // The body is walked with the call site's seeds, which need not be
+    // what the walk of the file around it gives its parameters, and a
+    // body parsed on its own has offsets unrelated to (and that may
+    // numerically collide with) the real file's.  Either way neither the
     // diagnostic scope cache nor the chain-resolution cache may read
     // from, or record into, the active ones while this walk runs. See
     // `out_param::read_out_type`, which walks another file's body for the
     // same reason.
     let _isolated = (suspend_diagnostic_scope(), with_isolated_chain_cache());
+
+    let mut f = Some(f);
+    if let Some(start) = closure_offset_in_file(trimmed, ctx) {
+        let end = start + trimmed.len() as u32;
+        let walked = crate::parser::with_parsed_program(
+            ctx.file.content,
+            "closure_body_return_narrowing",
+            |program, _| {
+                let function = find_function_literal(program, start, end)?;
+                walk_function_literal(function, ctx.file, start, param_types, ctx, |s, r, c| {
+                    f.take().map(|f| f(s, r, c))
+                })
+            },
+        );
+        if walked.is_some() || f.is_none() {
+            return walked.flatten();
+        }
+    }
 
     with_closure_program(trimmed, |program, content| {
         let function = program.statements.iter().find_map(|stmt| {
@@ -611,51 +636,134 @@ fn with_walked_closure<R>(
                 _ => None,
             }
         })?;
+        let file = ctx.file.with_source(content, ctx.file.all_classes);
+        walk_function_literal(function, file, 0, param_types, ctx, f.take()?)
+    })
+}
 
-        let dummy_class;
-        let current_class = match ctx.current_class {
-            Some(cc) => cc,
-            None => {
-                dummy_class = crate::class_lookup::class_context_placeholder(content, 0);
-                &dummy_class
+/// Where `literal` is written in the file `ctx` resolves, as its start
+/// offset: the occurrence nearest the cursor when the same text is written
+/// more than once.  Every occurrence reads alike, since its body sees only
+/// what the call site seeds and captures, but the nearest one sits in the
+/// same namespace and class as the call.
+fn closure_offset_in_file(literal: &str, ctx: &ResolutionCtx<'_>) -> Option<u32> {
+    let cursor = ctx.cursor_offset as usize;
+    ctx.file
+        .content
+        .match_indices(literal)
+        .map(|(offset, _)| offset)
+        .min_by_key(|&offset| offset.abs_diff(cursor))
+        .and_then(|offset| u32::try_from(offset).ok())
+}
+
+/// The closure or arrow function in `program` spanning `start..end`.
+fn find_function_literal<'ast, 'arena>(
+    program: &'ast Program<'arena>,
+    start: u32,
+    end: u32,
+) -> Option<&'ast Expression<'arena>> {
+    use mago_syntax::walker::Walker;
+
+    /// Descends only into the statements and expressions that enclose the
+    /// span it looks for.
+    struct Finder {
+        start: u32,
+        end: u32,
+    }
+
+    impl Finder {
+        fn encloses(&self, node: &impl HasSpan) -> bool {
+            let span = node.span();
+            span.start.offset <= self.start && self.end <= span.end.offset
+        }
+    }
+
+    impl<'ast, 'arena> Walker<'ast, 'arena, Option<&'ast Expression<'arena>>> for Finder {
+        crate::ast_walk::iterative_binary_walk!(Option<&'ast Expression<'arena>>);
+
+        fn walk_statement(
+            &self,
+            statement: &'ast Statement<'arena>,
+            found: &mut Option<&'ast Expression<'arena>>,
+        ) {
+            if found.is_none() && self.encloses(statement) {
+                mago_syntax::walker::walk_statement(self, statement, found);
             }
-        };
-
-        let flow = WalkFlow::default();
-        let fw_ctx = ForwardWalkCtx {
-            loaders: Loaders::with_function(ctx.function_loader),
-            resolved_class_cache: ctx.resolved_class_cache,
-            ..ForwardWalkCtx::new(
-                ctx.file.with_source(content, ctx.file.all_classes),
-                current_class,
-                u32::MAX,
-                &flow,
-            )
-        };
-
-        let mut scope = ScopeState::new();
-        for (name, types) in param_types {
-            scope.seed(name, types.clone());
         }
 
-        let returns: Vec<Option<&Expression<'_>>> = match function {
-            Expression::Closure(closure) => {
-                #[cfg(test)]
-                TEST_CLOSURE_WALKS.with(|count| count.set(count.get() + 1));
-                walk_body_forward(closure.body.statements.iter(), &mut scope, &fw_ctx);
-                let mut found = Vec::new();
-                crate::return_collection::collect_returns(
-                    closure.body.statements.iter(),
-                    &mut found,
-                );
-                found.into_iter().map(|(expr, ..)| expr).collect()
+        fn walk_expression(
+            &self,
+            expression: &'ast Expression<'arena>,
+            found: &mut Option<&'ast Expression<'arena>>,
+        ) {
+            if found.is_some() || !self.encloses(expression) {
+                return;
             }
-            Expression::ArrowFunction(arrow) => vec![Some(arrow.expression)],
-            _ => return None,
-        };
+            let span = expression.span();
+            if span.start.offset == self.start
+                && span.end.offset == self.end
+                && matches!(
+                    expression,
+                    Expression::Closure(_) | Expression::ArrowFunction(_)
+                )
+            {
+                *found = Some(expression);
+                return;
+            }
+            mago_syntax::walker::walk_expression(self, expression, found);
+        }
+    }
 
-        Some(f(scope, &returns, &fw_ctx))
-    })
+    let mut found = None;
+    Finder { start, end }.walk_program(program, &mut found);
+    found
+}
+
+/// [`with_walked_closure`] for the literal `function`, written at `offset`
+/// in `file`.
+fn walk_function_literal<R>(
+    function: &Expression<'_>,
+    file: crate::type_engine::resolver::FileCtx<'_>,
+    offset: u32,
+    param_types: &HashMap<String, Vec<ResolvedType>>,
+    ctx: &ResolutionCtx<'_>,
+    f: impl FnOnce(ScopeState, &[Option<&Expression<'_>>], &ForwardWalkCtx<'_>) -> R,
+) -> Option<R> {
+    let dummy_class;
+    let current_class = match ctx.current_class {
+        Some(cc) => cc,
+        None => {
+            dummy_class = crate::class_lookup::class_context_placeholder(file.content, offset);
+            &dummy_class
+        }
+    };
+
+    let flow = WalkFlow::default();
+    let fw_ctx = ForwardWalkCtx {
+        loaders: Loaders::with_function(ctx.function_loader),
+        resolved_class_cache: ctx.resolved_class_cache,
+        ..ForwardWalkCtx::new(file, current_class, u32::MAX, &flow)
+    };
+
+    let mut scope = ScopeState::new();
+    for (name, types) in param_types {
+        scope.seed(name, types.clone());
+    }
+
+    let returns: Vec<Option<&Expression<'_>>> = match function {
+        Expression::Closure(closure) => {
+            #[cfg(test)]
+            TEST_CLOSURE_WALKS.with(|count| count.set(count.get() + 1));
+            walk_body_forward(closure.body.statements.iter(), &mut scope, &fw_ctx);
+            let mut found = Vec::new();
+            crate::return_collection::collect_returns(closure.body.statements.iter(), &mut found);
+            found.into_iter().map(|(expr, ..)| expr).collect()
+        }
+        Expression::ArrowFunction(arrow) => vec![Some(arrow.expression)],
+        _ => return None,
+    };
+
+    Some(f(scope, &returns, &fw_ctx))
 }
 
 /// Run `f` on `closure_text` parsed as the value assigned in a program of

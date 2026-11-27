@@ -44,19 +44,19 @@ fn closure_walks(content: &str) -> usize {
 }
 
 /// Reading a closure argument reads the closures nested in its body.
-/// Each closure is parsed as a source of its own, so a closure is read
-/// once more for every closure around it, but no more: one more level of
-/// nesting adds one walk more than the level before did.
+/// Those are read from the file's own AST, the same source the closures
+/// around them are read from, so each is walked a fixed number of times
+/// however deep it sits: one more level of nesting adds as many walks as
+/// the level before did.
 #[test]
-fn nested_closure_arguments_are_walked_once_per_enclosing_level() {
+fn nested_closure_arguments_are_walked_alike_at_every_depth() {
     let walks: Vec<usize> = [4, 5, 6, 7, 8]
         .into_iter()
         .map(|depth| closure_walks(&nested_callbacks(depth)))
         .collect();
     let steps: Vec<usize> = walks.windows(2).map(|pair| pair[1] - pair[0]).collect();
-    let growth: Vec<usize> = steps.windows(2).map(|pair| pair[1] - pair[0]).collect();
     assert!(
-        growth.windows(2).all(|pair| pair[0] == pair[1]),
-        "walks per depth grow quadratically at most: {walks:?}"
+        steps.windows(2).all(|pair| pair[0] == pair[1]),
+        "walks per depth grow linearly: {walks:?}"
     );
 }
