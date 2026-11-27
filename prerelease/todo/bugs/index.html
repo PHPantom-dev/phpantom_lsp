@@ -4199,20 +4199,18 @@ upstream fixture is the spec for its function.</p>
 <code>NAN</code> literal type. <code>// SKIP</code> line in <code>tests/phpstan_nsrt/pow.php</code>.</p>
 <h3 id="b819-built-ins-whose-result-their-arguments-decide-return-the-declared-type">B819. Built-ins whose result their arguments decide return the declared type<a class="headerlink" href="#b819-built-ins-whose-result-their-arguments-decide-return-the-declared-type" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">version_compare('7.0.0', '7.0.1');   // int, should be -1</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">mb_http_output();                    // string|bool, should be string</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="x">gettimeofday(true);                  // array&lt;int&gt;|float, should be float</span>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="x">$dt-&gt;format('');                     // string, should be ''</span>
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="x">$px-&gt;getColor(1);                    // array{r: int|float, ...}, should be array{r: float, ...}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">parse_url('http://abc.def');         // array{scheme?: lowercase-string, ...}|false, should be array{scheme: 'http', host: 'abc.def'}</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">$dt-&gt;format('');                     // string, should be ''</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="x">$px-&gt;getColor(1);                    // array{r: int|float, ...}, should be array{r: float, ...}</span>
 </code></pre></div>
-<p>No argument-aware return rules for: version_compare, microtime(null), mb_http_output/mb_regex_encoding/mb_internal_encoding/mb_encoding_aliases/mb_chr/mb_ord, gettimeofday, DateTimeInterface::format literals, ImagickPixel::getColor, fpm_get_status, sscanf scansets, proc_open's $pipes, getopt, CachingIterator::getCache, get_called_class, array_find_key on literal keys. Each needs its own rule; grouped because the mechanism (a per-function return rule) is the same.</p>
+<p>No argument-aware return rules for: parse_url over a literal URL (<code>// SKIP</code> lines in <code>tests/phpstan_nsrt/functions.php</code>), DateTimeInterface::format literals, ImagickPixel::getColor, fpm_get_status, sscanf scansets, proc_open's $pipes, getopt, CachingIterator::getCache, get_called_class, array_find_key on literal keys. Each needs its own rule; grouped because the mechanism (a per-function return rule) is the same.</p>
 <p>It also shows as:</p>
 <ul>
 <li><code>openssl_encrypt()</code>'s <code>$tag</code> out-parameter ignores the cipher</li>
 <li>PECL extension calls whose return type PHPStan picks from the arguments use the stub's full union</li>
 <li><code>PDO::connect()</code> does not return the driver subclass named by the DSN</li>
 <li>By-reference arrays of <code>socket_select()</code> and <code>proc_open()</code> are not typed from their inputs</li>
-<li><code>stat()</code>, <code>lstat()</code>, <code>fstat()</code> and <code>ssh2_sftp_stat()</code> return shapes lack the numeric keys</li>
+<li><code>ssh2_sftp_stat()</code>'s return shape lacks the numeric keys</li>
 <li><code>ArrayObject</code> offset reads are not nullable</li>
 <li><code>Closure::bind()</code>, <code>bindTo()</code> and <code>Closure::getCurrent()</code> lose the closure's signature</li>
 <li><code>ReflectionEnum</code> methods are not specialized by the reflected enum</li>
@@ -4222,7 +4220,7 @@ upstream fixture is the spec for its function.</p>
 <li><code>sscanf()</code> with a literal format and no output arguments is not typed as a shape</li>
 </ul>
 <p><strong>Fix:</strong> add per-function rules (stub patches with conditional returns, or the array/function rule tables) one function at a time; each upstream fixture is the spec for its function.</p>
-<p><strong>Cases</strong> (PHPStan <code>nsrt/</code>, 358 assertions): <code>functions.php</code> (42), <code>array-functions.php</code> (23), <code>array-search.php</code> (20), <code>mb-convert-encoding-php8.php</code> (18), <code>sscanf.php</code> (18), <code>get-parent-class.php</code> (12), <code>pr-1244-php-84.php</code> (12), <code>DateTimeDynamicReturnTypes.php</code> (12), <code>DateTimeCreateDynamicReturnTypes.php</code> (10), <code>mb_substitute_character-php8.php</code> (10), <code>get-defined-vars.php</code> (10), <code>bug-3789.php</code> (8), 54 more.</p>
+<p><strong>Cases</strong> (PHPStan <code>nsrt/</code>, 316 assertions): <code>array-functions.php</code> (23), <code>array-search.php</code> (20), <code>mb-convert-encoding-php8.php</code> (18), <code>sscanf.php</code> (18), <code>get-parent-class.php</code> (12), <code>pr-1244-php-84.php</code> (12), <code>DateTimeDynamicReturnTypes.php</code> (12), <code>DateTimeCreateDynamicReturnTypes.php</code> (10), <code>mb_substitute_character-php8.php</code> (10), <code>get-defined-vars.php</code> (10), <code>bug-3789.php</code> (8), 54 more.</p>
 <h3 id="b820-array_splice-neither-returns-the-removed-slice-nor-updates-its-array">B820. <code>array_splice()</code> neither returns the removed slice nor updates its array<a class="headerlink" href="#b820-array_splice-neither-returns-the-removed-slice-nor-updates-its-array" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium · Complexity: Low-Medium</strong></p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">/** @param array&lt;int, int&gt; $arr */</span>
