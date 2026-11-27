@@ -178,7 +178,10 @@
 //! 5. **`SimpleXMLElement`** -- `asXML()` and `saveXML()` are declared
 //!    `string|bool`, but without a filename they serialise to a string and
 //!    with one they report whether the write succeeded. Each gets a
-//!    conditional return type keyed on `$filename`.
+//!    conditional return type keyed on `$filename`. The private `__get`
+//!    becomes public so subclasses keep magic child reads, and it and
+//!    `offsetGet()` return `static|null` (benevolent for `__get`) for a
+//!    child or attribute the document lacks.
 //!
 //! 6. **`ReflectionClass`** -- `newInstanceArgs()` is declared
 //!    `@return T|null` where `newInstance()` is `@return T`, so the same

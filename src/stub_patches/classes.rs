@@ -499,7 +499,21 @@ fn patch_dom_element(class: &mut ClassInfo) {
 /// and report whether it worked. The flat union means neither result can be
 /// split, so `assertNotFalse($xml->asXML())` still leaves a `bool` the caller
 /// has to defend against.
+///
+/// Magic child reads (`$xml->item`) and offset reads (`$xml['name']`)
+/// yield `null` for a child or attribute the document lacks. The stub's
+/// `__get` is private, so a subclass does not inherit it and loses magic
+/// child access altogether; making it public keeps it on every subclass.
+/// The child read is benevolent, as PHPStan types it, since code walks
+/// a known document shape without checking each step.
 fn patch_simple_xml_element(class: &mut ClassInfo) {
+    let static_or_null = PhpType::union(vec![PhpType::named(atom("static")), PhpType::null()]);
+    with_method_mut(class, "__get", |method| {
+        method.visibility = crate::types::Visibility::Public;
+        method.return_type = Some(PhpType::benevolent(static_or_null.clone()));
+    });
+    patch_method_return_type(class, "offsetGet", static_or_null);
+
     let serialised = PhpType::union(vec![PhpType::string(), PhpType::named(atom("false"))]);
     for method_name in ["asXML", "saveXML"] {
         patch_method_conditional_return(

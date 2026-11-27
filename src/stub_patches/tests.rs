@@ -349,6 +349,34 @@ fn simple_xml_serialisers_get_conditional_returns() {
 }
 
 #[test]
+fn simple_xml_magic_reads_are_nullable_and_inherited() {
+    let mut class = empty_class("SimpleXMLElement");
+    let mut get = crate::types::MethodInfo::virtual_method("__get", Some("static"));
+    get.visibility = crate::types::Visibility::Private;
+    let offset_get = crate::types::MethodInfo::virtual_method("offsetGet", Some("static"));
+    class.methods.make_mut().push(std::sync::Arc::new(get));
+    class
+        .methods
+        .make_mut()
+        .push(std::sync::Arc::new(offset_get));
+
+    apply_class_stub_patches(&mut class);
+
+    let get = &class.methods[0];
+    assert_eq!(get.visibility, crate::types::Visibility::Public);
+    let get_return = get.return_type.as_ref().unwrap();
+    assert!(get_return.is_benevolent());
+    assert_eq!(
+        get_return.strip_benevolence(),
+        PhpType::parse("static|null")
+    );
+    assert_eq!(
+        class.methods[1].return_type,
+        Some(PhpType::parse("static|null"))
+    );
+}
+
+#[test]
 fn reflection_class_new_instance_args_loses_its_null_branch() {
     let mut class = empty_class("ReflectionClass");
     let mut method = crate::types::MethodInfo::virtual_method("newInstanceArgs", Some("T|null"));

@@ -2055,18 +2055,3 @@ It also shows as:
 **Fix:** fold concatenation over the cross product of literal operands, up to the same union size cap the other folds use.
 
 **Cases** (PHPStan `nsrt/`, 23 assertions): `constant-string-unions.php` (17), `bug-11129.php` (6).
-
-### B892. Magic child and attribute access on `SimpleXMLElement` is not nullable, and on a subclass it has no type
-
-**Impact: Low · Complexity: Low**
-
-```php
-$xml->foo;          // got SimpleXMLElement, should be SimpleXMLElement|null
-$item['name'];      // got static(SimpleXMLElement), should be SimpleXMLElement|null
-class Bar extends SimpleXMLElement {}
-/** @var Bar $b */ $b->item; // got nothing, should be Bar|null
-```
-
-Two parts: the nullability PHPStan gives magic element/attribute reads, and a user subclass of SimpleXMLElement losing its magic child access entirely (foreach over it gives mixed).
-
-**Cases** (PHPStan `nsrt/`, 11 assertions): `simplexml.php` (8), `bug-9575.php` (3).

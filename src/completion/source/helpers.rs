@@ -778,7 +778,7 @@ fn walk_array_segments(
                 let cache = crate::virtual_members::active_resolved_class_cache();
                 let merged =
                     crate::virtual_members::resolve_class_fully_maybe_cached(&cls, class_loader, cache);
-                crate::type_engine::variable::iterable_elements::extract_iterable_element_type_from_class(
+                crate::type_engine::variable::iterable_elements::extract_offset_value_type_from_class(
                     &merged,
                     class_loader,
                 )

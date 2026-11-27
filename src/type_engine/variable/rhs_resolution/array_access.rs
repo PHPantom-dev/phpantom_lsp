@@ -366,7 +366,7 @@ fn index_segment(
             ctx.file.class_loader,
             ctx.resolved_class_cache,
         );
-        crate::type_engine::variable::iterable_elements::extract_iterable_element_type_from_class(
+        crate::type_engine::variable::iterable_elements::extract_offset_value_type_from_class(
             &merged,
             ctx.file.class_loader,
         )

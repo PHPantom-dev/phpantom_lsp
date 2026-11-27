@@ -93,7 +93,9 @@ namespace PsalmTest_property_type_6 {
     $b = $a->b;
 
     assertType('SimpleXMLElement', $a);
-    assertType('SimpleXMLElement', $b);
+    // PHPantom follows PHPStan: a child read can be `null` (a child of a
+    // missing element is), so it is a benevolent `SimpleXMLElement|null`.
+    assertType('(SimpleXMLElement|null)', $b);
 }
 
 // Test: staticVarSelf

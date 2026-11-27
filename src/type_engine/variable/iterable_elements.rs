@@ -393,27 +393,49 @@ pub(crate) fn extract_iterable_element_type_from_class(
     //    a generic annotation. `SimpleXMLElement` is the prototypical
     //    example: it implements `Iterator` with `current(): static`, so
     //    iterating it yields instances of the iterated class itself.
-    if class_directly_implements(class, class_loader, "Iterator")
-        && let Some(method) = class.get_method("current")
-        && let Some(return_type) = &method.return_type
-    {
-        return Some(return_type.replace_self(&class.fqn()));
-    }
+    // 4. Otherwise fall back to the `offsetGet()` return type (see
+    //    [`declared_method_return`]).
+    declared_method_return(class, class_loader, "Iterator", "current")
+        .or_else(|| declared_method_return(class, class_loader, "ArrayAccess", "offsetGet"))
+}
 
-    // 4. Fall back to the `offsetGet()` return type when the class
-    //    implements `ArrayAccess` directly without a usable generic
-    //    annotation (e.g. an unbound `@template` self-reference, or no
-    //    docblock generics at all). Mirrors the `current()` fallback
-    //    above: `$obj[$k]` invokes `offsetGet`, so its declared return
-    //    type is the most precise answer available.
-    if class_directly_implements(class, class_loader, "ArrayAccess")
-        && let Some(method) = class.get_method("offsetGet")
-        && let Some(return_type) = &method.return_type
-    {
-        return Some(return_type.replace_self(&class.fqn()));
+/// The value an offset read (`$obj[$key]`) of an instance of `class`
+/// yields.
+///
+/// The same as [`extract_iterable_element_type_from_class`], except that
+/// without a generic annotation the `offsetGet()` return type wins over
+/// `current()`: the read invokes `offsetGet`, which need not agree with
+/// what iteration yields. `SimpleXMLElement` iterates as `static` but
+/// reads an attribute or child that may be missing as `static|null`.
+pub(crate) fn extract_offset_value_type_from_class(
+    class: &ClassInfo,
+    class_loader: &ResolvedClassLoader<'_>,
+) -> Option<PhpType> {
+    if let Some(value) = declared_iterable_arg(class, class_loader, iterable_value_arg) {
+        return Some(value);
     }
+    if let Some(value) = aggregate_iteration_slot(class, class_loader, IterSlot::Value) {
+        return Some(value);
+    }
+    declared_method_return(class, class_loader, "ArrayAccess", "offsetGet")
+        .or_else(|| declared_method_return(class, class_loader, "Iterator", "current"))
+}
 
-    None
+/// The declared return type of `method` when `class` implements `iface`
+/// without a usable generic annotation (e.g. an unbound `@template`
+/// self-reference, or no docblock generics at all), with `static` read on
+/// an instance of `class` itself.
+fn declared_method_return(
+    class: &ClassInfo,
+    class_loader: &ResolvedClassLoader<'_>,
+    iface: &str,
+    method: &str,
+) -> Option<PhpType> {
+    if !class_directly_implements(class, class_loader, iface) {
+        return None;
+    }
+    let return_type = class.get_method(method)?.return_type.as_ref()?;
+    Some(return_type.replace_self_declared(&class.fqn()))
 }
 
 /// Select the generic argument that describes the iterated **value** type.
