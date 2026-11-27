@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795799180698,
+  "lastUpdate": 1795799434524,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -18771,6 +18771,65 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_wordpress_plugin",
             "value": 82,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_yii_action",
+            "value": 102.3,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "639b783e9783cc01e9adabbd57f984740d1983fa",
+          "message": "Closures nested in generic call arguments no longer slow analysis down\nsharply",
+          "timestamp": "2026-11-27T18:03:45+01:00",
+          "tree_id": "66022048bcc7e85d04251a6d925a9eb800aa1b91",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/639b783e9783cc01e9adabbd57f984740d1983fa"
+        },
+        "date": 1795799421750,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_drupal_module",
+            "value": 277.9,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_hello_world",
+            "value": 46.1,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 79.3,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_symfony_controller",
+            "value": 80.3,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_tempest_view",
+            "value": 77,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_wordpress_plugin",
+            "value": 80.5,
             "unit": "MiB"
           },
           {
