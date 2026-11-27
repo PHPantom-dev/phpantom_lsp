@@ -131,8 +131,8 @@ function probe(string $name): void {
 }
 
 /// `mb_convert_encoding()` answers in the shape it was handed, like the
-/// replace family. An array subject is converted per element, so no error
-/// branch survives there.
+/// replace family, and only fails when it has to detect the source encoding
+/// among several.
 #[test]
 fn mb_convert_encoding_follows_its_subject() {
     let content = r#"<?php
@@ -143,14 +143,16 @@ function probe(string $text, array $lines, mixed $anything): void {
     $one = mb_convert_encoding($text, 'UTF-8');
     $many = mb_convert_encoding($lines, 'UTF-8');
     $unknown = mb_convert_encoding($anything, 'UTF-8');
+    $detected = mb_convert_encoding($text, 'UTF-8', 'UTF-8,ISO-8859-1');
 }
 "#;
     assert_assigned_types(
         content,
         &[
-            ("$one", "string|false"),
-            ("$many", "array<array-key, string>"),
-            ("$unknown", "array<array-key, string>|string|false"),
+            ("$one", "string"),
+            ("$many", "list<string>"),
+            ("$unknown", "array|string"),
+            ("$detected", "string|false"),
         ],
     );
 }

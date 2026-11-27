@@ -410,6 +410,14 @@ pub(super) fn resolve_named_member_call<'b>(
             {
                 return result;
             }
+            if let Some(ty) = date_time_format_type(owner, method_name, argument_list, ctx) {
+                return crate::type_engine::type_ops::resolution::resolved_types_for_hint(
+                    ty,
+                    "",
+                    ctx.file.all_classes,
+                    ctx.file.class_loader,
+                );
+            }
             if let Some(ty) = dom_create_element_type(owner, method_name, argument_list, ctx) {
                 return crate::type_engine::type_ops::resolution::resolved_types_for_hint(
                     ty,
@@ -666,6 +674,35 @@ fn dom_create_element_type(
     };
     let kept: Vec<PhpType> = members.iter().filter(|m| !m.is_false()).cloned().collect();
     (kept.len() < members.len()).then(|| PhpType::union(kept))
+}
+
+/// `DateTimeInterface::format()` with a literal format: the strings that
+/// format can produce, as `date()` gives them but with the microseconds kept.
+/// A subclass whose own `format()` returns something other than a `string`
+/// is left to its declaration.
+fn date_time_format_type(
+    owner: &ClassInfo,
+    method_name: &str,
+    argument_list: &ArgumentList<'_>,
+    ctx: &VarResolutionCtx<'_>,
+) -> Option<PhpType> {
+    if !method_name.eq_ignore_ascii_case("format")
+        || !crate::class_lookup::is_subtype_of(owner, "DateTimeInterface", ctx.file.class_loader)
+    {
+        return None;
+    }
+    let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
+        owner,
+        ctx.file.class_loader,
+        ctx.resolved_class_cache,
+    );
+    let method = merged.get_method(method_name)?;
+    if method.return_type.as_ref() != Some(&PhpType::string()) {
+        return None;
+    }
+    let arg = crate::call_args::first_param_arg(argument_list, "format")?;
+    let format = crate::type_engine::variable::resolution::resolve_arg_raw_type(arg.value(), ctx)?;
+    crate::type_engine::type_ops::call_site_returns::date_formatted(&format, false)
 }
 
 /// Whether `name` is a valid XML `Name`, as libxml checks it for

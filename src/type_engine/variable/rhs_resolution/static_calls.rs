@@ -183,6 +183,14 @@ fn static_call_on_class(
                 ctx,
             );
         }
+        if let Some(ty) = date_from_format_type(owner, method_name, argument_list, ctx) {
+            return crate::type_engine::type_ops::resolution::resolved_types_for_hint(
+                ty,
+                "",
+                ctx.file.all_classes,
+                ctx.file.class_loader,
+            );
+        }
         if let Some(case) = enum_from_type(owner, method_name, argument_list, ctx) {
             return vec![ResolvedType::from_type_string(case)];
         }
@@ -297,6 +305,44 @@ fn static_call_on_class(
         &rctx,
     );
     results
+}
+
+/// `DateTime::createFromFormat()` and `DateTimeImmutable::createFromFormat()`
+/// over literal arguments: the date when PHP accepts the string, `false`
+/// when it does not. A subclass may override the method, so only the two
+/// classes themselves are read.
+fn date_from_format_type(
+    owner: &ClassInfo,
+    method_name: &str,
+    argument_list: &ArgumentList<'_>,
+    ctx: &VarResolutionCtx<'_>,
+) -> Option<PhpType> {
+    let fqn = owner.fqn();
+    if !method_name.eq_ignore_ascii_case("createFromFormat")
+        || !matches!(fqn.as_str(), "DateTime" | "DateTimeImmutable")
+    {
+        return None;
+    }
+    // The argument at `position`, or the one labelled `name`.
+    let resolve = |position: usize, name: &str| {
+        let args = &argument_list.arguments;
+        let arg = args
+            .iter()
+            .find(|arg| matches!(arg, Argument::Named(named) if bytes_to_str(named.name.value) == name))
+            .or_else(|| {
+                args.iter()
+                    .take(position + 1)
+                    .all(|arg| matches!(arg, Argument::Positional(p) if p.ellipsis.is_none()))
+                    .then(|| args.get(position))
+                    .flatten()
+            })?;
+        crate::type_engine::variable::resolution::resolve_arg_raw_type(arg.value(), ctx)
+    };
+    crate::type_engine::type_ops::call_site_returns::date_create::created(
+        PhpType::named(fqn),
+        Some(&resolve(0, "format")?),
+        &resolve(1, "datetime")?,
+    )
 }
 
 /// `BackedEnum::from($value)` and `tryFrom($value)` with a value of known

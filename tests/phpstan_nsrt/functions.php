@@ -149,18 +149,18 @@ assertType('float', $gettimeofdayFloat);
 assertType('array{sec: int, usec: int, minuteswest: int, dsttime: int}', $gettimeofdayDefault); // PHPStan says `array{…}|float`, but `null` is read as `false` outside strict mode
 assertType('(array{sec: int, usec: int, minuteswest: int, dsttime: int}|float)', $gettimeofdayBenevolent);
 assertType('array|int|string|false|null', $parseUrlWithoutParameters); // SKIP: a call PHP rejects is not reported as an error type
-assertType('array{scheme: \'http\', host: \'abc.def\'}', $parseUrlConstantUrlWithoutComponent1); // SKIP: `parse_url()` of a literal URL is not folded
-assertType('array{scheme: \'http\', host: \'def.abc\'}', $parseUrlConstantUrlWithoutComponent2); // SKIP: `parse_url()` of a literal URL is not folded
+assertType('array{scheme: \'http\', host: \'abc.def\'}', $parseUrlConstantUrlWithoutComponent1);
+assertType('array{scheme: \'http\', host: \'def.abc\'}', $parseUrlConstantUrlWithoutComponent2);
 assertType('array{scheme?: lowercase-string, host?: lowercase-string, port?: int<0, 65535>, user?: lowercase-string, pass?: lowercase-string, path?: lowercase-string, query?: lowercase-string, fragment?: lowercase-string}|int<0, 65535>|lowercase-string|false|null', $parseUrlConstantUrlUnknownComponent);
-assertType('null', $parseUrlConstantUrlWithComponentNull); // SKIP: `parse_url()` of a literal URL is not folded
-assertType('\'this-is-fragment\'', $parseUrlConstantUrlWithComponentSet); // SKIP: `parse_url()` of a literal URL is not folded
+assertType('null', $parseUrlConstantUrlWithComponentNull);
+assertType('\'this-is-fragment\'', $parseUrlConstantUrlWithComponentSet);
 assertType('*NEVER*', $parseUrlConstantUrlWithComponentInvalid); // PHPStan says `false`, but PHP 8 throws a `ValueError` for an unknown component
 assertType('*NEVER*', $parseUrlStringUrlWithComponentInvalid); // PHPStan says `false`, but PHP 8 throws a `ValueError` for an unknown component
 assertType('int<0, 65535>|false|null', $parseUrlStringUrlWithComponentPort);
 assertType('array{scheme?: string, host?: string, port?: int<0, 65535>, user?: string, pass?: string, path?: string, query?: string, fragment?: string}|false', $parseUrlStringUrlWithoutComponent);
-assertType('array{path: \'abc.def\'}', parse_url('abc.def')); // SKIP: `parse_url()` of a literal URL is not folded
-assertType('null', parse_url('abc.def', PHP_URL_SCHEME)); // SKIP: `parse_url()` of a literal URL is not folded
-assertType('\'http\'', parse_url('http://abc.def', PHP_URL_SCHEME)); // SKIP: `parse_url()` of a literal URL is not folded
+assertType('array{path: \'abc.def\'}', parse_url('abc.def'));
+assertType('null', parse_url('abc.def', PHP_URL_SCHEME));
+assertType('\'http\'', parse_url('http://abc.def', PHP_URL_SCHEME));
 assertType('array{0: int, 1: int, 2: int, 3: int, 4: int, 5: int, 6: int, 7: int, 8: int, 9: int, 10: int, 11: int, 12: int, dev: int, ino: int, mode: int, nlink: int, uid: int, gid: int, rdev: int, size: int, atime: int, mtime: int, ctime: int, blksize: int, blocks: int}|false', $stat);
 assertType('array{0: int, 1: int, 2: int, 3: int, 4: int, 5: int, 6: int, 7: int, 8: int, 9: int, 10: int, 11: int, 12: int, dev: int, ino: int, mode: int, nlink: int, uid: int, gid: int, rdev: int, size: int, atime: int, mtime: int, ctime: int, blksize: int, blocks: int}|false', $lstat);
 assertType('array{0: int, 1: int, 2: int, 3: int, 4: int, 5: int, 6: int, 7: int, 8: int, 9: int, 10: int, 11: int, 12: int, dev: int, ino: int, mode: int, nlink: int, uid: int, gid: int, rdev: int, size: int, atime: int, mtime: int, ctime: int, blksize: int, blocks: int}|false', $fstat);

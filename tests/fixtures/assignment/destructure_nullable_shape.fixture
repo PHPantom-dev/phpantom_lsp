@@ -1,0 +1,11 @@
+// test: destructuring a nullable shape whose entry is already nullable gives the entry once with null
+// feature: hover
+// expect: int|null
+---
+<?php
+
+/** @param array{int|null, string}|null $pair */
+function demo($pair): void {
+    [$first, $second] = $pair;
+    echo $fir<>st;
+}

@@ -1,0 +1,12 @@
+// test: array_rand() picking more than one key, by a count only known as a range, returns them as a list
+// php: 8.5
+// feature: hover
+// expect: list<string>
+// expect_absent: |list
+---
+<?php
+
+function demo(): void {
+    $picked = array_rand(["a" => 1, "b" => 2, "c" => 3], mt_rand(2, 3));
+    echo $pic<>ked;
+}

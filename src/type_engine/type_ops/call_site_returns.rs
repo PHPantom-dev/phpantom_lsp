@@ -49,7 +49,13 @@ use super::conditional::ArgTypeResolver;
 use crate::text_scan::{ScanStep, scan_top_level, split_top_level_commas};
 use crate::types::FunctionInfo;
 
+mod array_search;
+pub(crate) mod date_create;
+mod mb_convert_encoding;
+mod parent_class;
+mod parse_url;
 mod preg_split;
+mod scanf;
 mod wordpress;
 
 /// `JSON_THROW_ON_ERROR`, as defined by PHP's `ext/json/php_json.h`.
@@ -151,6 +157,16 @@ enum CallSiteFunction {
     Random { swaps_bounds: bool },
     Date,
     ArrayKeyExists,
+    ParseUrl,
+    Scanf { stream: bool },
+    ParentClass,
+    ArraySearch,
+    MbSubstituteCharacter,
+    MbConvertEncoding,
+    ArrayRand,
+    DateFormat,
+    DateCreate { from_format: bool },
+    Strtotime,
     WordPress(wordpress::WordPressFunction),
 }
 
@@ -179,10 +195,38 @@ fn classify(func_name: &str) -> Option<CallSiteFunction> {
         Some(CallSiteFunction::PregSplit)
     } else if name.eq_ignore_ascii_case("date") {
         Some(CallSiteFunction::Date)
+    } else if name.eq_ignore_ascii_case("date_create")
+        || name.eq_ignore_ascii_case("date_create_immutable")
+    {
+        Some(CallSiteFunction::DateCreate { from_format: false })
+    } else if name.eq_ignore_ascii_case("date_create_from_format")
+        || name.eq_ignore_ascii_case("date_create_immutable_from_format")
+    {
+        Some(CallSiteFunction::DateCreate { from_format: true })
+    } else if name.eq_ignore_ascii_case("strtotime") {
+        Some(CallSiteFunction::Strtotime)
+    } else if name.eq_ignore_ascii_case("date_format") {
+        Some(CallSiteFunction::DateFormat)
     } else if name.eq_ignore_ascii_case("array_key_exists")
         || name.eq_ignore_ascii_case("key_exists")
     {
         Some(CallSiteFunction::ArrayKeyExists)
+    } else if name.eq_ignore_ascii_case("parse_url") {
+        Some(CallSiteFunction::ParseUrl)
+    } else if name.eq_ignore_ascii_case("sscanf") {
+        Some(CallSiteFunction::Scanf { stream: false })
+    } else if name.eq_ignore_ascii_case("fscanf") {
+        Some(CallSiteFunction::Scanf { stream: true })
+    } else if name.eq_ignore_ascii_case("get_parent_class") {
+        Some(CallSiteFunction::ParentClass)
+    } else if name.eq_ignore_ascii_case("array_search") {
+        Some(CallSiteFunction::ArraySearch)
+    } else if name.eq_ignore_ascii_case("array_rand") {
+        Some(CallSiteFunction::ArrayRand)
+    } else if name.eq_ignore_ascii_case("mb_convert_encoding") {
+        Some(CallSiteFunction::MbConvertEncoding)
+    } else if name.eq_ignore_ascii_case("mb_substitute_character") {
+        Some(CallSiteFunction::MbSubstituteCharacter)
     } else if name.eq_ignore_ascii_case("random_int") {
         Some(CallSiteFunction::Random {
             swaps_bounds: false,
@@ -259,7 +303,25 @@ pub(crate) fn call_site_return_type(
         CallSiteFunction::PregSplit => preg_split::return_type(&args),
         CallSiteFunction::Random { swaps_bounds } => random_return(&args, swaps_bounds),
         CallSiteFunction::Date => date_return(&args),
+        CallSiteFunction::DateCreate { from_format } => {
+            date_create::return_type(&args, declared?, from_format)
+        }
+        CallSiteFunction::Strtotime => date_create::strtotime(
+            &args.resolve(&args.text("$datetime")?)?,
+            args.text("$baseTimestamp")
+                .is_some_and(|base| !base.trim().eq_ignore_ascii_case("null")),
+        ),
+        CallSiteFunction::DateFormat => {
+            date_formatted(&args.resolve(&args.text("$format")?)?, false)
+        }
         CallSiteFunction::ArrayKeyExists => array_key_exists_return(&args),
+        CallSiteFunction::ParseUrl => parse_url::return_type(&args),
+        CallSiteFunction::Scanf { stream } => scanf::return_type(&args, stream),
+        CallSiteFunction::ParentClass => parent_class::return_type(&args, class_loader),
+        CallSiteFunction::ArraySearch => array_search::return_type(&args),
+        CallSiteFunction::MbSubstituteCharacter => mb_substitute_character_return(&args),
+        CallSiteFunction::MbConvertEncoding => mb_convert_encoding::return_type(&args),
+        CallSiteFunction::ArrayRand => array_rand_return(&args),
         CallSiteFunction::WordPress(function) => wordpress::return_type(function, &args),
     }
 }
@@ -307,6 +369,88 @@ fn array_key_exists_return(args: &CallArgs<'_>) -> Option<PhpType> {
         (false, true) => PhpType::false_(),
         _ => PhpType::bool(),
     })
+}
+
+/// `array_rand($array, $num)`: one of the array's keys when picking one, and
+/// a list of them when picking more. A `$num` that is not a literal may be
+/// either.
+fn array_rand_return(args: &CallArgs<'_>) -> Option<PhpType> {
+    let array = args.resolve(&args.text("$array")?)?;
+    let keys = array.iterable_key_type()?;
+    if keys.is_never() {
+        return None;
+    }
+    let picks = |n: i64| match n {
+        1 => Some(keys.clone()),
+        n if n > 1 => Some(PhpType::list(keys.clone())),
+        // Fewer than one is a `ValueError`.
+        _ => None,
+    };
+    let Some(text) = args.text("$num") else {
+        return picks(1);
+    };
+    if let Some(n) = crate::php_type::parse_php_int_literal(text.trim()) {
+        return picks(n);
+    }
+    // A count whose every value picks one key, or more than one, decides the
+    // form even when it is not one literal (`mt_rand(3, 10)`).
+    let interval = args
+        .resolve(&text)
+        .filter(|ty| ty.is_int_subtype())
+        .and_then(|ty| super::int_interval::IntInterval::of_int(&ty));
+    match interval {
+        Some(interval) if interval.min == Some(1) && interval.max == Some(1) => picks(1),
+        Some(interval) if interval.min.is_some_and(|min| min > 1) => picks(2),
+        _ => Some(PhpType::union(vec![keys.clone(), PhpType::list(keys)])),
+    }
+}
+
+/// `mb_substitute_character()`: without an argument (or with `null`) the
+/// current setting, a mode name or a Unicode scalar value; with one, `true`
+/// for a setting it accepts, since PHP 8 throws a `ValueError` for any other.
+fn mb_substitute_character_return(args: &CallArgs<'_>) -> Option<PhpType> {
+    use super::int_interval::IntInterval;
+    const GETTER: &str = "'entity'|'long'|'none'|int<0, 55295>|int<57344, 1114111>";
+    let Some(text) = args.text("$substitute_character") else {
+        return Some(PhpType::parse(GETTER));
+    };
+    let subject = args.resolve(&text)?;
+    let mut results: Vec<PhpType> = Vec::new();
+    for member in subject.union_members() {
+        let ty = if member.is_null() {
+            PhpType::parse(GETTER)
+        } else if member.is_object_like() || member.is_closure() {
+            PhpType::never()
+        } else if let Some(content) = member.as_literal().and_then(|l| {
+            matches!(l, crate::php_type::LiteralValue::String(_))
+                .then(|| l.string_content())
+                .flatten()
+        }) {
+            let mode = content.to_ascii_lowercase();
+            if ["none", "long", "entity"].contains(&mode.as_str()) {
+                PhpType::true_()
+            } else {
+                PhpType::never()
+            }
+        } else if member.is_int_subtype() {
+            let interval = IntInterval::of_int(member)?;
+            let overlaps = |min: i64, max: i64| {
+                interval.min.is_none_or(|low| low <= max)
+                    && interval.max.is_none_or(|high| high >= min)
+            };
+            if overlaps(0, 0xD7FF) || overlaps(0xE000, 0x10_FFFF) {
+                PhpType::true_()
+            } else {
+                PhpType::never()
+            }
+        } else {
+            return None;
+        };
+        if !results.contains(&ty) {
+            results.push(ty);
+        }
+    }
+    Some(PhpType::union(results))
 }
 
 /// One call's arguments, bound to the parameters they fill.
@@ -801,23 +945,27 @@ const DATE_DIGIT_CHARS: &str = "djNwzWmntLoYygGhHisuvBUI";
 /// `non-falsy-string` otherwise. Mirrors PHPStan's
 /// `DateFunctionReturnTypeHelper`.
 fn date_return(args: &CallArgs<'_>) -> Option<PhpType> {
-    let format = args.resolve(&args.text("$format")?)?;
-    let formats: Vec<String> = format
-        .union_members()
-        .into_iter()
-        .map(|member| Some(member.as_literal()?.string_content()?.into_owned()))
-        .collect::<Option<_>>()?;
+    date_formatted(&args.resolve(&args.text("$format")?)?, true)
+}
+
+/// What formatting a date with `format` gives, when it is a literal or a
+/// union of them; see [`date_return`].
+///
+/// `whole_seconds` is true for `date()`, whose `u` and `v` are always zero,
+/// and false for a `DateTimeInterface`, which keeps its microseconds.
+pub(crate) fn date_formatted(format: &PhpType, whole_seconds: bool) -> Option<PhpType> {
+    let formats = literal_strings(format)?;
     let mut results: Vec<PhpType> = Vec::new();
     for format in &formats {
-        let ty = date_format_type(format);
+        let ty = date_format_type(format, whole_seconds);
         if !results.contains(&ty) {
             results.push(ty);
         }
     }
-    Some(PhpType::union(results))
+    (!results.is_empty()).then(|| PhpType::union(results))
 }
 
-fn date_format_type(format: &str) -> PhpType {
+fn date_format_type(format: &str, whole_seconds: bool) -> PhpType {
     let numbers = |min: u32, max: u32, pad: bool| {
         PhpType::union(
             (min..=max)
@@ -844,8 +992,10 @@ fn date_format_type(format: &str) -> PhpType {
         "h" => return numbers(1, 12, true),
         "H" => return numbers(0, 23, true),
         // `date()` works on whole seconds.
-        "u" => return PhpType::literal_string_value("000000"),
-        "v" => return PhpType::literal_string_value("000"),
+        "u" if whole_seconds => return PhpType::literal_string_value("000000"),
+        "v" if whole_seconds => return PhpType::literal_string_value("000"),
+        // A fixed number of digits, so never the falsy `'0'`.
+        "u" | "v" => return PhpType::parse("non-falsy-string&numeric-string"),
         _ => {}
     }
     let mut copied = String::new();
@@ -1309,6 +1459,14 @@ fn term_value(term: &str, arg_type_resolver: ArgTypeResolver<'_>) -> Option<i64>
 
 fn literal_int(ty: &PhpType) -> Option<i64> {
     super::const_fold::literal_int_value(ty)
+}
+
+/// Every string `ty` may be, when it is a literal or a union of them.
+fn literal_strings(ty: &PhpType) -> Option<Vec<String>> {
+    ty.union_members()
+        .into_iter()
+        .map(|member| Some(member.as_literal()?.string_content()?.into_owned()))
+        .collect()
 }
 
 /// Whether the bitmask expression `text` provably sets `bit`.

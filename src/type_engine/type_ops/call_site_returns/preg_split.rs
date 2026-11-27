@@ -10,7 +10,7 @@
 
 use crate::php_type::{PhpType, ShapeEntry};
 
-use super::{CallArgs, literal_int, split_bitwise_or};
+use super::{CallArgs, literal_int, literal_strings, split_bitwise_or};
 
 const PREG_SPLIT_NO_EMPTY: i64 = 1;
 const PREG_SPLIT_DELIM_CAPTURE: i64 = 2;
@@ -104,13 +104,6 @@ fn int_values(args: &CallArgs<'_>, text: &str) -> Option<Option<Vec<i64>>> {
         }
     }
     Some(Some(values))
-}
-
-fn literal_strings(ty: &PhpType) -> Option<Vec<String>> {
-    ty.union_members()
-        .into_iter()
-        .map(|member| Some(member.as_literal()?.string_content()?.into_owned()))
-        .collect()
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]

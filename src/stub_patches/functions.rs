@@ -37,6 +37,8 @@ pub fn apply_function_stub_patches(func: &mut FunctionInfo) {
         "key" => patch_array_key_value_generics(func, "$array", "TKey|null"),
         "pathinfo" => patch_pathinfo(func),
         "print_r" => patch_print_r(func),
+        "highlight_string" => patch_highlight(func, "true"),
+        "highlight_file" | "show_source" => patch_highlight(func, "bool"),
         "base64_decode" => patch_base64_decode(func),
         "trigger_error" | "user_error" => patch_trigger_error(func),
         "mysqli_fetch_object" if func.template_params.iter().any(|t| t.as_str() == "T") => {
@@ -733,6 +735,23 @@ fn patch_print_r(func: &mut FunctionInfo) {
         PhpType::parse("true"),
         PhpType::string(),
         PhpType::parse("true"),
+    );
+}
+
+/// Patch `highlight_string()`, `highlight_file()` and `show_source()` to
+/// have a conditional return type keyed on `$return`.
+///
+/// Asked to return the highlighted source they do, and otherwise they print
+/// it and report how that went: `highlight_string()` always succeeds (PHP
+/// 8.4 declares it `true`), while the file variants fail on a file they
+/// cannot read.
+fn patch_highlight(func: &mut FunctionInfo, printed: &str) {
+    conditional_on(
+        func,
+        "$return",
+        PhpType::parse("true"),
+        PhpType::string(),
+        PhpType::parse(printed),
     );
 }
 

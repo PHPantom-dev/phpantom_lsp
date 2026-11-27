@@ -38,12 +38,12 @@ No outstanding items.
 **Impact: Medium · Complexity: Medium**
 
 ```php
-parse_url('http://abc.def');         // array{scheme?: lowercase-string, ...}|false, should be array{scheme: 'http', host: 'abc.def'}
-$dt->format('');                     // string, should be ''
 $px->getColor(1);                    // array{r: int|float, ...}, should be array{r: float, ...}
+get_defined_vars();                  // array, should be array{param: int, local: 'foo'}
+strtotime('4 qm');                   // int|false, should be false
 ```
 
-No argument-aware return rules for: parse_url over a literal URL (`// SKIP` lines in `tests/phpstan_nsrt/functions.php`), DateTimeInterface::format literals, ImagickPixel::getColor, fpm_get_status, sscanf scansets, proc_open's $pipes, getopt, CachingIterator::getCache, get_called_class, array_find_key on literal keys. Each needs its own rule; grouped because the mechanism (a per-function return rule) is the same.
+No argument-aware return rules for: ImagickPixel::getColor, fpm_get_status, proc_open's $pipes, getopt, CachingIterator::getCache, get_called_class and `get_class()` without an argument, array_find_key on literal keys, and get_defined_vars (which needs the walker's scope listed, not just queried). Each needs its own rule; grouped because the mechanism (a per-function return rule) is the same.
 
 It also shows as:
 
@@ -56,13 +56,13 @@ It also shows as:
 - `Closure::bind()`, `bindTo()` and `Closure::getCurrent()` lose the closure's signature
 - `ReflectionEnum` methods are not specialized by the reflected enum
 - `DatePeriod`'s constructor arguments do not decide its end-date and recurrence types
-- `strtotime()` of a literal string is not folded
-- `DateTimeInterface::format()` with a literal format is not typed by the format
-- `sscanf()` with a literal format and no output arguments is not typed as a shape
+- `date_create()` and `strtotime()` only recognise ISO dates, relative day keywords and `+N unit` offsets, so a string PHP rejects (`'202/20'`, `'foo'`) is never folded to `false`
+- `get_parent_class()` written outside any class is `class-string|false`, should be `false`
+- `array_search()` on a generic array whose offset was narrowed to the needle (`$arr[17] === 'foo'`) still includes `false`
 
-**Fix:** add per-function rules (stub patches with conditional returns, or the array/function rule tables) one function at a time; each upstream fixture is the spec for its function.
+**Fix:** add per-function rules (`type_ops/call_site_returns/`, stub patches with conditional returns, or the array/function rule tables) one function at a time; each upstream fixture is the spec for its function.
 
-**Cases** (PHPStan `nsrt/`, 316 assertions): `array-functions.php` (23), `array-search.php` (20), `mb-convert-encoding-php8.php` (18), `sscanf.php` (18), `get-parent-class.php` (12), `pr-1244-php-84.php` (12), `DateTimeDynamicReturnTypes.php` (12), `DateTimeCreateDynamicReturnTypes.php` (10), `mb_substitute_character-php8.php` (10), `get-defined-vars.php` (10), `bug-3789.php` (8), 54 more.
+**Cases** (PHPStan `nsrt/`): `get-defined-vars.php` (10), the `array_search`, `array_find_key` and `array_rand` lines of `array-functions.php`, the `// SKIP` lines in `get-parent-class.php`, `array-search.php`, `DateTimeCreateDynamicReturnTypes.php` and `strtotime-return-type-extensions.php`, and the other one- and two-assertion files the gap triage grouped here.
 
 ### B821. `preg_match()` gives a generic array for a pattern that is not one plain literal
 
@@ -2038,3 +2038,24 @@ Every pow() line in pow.php passes while the matching `**` line fails, so the op
 **Fix:** route `**` through the same rule `pow()` uses.
 
 **Cases** (PHPStan `nsrt/`, 31 assertions): `pow.php` (31).
+
+### B923. Arithmetic on a numeric-string literal and a non-literal number widens to `int|float`
+
+**Impact: Low · Complexity: Low**
+
+```php
+/** @param '1'|'2'|'3' $digit @param int<1, 14> $offset */
+$digit + $offset;   // int|float, should be int<2, 17>
+'1e3' + $offset;    // int|float, should be float
+```
+
+A single numeric-string literal on both sides folds (`'3' + 1` is `4`), but
+a union of them, or one beside a non-literal `int`, is read as a plain
+`numeric-string`, which may hold a float. Each literal decides whether it
+is an integer or a float string, so the result is an `int` range for
+integer strings and a `float` for the rest.
+
+**Fix:** read each numeric-string literal operand as the `int` or `float`
+it converts to before the arithmetic rules combine the operands.
+
+**Cases** (PHPStan `nsrt/`): the `// SKIP` lines in `bug-8803.php`.

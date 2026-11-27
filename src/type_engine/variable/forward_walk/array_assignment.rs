@@ -168,11 +168,16 @@ pub(crate) fn bind_destructured_pattern<'b>(
 pub(crate) fn destructured_element_type(rhs_type: &PhpType, key: Option<&str>) -> Option<PhpType> {
     match rhs_type.kind() {
         TypeKind::Nullable(inner) => destructured_element_type(inner, key).map(PhpType::or_null),
-        TypeKind::Union(members) => members
-            .iter()
-            .map(|member| destructured_element_type(member, key))
-            .collect::<Option<Vec<_>>>()
-            .map(PhpType::union),
+        TypeKind::Union(members) => {
+            let mut flat: Vec<PhpType> = Vec::new();
+            for member in members.iter() {
+                // An element that is itself a union (`int|null`) is spread
+                // out, so the `null` a nullable member adds merges with it.
+                let element = destructured_element_type(member, key)?;
+                flat.extend(element.union_members().into_iter().cloned());
+            }
+            Some(PhpType::union(flat))
+        }
         _ if rhs_type.is_null()
             || rhs_type.is_bool()
             || rhs_type.is_true()
