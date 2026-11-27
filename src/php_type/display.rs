@@ -169,6 +169,8 @@ impl fmt::Display for PhpType {
             TypeKind::Literal(s) => write!(f, "{s}"),
 
             TypeKind::Raw(s) => write!(f, "{s}"),
+            TypeKind::HasMethod(name) => write!(f, "hasMethod({name})"),
+            TypeKind::HasProperty(name) => write!(f, "hasProperty({name})"),
         }
     }
 }

@@ -292,6 +292,37 @@ impl PhpType {
         TypeKind::Intersection(members.into()).into()
     }
 
+    /// The `hasMethod(name)` accessory.
+    pub fn has_method(name: Atom) -> PhpType {
+        TypeKind::HasMethod(name).into()
+    }
+
+    /// The `hasProperty(name)` accessory.
+    pub fn has_property(name: Atom) -> PhpType {
+        TypeKind::HasProperty(name).into()
+    }
+
+    /// This type with the `hasMethod()` / `hasProperty()` accessory
+    /// `accessory` added, when it is a bare `object` or an intersection
+    /// that already narrowed one: `object` becomes `object&hasMethod(x)`.
+    ///
+    /// `None` for anything else, including a type that already carries the
+    /// accessory.  A class type has its members looked up on the class
+    /// instead, and a union or a `mixed` holds more than objects.
+    pub(crate) fn with_member_accessory(&self, accessory: &PhpType) -> Option<PhpType> {
+        match self.kind() {
+            TypeKind::Named(_) if self.is_object() => {
+                Some(PhpType::intersection(vec![self.clone(), accessory.clone()]))
+            }
+            TypeKind::Intersection(members) if self.is_object() && !members.contains(accessory) => {
+                let mut members = members.to_vec();
+                members.push(accessory.clone());
+                Some(PhpType::intersection(members))
+            }
+            _ => None,
+        }
+    }
+
     /// Array shape (`array{…}`).
     pub fn array_shape(entries: Vec<ShapeEntry>) -> PhpType {
         TypeKind::ArrayShape(entries.into()).into()

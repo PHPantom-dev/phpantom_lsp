@@ -8,7 +8,7 @@ function (string $class): void {
 	$foo = new $class();
 	assertType('object', $foo);
 	if (method_exists($foo, 'doFoo')) {
-		assertType('object&hasMethod(doFoo)', $foo); // SKIP: `method_exists()` does not narrow to `hasMethod()`
+		assertType('object&hasMethod(doFoo)', $foo);
 	}
 };
 

@@ -4913,6 +4913,25 @@ mod predicate_tests {
     }
 
     #[test]
+    fn is_object_true_for_object_narrowed_by_an_accessory() {
+        let narrowed =
+            PhpType::intersection(vec![PhpType::object(), PhpType::has_method(atom("doFoo"))]);
+        assert!(narrowed.is_object());
+        assert_eq!(narrowed.to_string(), "object&hasMethod(doFoo)");
+        assert!(narrowed.is_subtype_of(&PhpType::object()));
+        assert!(!PhpType::object().is_subtype_of(&narrowed));
+    }
+
+    #[test]
+    fn is_object_false_for_class_with_an_accessory() {
+        let narrowed = PhpType::intersection(vec![
+            PhpType::named(atom("User")),
+            PhpType::has_method(atom("doFoo")),
+        ]);
+        assert!(!narrowed.is_object());
+    }
+
+    #[test]
     fn is_object_false_for_object_shape() {
         assert!(!PhpType::object_shape(vec![]).is_object());
     }

@@ -175,6 +175,8 @@ impl PhpType {
             | TypeKind::ThisType(_)
             | TypeKind::IntRange(..)
             | TypeKind::Literal(_)
+            | TypeKind::HasMethod(_)
+            | TypeKind::HasProperty(_)
             | TypeKind::Raw(_) => self.clone(),
         }
     }
@@ -756,6 +758,7 @@ impl PhpType {
             }
             TypeKind::StaticType(_) | TypeKind::ThisType(_) => false,
             TypeKind::Literal(_) | TypeKind::Raw(_) | TypeKind::IntRange(_, _) => false,
+            TypeKind::HasMethod(_) | TypeKind::HasProperty(_) => false,
         }
     }
 
@@ -1230,6 +1233,7 @@ impl PhpType {
             }
 
             TypeKind::Literal(_) | TypeKind::Raw(_) | TypeKind::IntRange(_, _) => {}
+            TypeKind::HasMethod(_) | TypeKind::HasProperty(_) => {}
         }
     }
 

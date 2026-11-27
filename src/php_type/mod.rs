@@ -508,6 +508,17 @@ pub enum TypeKind {
     /// different DQL are different values, the way two enum cases are, and
     /// the bare class (a builder whose DQL is not known) admits both.
     DqlBuilder(PhpType, Box<QueryBuilderState>),
+
+    /// PHPStan's `hasMethod(name)` accessory: an object known to have a
+    /// method called `name`, as `method_exists($x, 'name')` proves.  Only
+    /// ever met as a member of an intersection (`object&hasMethod(name)`),
+    /// which is what makes it an object; on its own it names no class, so
+    /// class lookup finds nothing for it.
+    HasMethod(Atom),
+
+    /// PHPStan's `hasProperty(name)` accessory, the property counterpart of
+    /// [`HasMethod`](TypeKind::HasMethod) that `property_exists()` proves.
+    HasProperty(Atom),
 }
 
 /// Payload of [`TypeKind::UnsealedShape`].

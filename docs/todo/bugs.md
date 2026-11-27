@@ -2113,21 +2113,3 @@ literal's own body reading is memoized per request. The callback
 argument paths (template binding from a closure argument, and the
 callback return inference behind `array_map`/`array_filter`) re-read a
 nested callback once per enclosing level instead of sharing one answer.
-
-### B913. `method_exists()` does not narrow its subject to `hasMethod()`
-
-**Impact: Low · Complexity: Medium**
-
-```php
-function f(object $foo) {
-    if (method_exists($foo, 'doFoo')) {
-        $foo;   // object, should be object&hasMethod(doFoo)
-    }
-}
-```
-
-There is no `hasMethod()` accessory type, so a `method_exists()` guard
-leaves the object as it was and `$foo->doFoo()` reads as an unknown
-member.
-
-**Cases** (PHPStan `nsrt/`, 1 assertion): `bug-4579.php`.

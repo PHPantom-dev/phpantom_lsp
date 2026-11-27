@@ -1,0 +1,23 @@
+// test: method_exists() and property_exists() on a plain object prove the member in the type, until the branches join
+// feature: hover
+// expect_hover: $withMethod => $withMethod = object&hasMethod(doFoo)
+// expect_hover: $withBoth => $withBoth = object&hasMethod(doFoo)&hasProperty(bar)
+// expect_hover: $afterGuard => $afterGuard = object&hasProperty(bar)
+// expect_hover: $joined => $joined = object
+---
+<?php
+
+function test(object $foo, object $guarded): void {
+    if (method_exists($foo, 'doFoo')) {
+        $withMethod = $foo;
+        if (property_exists($foo, 'bar')) {
+            $withBoth = $foo;
+        }
+    }
+    $joined = $foo;
+    if (!property_exists($guarded, 'bar')) {
+        return;
+    }
+    $afterGuard = $guarded;
+    $<>joined;
+}

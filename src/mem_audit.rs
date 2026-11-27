@@ -226,6 +226,8 @@ fn variant_name(t: &PhpType) -> &'static str {
         TypeKind::IndexAccess(..) => "IndexAccess",
         TypeKind::Literal(_) => "Literal",
         TypeKind::Raw(_) => "Raw",
+        TypeKind::HasMethod(_) => "HasMethod",
+        TypeKind::HasProperty(_) => "HasProperty",
         TypeKind::Benevolent(_) => "Benevolent",
         TypeKind::ListShape(_) => "ListShape",
         TypeKind::TemplateParam(..) => "TemplateParam",
@@ -331,7 +333,7 @@ fn ty(t: &PhpType) -> Sz {
             }
         }
         // Interned bounds: no per-node heap payload.
-        TypeKind::IntRange(..) => {}
+        TypeKind::IntRange(..) | TypeKind::HasMethod(_) | TypeKind::HasProperty(_) => {}
         TypeKind::IndexAccess(a, b) => {
             z.slot(2);
             z += ty(a);

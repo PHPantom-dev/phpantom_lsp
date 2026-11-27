@@ -32,10 +32,21 @@ pub(crate) fn apply_member_exists_narrowing<'b>(
                 continue;
             }
 
+            let accessory = if is_method {
+                PhpType::has_method(atom(&member))
+            } else {
+                PhpType::has_property(atom(&member))
+            };
             let mut results = scope.get(var_name).to_vec();
             let mut changed = false;
             for rt in &mut results {
                 let Some(class_info) = &rt.class_info else {
+                    // A plain `object` has no class to add the member to,
+                    // so the proof goes on the type: `object&hasMethod(x)`.
+                    if let Some(narrowed) = rt.type_string.with_member_accessory(&accessory) {
+                        rt.type_string = narrowed;
+                        changed = true;
+                    }
                     continue;
                 };
                 // Skip when the member is already declared on the class

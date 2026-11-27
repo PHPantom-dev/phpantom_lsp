@@ -362,6 +362,8 @@ fn type_hint_to_classes_typed_depth(
         | TypeKind::IndexAccess(..)
         | TypeKind::Literal(_)
         | TypeKind::Conditional { .. }
+        | TypeKind::HasMethod(_)
+        | TypeKind::HasProperty(_)
         | TypeKind::Raw(_) => vec![],
     }
 }

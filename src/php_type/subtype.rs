@@ -366,9 +366,11 @@ impl PhpType {
             return Some(fits);
         }
 
-        // ── ObjectShape <: object ───────────────────────────────────
-        if matches!(self.kind(), TypeKind::ObjectShape(_))
-            && let TypeKind::Named(sup) = supertype.kind()
+        // ── ObjectShape, hasMethod(), hasProperty() <: object ───────
+        if matches!(
+            self.kind(),
+            TypeKind::ObjectShape(_) | TypeKind::HasMethod(_) | TypeKind::HasProperty(_)
+        ) && let TypeKind::Named(sup) = supertype.kind()
         {
             return Some(sup.eq_ignore_ascii_case("object"));
         }

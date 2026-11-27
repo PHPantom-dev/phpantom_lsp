@@ -516,11 +516,20 @@ impl PhpType {
 
     /// Whether this type is `object` (case-insensitive).
     ///
-    /// Also returns `true` when the type is `?object` (nullable wrapper).
+    /// Also returns `true` when the type is `?object` (nullable wrapper),
+    /// and for an `object` a member-existence guard narrowed
+    /// (`object&hasMethod(x)`), which is still an object of no known class.
     pub fn is_object(&self) -> bool {
         match self.kind() {
             TypeKind::Named(s) => s.eq_ignore_ascii_case("object"),
             TypeKind::Nullable(inner) => inner.is_object(),
+            TypeKind::Intersection(members) => {
+                members.iter().any(|m| m.is_object())
+                    && members.iter().all(|m| {
+                        m.is_object()
+                            || matches!(m.kind(), TypeKind::HasMethod(_) | TypeKind::HasProperty(_))
+                    })
+            }
             _ => false,
         }
     }
@@ -863,7 +872,7 @@ impl PhpType {
         match self.kind() {
             TypeKind::Named(s) => s.eq_ignore_ascii_case("object") || !is_scalar_name(s),
             TypeKind::Generic(g) => !is_scalar_name(&g.name),
-            TypeKind::ObjectShape(_) => true,
+            TypeKind::ObjectShape(_) | TypeKind::HasMethod(_) | TypeKind::HasProperty(_) => true,
             TypeKind::StaticType(s) | TypeKind::ThisType(s) => !is_scalar_name(s),
             TypeKind::Nullable(inner) => inner.is_object_like(),
             _ => false,
@@ -1038,7 +1047,9 @@ impl PhpType {
                 LiteralValue::Int(_) => PhpType::int(),
                 LiteralValue::Float(_) => PhpType::float(),
             }),
-            TypeKind::ObjectShape(_) => Some(PhpType::object()),
+            TypeKind::ObjectShape(_) | TypeKind::HasMethod(_) | TypeKind::HasProperty(_) => {
+                Some(PhpType::object())
+            }
             TypeKind::Callable(c) => Some(PhpType::named(c.kind)),
             TypeKind::Conditional(_)
             | TypeKind::KeyOf(_)
@@ -1209,6 +1220,7 @@ impl PhpType {
             TypeKind::Literal(..) => true,
             TypeKind::StaticType(_) | TypeKind::ThisType(_) | TypeKind::TemplateParam(..) => true,
             TypeKind::Raw(s) => s.contains('<') || s.contains('{') || s.ends_with("[]"),
+            TypeKind::HasMethod(_) | TypeKind::HasProperty(_) => true,
         }
     }
 
@@ -1305,6 +1317,8 @@ impl PhpType {
             | TypeKind::Literal(..)
             | TypeKind::StaticType(_)
             | TypeKind::ThisType(_)
+            | TypeKind::HasMethod(_)
+            | TypeKind::HasProperty(_)
             | TypeKind::Raw(..) => false,
         }
     }
