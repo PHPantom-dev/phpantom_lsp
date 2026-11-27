@@ -94,7 +94,9 @@ mod symfony_calls;
 mod unary_prefix;
 
 pub(crate) use magic_constants::file_magic_constant_type;
-pub(crate) use scalar_fold::{fold_concat_types, is_literal_string_type, php_string_of_type};
+pub(crate) use scalar_fold::{
+    fold_concat_types, is_literal_string_type, php_string_of_type, widen_grown_strings,
+};
 
 pub(crate) use arithmetic::{ArithmeticOpKind, infer_arithmetic_result_type};
 use arithmetic::{combine_with_lhs, combines_operand_types, resolve_binary_result_type};
@@ -545,10 +547,8 @@ fn resolve_rhs_expression_inner<'b>(
                 mago_syntax::cst::string::CompositeString::ShellExecute(_)
             ) =>
         {
-            let folded =
-                scalar_fold::fold_interpolated(string, |part| resolve_rhs_expression(part, ctx));
             vec![ResolvedType::from_type_string(
-                folded.unwrap_or_else(PhpType::string),
+                scalar_fold::interpolated_type(string, |part| resolve_rhs_expression(part, ctx)),
             )]
         }
         // ── Magic constants: `__LINE__`, `__FILE__`, `__CLASS__`, … ─

@@ -1,0 +1,41 @@
+// test: a string built onto itself in a loop widens to literal-string
+// feature: hover
+// The walks of a loop body cannot count how often it runs, so a local that
+// gains a new literal string on every pass is widened to the literal-string
+// it always is. A local the body assigns from elsewhere keeps its literals.
+// expect_hover: $appendedAfter => ''|(literal-string&non-falsy-string)
+// expect_hover: $joinedAfter => literal-string&non-falsy-string
+// expect_hover: $interpolatedAfter => ''|(literal-string&non-falsy-string)
+// expect_hover: $stateAfter => 'a'|'b'|'c'
+// expect_hover: $toggleAfter => 'a'|'b'
+---
+<?php
+
+function test(array $xs): void {
+    $appended = '';
+    foreach ($xs as $x) {
+        $appended .= 'x';
+    }
+    $joined = 'a';
+    for ($i = 0; $i < 10; $i++) {
+        $joined = $joined . 'y';
+    }
+    $interpolated = '';
+    while (rand()) {
+        $interpolated = "{$interpolated}z";
+    }
+    $state = 'a';
+    foreach ($xs as $x) {
+        $state = rand() ? 'b' : 'c';
+    }
+    $toggle = 'a';
+    foreach ($xs as $x) {
+        $toggle = $toggle === 'a' ? 'b' : 'a';
+    }
+    $appendedAfter = $appended;
+    $joinedAfter = $joined;
+    $interpolatedAfter = $interpolated;
+    $stateAfter = $state;
+    $toggleAfter = $toggle;
+    $<>toggleAfter;
+}

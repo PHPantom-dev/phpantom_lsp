@@ -9,6 +9,7 @@ use std::collections::{HashMap, HashSet};
 use std::ops::ControlFlow;
 
 use crate::type_engine::type_ops::int_interval::widen_grown_ints;
+use crate::type_engine::variable::rhs_resolution::widen_grown_strings;
 
 /// Where in a loop iteration `walk_loop_body_to_fixed_point` is invoking
 /// its seeding callback.
@@ -114,7 +115,7 @@ pub(crate) fn walk_loop_body_to_fixed_point<'b>(
             if entry.walks_the_same_as(previous) {
                 break;
             }
-            widen_grown_int_locals(previous, &mut entry, self_dependent);
+            widen_grown_locals(previous, &mut entry, self_dependent);
         }
         *scope = entry;
         if iteration + 1 < re_walks {
@@ -139,7 +140,7 @@ pub(crate) fn walk_loop_body_to_fixed_point<'b>(
         seed(scope, LoopSeedPoint::AfterBody);
         *scope = merged_loop_entry_scope(pre_loop_scope, scope, &mut seed);
         if let Some(previous) = previous_entry.as_ref() {
-            widen_grown_int_locals(previous, scope, self_dependent);
+            widen_grown_locals(previous, scope, self_dependent);
         }
         clear_exit_frame(ctx.flow);
         walk_body_forward(body_stmts.iter().copied(), scope, ctx);
@@ -252,14 +253,15 @@ impl<'a> LoopBodyCtxs<'a> {
 }
 
 /// Widen every self-dependent local of `entry` whose integers reach past
-/// what it held at the `previous` entry; see [`widen_grown_ints`].
+/// what it held at the `previous` entry, or that holds a literal string it
+/// did not hold then; see [`widen_grown_ints`] and [`widen_grown_strings`].
 ///
 /// A counter's next value is computed from its last one, so a bound that
 /// moved from one pass to the next keeps moving for as many passes as the
-/// loop makes, which the walks cannot count.  A variable the body assigns
-/// from elsewhere (`$state = 1`) has every value it can take by the second
-/// pass and is left exact.
-fn widen_grown_int_locals(
+/// loop makes, which the walks cannot count, and so does a string built
+/// onto itself.  A variable the body assigns from elsewhere (`$state = 1`)
+/// has every value it can take by the second pass and is left exact.
+fn widen_grown_locals(
     previous: &ScopeState,
     entry: &mut ScopeState,
     self_dependent: &HashSet<String>,
@@ -273,7 +275,10 @@ fn widen_grown_int_locals(
         .diff::<()>(&previous.locals, |name, now, before| {
             if let (Some(now), Some(before)) = (now, before)
                 && self_dependent.contains(name.as_str())
-                && let Some(types) = widen_grown_ints(before, now)
+                && let Some(types) = {
+                    let ints = widen_grown_ints(before, now);
+                    widen_grown_strings(before, ints.as_deref().unwrap_or(now)).or(ints)
+                }
             {
                 widened.push((*name, types));
             }

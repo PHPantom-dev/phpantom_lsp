@@ -12,9 +12,11 @@
 ---
 <?php
 
-/** @param int<0, max> $k */
-function test(int $k, bool $lite, string $column, int $id, int $n): void {
-    $if = $lite ? 'IIF' : 'IF';
+/**
+ * @param int<0, max> $k
+ * @param literal-string $if
+ */
+function test(int $k, string $if, string $column, int $id, int $n): void {
     $sql = 'SUM(' . $if . '(x, 1, 0))';
     $built = 'SELECT ';
     $built .= $if;

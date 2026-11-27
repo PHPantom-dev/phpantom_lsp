@@ -8,6 +8,8 @@ use super::*;
 use std::collections::{HashMap, HashSet};
 use std::ops::ControlFlow;
 
+use mago_syntax::cst::string::StringPart;
+
 use crate::atom::bytes_to_str;
 
 /// What a loop's assignments say about how walks of its body settle.
@@ -371,6 +373,17 @@ pub(crate) fn collect_rhs_variables(expr: &Expression<'_>, vars: &mut HashSet<St
         Expression::Assignment(assign) => {
             // Nested assignments like `$a = $b = expr`.
             collect_rhs_variables(assign.rhs, vars);
+        }
+        Expression::CompositeString(string) => {
+            for part in string.parts().iter() {
+                match part {
+                    StringPart::Literal(_) => {}
+                    StringPart::Expression(expression) => collect_rhs_variables(expression, vars),
+                    StringPart::BracedExpression(braced) => {
+                        collect_rhs_variables(braced.expression, vars);
+                    }
+                }
+            }
         }
         _ => {}
     }

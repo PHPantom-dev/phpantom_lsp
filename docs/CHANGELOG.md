@@ -33,6 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Concatenating a few known strings gives each result.** `.`, `.=` and interpolated strings over a value such as `'a'|'b'` give every string they can build, such as `'ax'|'bx'`, instead of `literal-string`. Past 128 results, or in a loop that keeps adding to a string, the type falls back to `literal-string`. An interpolated string that cannot be worked out is now typed like the matching concatenation instead of a plain `string`.
 - **`pow()` and `**` with no real result are `NAN`.** A power such as `pow(-1, 5.5)` is typed `NAN` instead of a plain `float`.
 - **Reversing a list with optional entries keeps its shape.** `array_reverse()` over a shape such as `array{0: 'A', 1?: 'B', 2?: 'C'}` gives a `list{…}` of the values each position can hold, instead of a generic list. `array_slice()` renumbers such shapes the same way.
 - **`int-mask<…>` and `int-mask-of<…>` resolve to their values.** A bitmask type over constants or literal flags is read as the values it allows, such as `int<0, 3>` or `0|1|4|5`, and bitwise operators on a value with a few known values work out the possible results.

@@ -2065,23 +2065,70 @@ Every pow() line in pow.php passes while the matching `**` line fails, so the op
 
 **Cases** (PHPStan `nsrt/`, 31 assertions): `pow.php` (31).
 
-### B891. Concatenating a union of literal strings gives `literal-string` instead of a union of the results
+### B920. A concatenation is never typed `lowercase-string` or `uppercase-string`
 
 **Impact: Low · Complexity: Low**
 
 ```php
-$left = rand() ? 'a' : 'b';
-$right = rand() ? 'x' : 'y';
-$left . $right;  // got literal-string&non-falsy-string, should be 'ax'|'ay'|'bx'|'by'
-".$left.";       // got string, should be '.a.'|'.b.'
+'0' . $i;         // non-falsy-string, should be lowercase-string&non-falsy-string&uppercase-string
+$i . $string;     // non-falsy-string, should be lowercase-string&non-falsy-string when $string is lowercase
 ```
 
-A single literal on each side is folded, but a union on either side is not distributed. This covers `.`, `.=` and interpolation (where the result even drops to `string`). PHPStan distributes up to a limit of 128 combinations and generalizes past it.
+PHPStan carries the case accessories through `.` and interpolation: a side
+that is all digits (an int, a float, a numeric literal) has no letters, so it
+is both lowercase and uppercase, and the result keeps whichever case both
+sides share. PHPantom's concatenation result only tracks emptiness,
+literal-ness and numeric-ness.
 
-It also shows as:
+**Fix:** track the case of each side next to its emptiness in
+`scalar_fold::concat_result` and add the accessories both sides promise.
 
-- Concatenating a union of literals is not folded into a union of literals
+**Cases** (PHPStan `nsrt/`): the `// SKIP` lines in `bug-11129.php` and
+`constant-string-unions.php`.
 
-**Fix:** fold concatenation over the cross product of literal operands, up to the same union size cap the other folds use.
+### B921. Concatenating a `bool` or a `float` is not seen to stay numeric
 
-**Cases** (PHPStan `nsrt/`, 23 assertions): `constant-string-unions.php` (17), `bug-11129.php` (6).
+**Impact: Low · Complexity: Low**
+
+```php
+$i . $bool;             // non-empty-string, should be non-empty-string&numeric-string
+$positiveInt . $bool;   // non-falsy-string, should be non-falsy-string&numeric-string
+$bool . $positiveInt;   // non-falsy-string, should be non-falsy-string&numeric-string
+$float . $positiveInt;  // non-falsy-string, should be non-falsy-string&numeric-string
+```
+
+A `bool` converts to `''` or `'1'`, so it continues an integer (or starts
+one), and a float followed by more digits is still a number. The numeric
+rule for `.` (`NumericConcat`) only knows integers, numeric strings and
+written-out literals on either side.
+
+**Fix:** teach `NumericConcat::of_lhs()` and `admits()` about `bool` and
+`float` operands the way PHPStan's `resolveConcatType()` does.
+
+**Cases** (PHPStan `nsrt/`): the `bool`/`float` `// SKIP` lines in
+`bug-11129.php`.
+
+### B922. Merging branches keeps literals a wider refined string already covers
+
+**Impact: Low · Complexity: Low**
+
+```php
+/** @param '1'|'2'|…|'17' $s @param 'a'|'b' $t @param non-empty-string $n */
+if (rand(0, 1)) { $s .= $suffix; }  // too many strings, generalized
+$s;  // '1'|'2'|…|'17'|(literal-string&non-falsy-string), should be literal-string&non-falsy-string
+
+$x = $t;
+if (rand(0, 1)) { $x = $n; }
+$x;  // string, should be non-empty-string
+```
+
+When the two sides of a branch merge, a literal that is a value of a refined
+string type on the other side (`literal-string&non-falsy-string`,
+`non-empty-string`) is kept next to it, or the whole union is widened to
+plain `string`. PHPStan's union normalization absorbs the literal into the
+wider type.
+
+**Fix:** absorb a literal string into a refined string member of the same
+union whose every accessory it satisfies, when the union is built.
+
+**Cases** (PHPStan `nsrt/`): `constant-string-unions.php` line 77.

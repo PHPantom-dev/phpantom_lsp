@@ -1,0 +1,24 @@
+// test: interpolation folds unions of literals and types the rest like concatenation
+// feature: hover
+// Each embedded union of known scalars multiplies the strings the result can
+// be. An embedded value that is not one of a few known scalars leaves the
+// string type joining the parts with `.` would give.
+// expect_hover: $pair => '.a.0.'|'.a.1.'|'.b.0.'|'.b.1.'
+// expect_hover: $flag => '..'|'.1.'
+// expect_hover: $prefixed => non-falsy-string
+// expect_hover: $literal => literal-string&non-falsy-string
+// expect_hover: $bare => string
+---
+<?php
+
+/** @param literal-string $kw */
+function test(bool $b, string $u, string $kw): void {
+    $str = rand() ? 'a' : 'b';
+    $int = rand() ? 1 : 0;
+    $pair = ".$str.$int.";
+    $flag = ".$b.";
+    $prefixed = "x{$u}";
+    $literal = "x{$kw}";
+    $bare = "$u";
+    $<>bare;
+}

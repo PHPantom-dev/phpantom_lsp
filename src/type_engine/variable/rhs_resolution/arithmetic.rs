@@ -112,9 +112,10 @@ pub(super) fn combine_with_lhs<'b>(
     lhs_types: Vec<ResolvedType>,
     ctx: &VarResolutionCtx<'_>,
 ) -> Vec<ResolvedType> {
-    // Concatenation: two operands that each hold one known scalar
-    // concatenate to the literal PHP would build (`'1' . 'a'` is `'1a'`).
-    // Otherwise a non-empty operand makes the result non-empty (`'x' . $u`).
+    // Concatenation: operands that each hold one of a few known scalars
+    // concatenate to the literals PHP would build (`'1' . ('a'|'b')` is
+    // `'1a'|'1b'`). Otherwise a non-empty operand makes the result
+    // non-empty (`'x' . $u`).
     if binary.operator.is_concatenation() {
         let foldable = scalar_fold::is_cheap_scalar_operand(binary.lhs)
             && scalar_fold::is_cheap_scalar_operand(binary.rhs);
@@ -125,12 +126,16 @@ pub(super) fn combine_with_lhs<'b>(
             ))];
         }
         let rhs_types = resolve_rhs_expression(binary.rhs, ctx);
-        let folded = scalar_fold::concat_operand_scalar(binary.lhs, &lhs_types)
-            .zip(scalar_fold::concat_operand_scalar(binary.rhs, &rhs_types))
-            .and_then(|(l, r)| scalar_fold::fold_concat(&l, &r));
-        return vec![ResolvedType::from_type_string(folded.unwrap_or_else(
-            || scalar_fold::concat_result(&lhs_types, || rhs_types),
-        ))];
+        let result = match scalar_fold::concat_operand_strings(binary.lhs, &lhs_types)
+            .zip(scalar_fold::concat_operand_strings(binary.rhs, &rhs_types))
+        {
+            Some((lhs, rhs)) => scalar_fold::concat_string_sets(&lhs, &rhs).map_or_else(
+                || scalar_fold::unfolded_concat_result(&lhs_types, &rhs_types),
+                scalar_fold::literal_strings_type,
+            ),
+            None => scalar_fold::unfolded_concat_result(&lhs_types, &rhs_types),
+        };
+        return vec![ResolvedType::from_type_string(result)];
     }
 
     let rhs_types = resolve_rhs_expression(binary.rhs, ctx);

@@ -234,19 +234,64 @@ pub(super) fn is_cheap_scalar_operand(expr: &Expression<'_>) -> bool {
     }
 }
 
-/// The one scalar a concatenation operand holds: a scalar its type pins,
-/// or the name `Foo::class` gives.  PHP resolves a class name written
-/// before `::class` at compile time, so it is one known string; the type,
-/// `class-string<Foo>`, also admits the names of subclasses, so the
-/// expression is read rather than the type.  `static::class` and
-/// `$object::class` name the runtime class, which is not known, and so does
-/// `self::class` in a trait.
-pub(super) fn concat_operand_scalar(
+/// How many strings a concatenation or interpolation may fold to before it
+/// answers with the general string type instead of listing them all.
+/// PHPStan's `CALCULATE_SCALARS_LIMIT`.
+const CONCAT_COMBINATION_LIMIT: usize = 128;
+
+/// Every string converting a value of the resolved operand gives, when the
+/// operand is a union of known scalars (`'a'|'b'`, `?'a'`, `bool`), or
+/// `None` when it admits a value that is not one known scalar.
+pub(super) fn operand_strings(types: &[ResolvedType]) -> Option<Vec<String>> {
+    fn collect(ty: &PhpType, out: &mut Vec<String>) -> Option<()> {
+        match ty.kind() {
+            TypeKind::Union(members) => {
+                for member in members.iter() {
+                    collect(member, out)?;
+                }
+            }
+            TypeKind::Nullable(inner) => {
+                out.push(String::new());
+                collect(inner, out)?;
+            }
+            TypeKind::Named(name)
+                if name.eq_ignore_ascii_case("bool") || name.eq_ignore_ascii_case("boolean") =>
+            {
+                out.push(String::new());
+                out.push("1".to_string());
+            }
+            _ => out.push(Scalar::from_type(ty)?.to_php_string()?),
+        }
+        Some(())
+    }
+    if types.is_empty() {
+        return None;
+    }
+    let mut out = Vec::new();
+    for resolved in types {
+        collect(&resolved.type_string, &mut out)?;
+        if out.len() > CONCAT_COMBINATION_LIMIT {
+            return None;
+        }
+    }
+    out.sort_unstable();
+    out.dedup();
+    Some(out)
+}
+
+/// Every string a concatenation operand converts to: the ones its type
+/// pins (see [`operand_strings`]), or the name `Foo::class` gives.  PHP
+/// resolves a class name written before `::class` at compile time, so it
+/// is one known string; the type, `class-string<Foo>`, also admits the
+/// names of subclasses, so the expression is read rather than the type.
+/// `static::class` and `$object::class` name the runtime class, which is
+/// not known, and so does `self::class` in a trait.
+pub(super) fn concat_operand_strings(
     expr: &Expression<'_>,
     types: &[ResolvedType],
-) -> Option<Scalar> {
-    if let Some(scalar) = single_scalar(types) {
-        return Some(scalar);
+) -> Option<Vec<String>> {
+    if let Some(strings) = operand_strings(types) {
+        return Some(strings);
     }
     let mut expr = expr;
     while let Expression::Parenthesized(inner) = expr {
@@ -268,7 +313,7 @@ pub(super) fn concat_operand_scalar(
     };
     match only.type_string.kind() {
         TypeKind::ClassString(Some(inner)) => match inner.kind() {
-            TypeKind::Named(name) => Some(Scalar::String(name.to_string())),
+            TypeKind::Named(name) => Some(vec![name.to_string()]),
             _ => None,
         },
         _ => None,
@@ -276,10 +321,106 @@ pub(super) fn concat_operand_scalar(
 }
 
 /// `lhs . rhs` for two known scalars.
-pub(super) fn fold_concat(lhs: &Scalar, rhs: &Scalar) -> Option<PhpType> {
+fn fold_concat(lhs: &Scalar, rhs: &Scalar) -> Option<PhpType> {
     let mut text = lhs.to_php_string()?;
     text.push_str(&rhs.to_php_string()?);
     Some(PhpType::literal_string_value(text))
+}
+
+/// Every string `lhs . rhs` can give, for operands that each convert to
+/// one of a known set of strings, or `None` when there are more than
+/// [`CONCAT_COMBINATION_LIMIT`] of them.
+pub(super) fn concat_string_sets(lhs: &[String], rhs: &[String]) -> Option<Vec<String>> {
+    if lhs.len() * rhs.len() > CONCAT_COMBINATION_LIMIT {
+        return None;
+    }
+    let mut joined: Vec<String> = lhs
+        .iter()
+        .flat_map(|left| rhs.iter().map(move |right| format!("{left}{right}")))
+        .collect();
+    joined.sort_unstable();
+    joined.dedup();
+    Some(joined)
+}
+
+/// Widen a loop-carried local whose literal strings grew from one entry of
+/// the loop body to the next, the way PHPStan's `generalizeWith()` does.
+///
+/// `$s .= 'x'` enters the body as `''`, then as `''|'x'`, and the loop may
+/// run any number of times, so the literals are replaced by the
+/// `literal-string` they all are, keeping what they promise about being
+/// empty. Every other alternative the local holds is kept.
+///
+/// Returns `None` when no new literal string appeared, or the widened
+/// types otherwise.
+pub(crate) fn widen_grown_strings(
+    previous: &[ResolvedType],
+    current: &[ResolvedType],
+) -> Option<Vec<ResolvedType>> {
+    let is_literal_string = |ty: &PhpType| matches!(ty.as_literal(), Some(LiteralValue::String(_)));
+    let literals_of = |types: &[ResolvedType]| -> Vec<PhpType> {
+        types
+            .iter()
+            .flat_map(|rt| rt.type_string.union_members())
+            .filter(|member| is_literal_string(member))
+            .cloned()
+            .collect()
+    };
+    let now = literals_of(current);
+    if now.is_empty() {
+        return None;
+    }
+    let before = literals_of(previous);
+    if now.iter().all(|literal| before.contains(literal)) {
+        return None;
+    }
+
+    let emptiness = now
+        .iter()
+        .map(StringEmptiness::of_type)
+        .min()
+        .unwrap_or(StringEmptiness::MaybeEmpty);
+    let widened = match emptiness {
+        StringEmptiness::NonFalsy => {
+            PhpType::intersection(vec![PhpType::literal_string(), PhpType::non_falsy_string()])
+        }
+        StringEmptiness::NonEmpty => PhpType::non_empty_literal_string(),
+        StringEmptiness::MaybeEmpty => PhpType::literal_string(),
+    };
+    let mut types = vec![ResolvedType::from_type_string(widened)];
+    for rt in current {
+        let members = rt.type_string.union_members();
+        if !members.iter().any(|member| is_literal_string(member)) {
+            types.push(rt.clone());
+            continue;
+        }
+        let rest: Vec<PhpType> = members
+            .into_iter()
+            .filter(|member| !is_literal_string(member))
+            .cloned()
+            .collect();
+        if !rest.is_empty() {
+            types.push(ResolvedType::from_type_string(PhpType::union(rest)));
+        }
+    }
+    Some(types)
+}
+
+/// The union of literal strings a set of known strings makes.
+pub(super) fn literal_strings_type(strings: Vec<String>) -> PhpType {
+    PhpType::union(
+        strings
+            .into_iter()
+            .map(PhpType::literal_string_value)
+            .collect(),
+    )
+}
+
+/// `lhs . rhs` folded over every pair of the values the operands can hold,
+/// or `None` when either holds a value that is not one known scalar, or
+/// there are too many pairs to list.
+fn fold_concat_operands(lhs: &[ResolvedType], rhs: &[ResolvedType]) -> Option<PhpType> {
+    concat_string_sets(&operand_strings(lhs)?, &operand_strings(rhs)?).map(literal_strings_type)
 }
 
 /// `lhs . rhs` for two types that each pin one scalar value, or `None` when
@@ -403,26 +544,37 @@ impl StringEmptiness {
     }
 }
 
-/// The string type `lhs . rhs` gives for operands that do not fold to one
-/// value. `rhs` is only resolved when the left side leaves the answer
-/// open: a non-falsy left side that is neither written out nor a number
-/// decides it alone.
+/// The string type `lhs . rhs` gives: the strings it can be when both
+/// operands are unions of known scalars, else the general string type.
+/// `rhs` is only resolved when the left side leaves the answer open: a
+/// non-falsy left side that is neither written out nor a number decides it
+/// alone.
 pub(super) fn concat_result(
     lhs: &[ResolvedType],
     rhs: impl FnOnce() -> Vec<ResolvedType>,
 ) -> PhpType {
-    let lhs_emptiness = StringEmptiness::of_operand(lhs);
-    let lhs_literal = is_literal_operand(lhs);
-    let lhs_numeric = NumericConcat::of_lhs(lhs);
-    if lhs_emptiness == StringEmptiness::NonFalsy && !lhs_literal && lhs_numeric.is_none() {
+    if !is_literal_operand(lhs)
+        && StringEmptiness::of_operand(lhs) == StringEmptiness::NonFalsy
+        && NumericConcat::of_lhs(lhs).is_none()
+    {
         return PhpType::non_falsy_string();
     }
     let rhs = rhs();
+    if let Some(folded) = fold_concat_operands(lhs, &rhs) {
+        return folded;
+    }
+    unfolded_concat_result(lhs, &rhs)
+}
+
+/// The string type `lhs . rhs` gives without listing the strings it can
+/// be.
+pub(super) fn unfolded_concat_result(lhs: &[ResolvedType], rhs: &[ResolvedType]) -> PhpType {
+    let lhs_numeric = NumericConcat::of_lhs(lhs);
     StringEmptiness::concat_type(
-        lhs_emptiness,
-        StringEmptiness::of_operand(&rhs),
-        lhs_literal && is_literal_operand(&rhs),
-        lhs_numeric.is_some_and(|rule| rule.admits(&rhs)),
+        StringEmptiness::of_operand(lhs),
+        StringEmptiness::of_operand(rhs),
+        is_literal_operand(lhs) && is_literal_operand(rhs),
+        lhs_numeric.is_some_and(|rule| rule.admits(rhs)),
     )
 }
 
@@ -539,32 +691,70 @@ impl NumericConcat {
     }
 }
 
-/// An interpolated string (`"$a-$b"`, a heredoc) whose every embedded
-/// expression folds to a known scalar. `resolve` is only asked about
-/// expressions [`is_cheap_scalar_operand`] accepts.
-pub(super) fn fold_interpolated<'b>(
+/// The type of an interpolated string (`"$a-$b"`, a heredoc): every string
+/// it can build while each embedded expression is a union of known scalars
+/// and there are few enough of them, else the string type joining its parts
+/// with `.` gives. `resolve` is only asked about expressions
+/// [`is_cheap_scalar_operand`] accepts; any other part counts as an unknown
+/// string.
+pub(super) fn interpolated_type<'b>(
     string: &'b CompositeString<'b>,
     mut resolve: impl FnMut(&'b Expression<'b>) -> Vec<ResolvedType>,
-) -> Option<PhpType> {
-    if matches!(string, CompositeString::ShellExecute(_)) {
-        return None;
+) -> PhpType {
+    /// What is known about the parts joined so far.
+    enum Joined {
+        /// Every string they can be.
+        Strings(Vec<String>),
+        /// Only their type.
+        General(PhpType),
     }
-    let mut text = String::new();
+    let mut joined = Joined::Strings(vec![String::new()]);
     for part in string.parts().iter() {
-        let expression = match part {
+        let part_types = match part {
             StringPart::Literal(literal) => {
-                text.push_str(bytes_to_str(literal.value?));
-                continue;
+                let Some(value) = literal.value else {
+                    return PhpType::string();
+                };
+                let literal = bytes_to_str(value);
+                if let Joined::Strings(texts) = &mut joined {
+                    for text in texts {
+                        text.push_str(literal);
+                    }
+                    continue;
+                }
+                vec![ResolvedType::from_type_string(
+                    PhpType::literal_string_value(literal),
+                )]
             }
-            StringPart::Expression(expression) => expression,
-            StringPart::BracedExpression(braced) => braced.expression,
+            StringPart::Expression(expression) if is_cheap_scalar_operand(expression) => {
+                resolve(expression)
+            }
+            StringPart::BracedExpression(braced) if is_cheap_scalar_operand(braced.expression) => {
+                resolve(braced.expression)
+            }
+            StringPart::Expression(_) | StringPart::BracedExpression(_) => Vec::new(),
         };
-        if !is_cheap_scalar_operand(expression) {
-            return None;
-        }
-        text.push_str(&single_scalar(&resolve(expression))?.to_php_string()?);
+        let lhs = match joined {
+            Joined::Strings(texts) => {
+                if let Some(product) = operand_strings(&part_types)
+                    .and_then(|values| concat_string_sets(&texts, &values))
+                {
+                    joined = Joined::Strings(product);
+                    continue;
+                }
+                literal_strings_type(texts)
+            }
+            Joined::General(lhs) => lhs,
+        };
+        joined = Joined::General(unfolded_concat_result(
+            &[ResolvedType::from_type_string(lhs)],
+            &part_types,
+        ));
     }
-    Some(PhpType::literal_string_value(text))
+    match joined {
+        Joined::Strings(texts) => literal_strings_type(texts),
+        Joined::General(ty) => ty,
+    }
 }
 
 /// The value a cast of a known scalar produces, for the casts that have
