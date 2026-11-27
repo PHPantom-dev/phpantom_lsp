@@ -2160,17 +2160,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b892-magic-child-and-attribute-access-on-simplexmlelement-is-not-nullable-and-on-a-subclass-it-has-no-type" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B892. Magic child and attribute access on <code>SimpleXMLElement</code> is not nullable, and on a subclass it has no type
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -3947,17 +3936,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b892-magic-child-and-attribute-access-on-simplexmlelement-is-not-nullable-and-on-a-subclass-it-has-no-type" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B892. Magic child and attribute access on <code>SimpleXMLElement</code> is not nullable, and on a subclass it has no type
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -5398,15 +5376,6 @@ completion goes through the same path. <code>// SKIP</code> lines in
 </ul>
 <p><strong>Fix:</strong> fold concatenation over the cross product of literal operands, up to the same union size cap the other folds use.</p>
 <p><strong>Cases</strong> (PHPStan <code>nsrt/</code>, 23 assertions): <code>constant-string-unions.php</code> (17), <code>bug-11129.php</code> (6).</p>
-<h3 id="b892-magic-child-and-attribute-access-on-simplexmlelement-is-not-nullable-and-on-a-subclass-it-has-no-type">B892. Magic child and attribute access on <code>SimpleXMLElement</code> is not nullable, and on a subclass it has no type<a class="headerlink" href="#b892-magic-child-and-attribute-access-on-simplexmlelement-is-not-nullable-and-on-a-subclass-it-has-no-type" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-101-1" name="__codelineno-101-1" href="#__codelineno-101-1"></a><span class="x">$xml-&gt;foo;          // got SimpleXMLElement, should be SimpleXMLElement|null</span>
-<a id="__codelineno-101-2" name="__codelineno-101-2" href="#__codelineno-101-2"></a><span class="x">$item['name'];      // got static(SimpleXMLElement), should be SimpleXMLElement|null</span>
-<a id="__codelineno-101-3" name="__codelineno-101-3" href="#__codelineno-101-3"></a><span class="x">class Bar extends SimpleXMLElement {}</span>
-<a id="__codelineno-101-4" name="__codelineno-101-4" href="#__codelineno-101-4"></a><span class="x">/** @var Bar $b */ $b-&gt;item; // got nothing, should be Bar|null</span>
-</code></pre></div>
-<p>Two parts: the nullability PHPStan gives magic element/attribute reads, and a user subclass of SimpleXMLElement losing its magic child access entirely (foreach over it gives mixed).</p>
-<p><strong>Cases</strong> (PHPStan <code>nsrt/</code>, 11 assertions): <code>simplexml.php</code> (8), <code>bug-9575.php</code> (3).</p>
 
 
 
