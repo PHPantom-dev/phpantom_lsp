@@ -455,6 +455,8 @@ impl<'ast, 'arena> ThrowSiteSink<'ast, 'arena> for Collect<'_, '_> {
 struct ThrowSiteWalker;
 
 impl<'ast, 'arena, S: ThrowSiteSink<'ast, 'arena>> Walker<'ast, 'arena, S> for ThrowSiteWalker {
+    crate::ast_walk::iterative_binary_walk!(S);
+
     fn walk_closure(&self, _: &'ast Closure<'arena>, _: &mut S) {}
     fn walk_arrow_function(&self, _: &'ast ArrowFunction<'arena>, _: &mut S) {}
     fn walk_function(&self, _: &'ast Function<'arena>, _: &mut S) {}

@@ -73,6 +73,8 @@ fn declaration_spans(content: &str) -> Vec<(u32, u32)> {
         spans.push((span.start.offset, span.end.offset));
     }
     impl<'ast, 'arena> Walker<'ast, 'arena, Vec<(u32, u32)>> for Spans {
+        crate::ast_walk::iterative_binary_walk!(Vec<(u32, u32)>);
+
         fn walk_in_class(&self, node: &'ast Class<'arena>, spans: &mut Vec<(u32, u32)>) {
             push(spans, node);
         }

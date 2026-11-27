@@ -4,6 +4,8 @@ use super::*;
 pub(crate) fn variables_named_by(expr: &Expression<'_>) -> Vec<Atom> {
     struct NamedVariables;
     impl<'ast, 'arena> mago_syntax::walker::Walker<'ast, 'arena, Vec<Atom>> for NamedVariables {
+        crate::ast_walk::iterative_binary_walk!(Vec<Atom>);
+
         fn walk_in_expression(&self, node: &'ast Expression<'arena>, names: &mut Vec<Atom>) {
             if let Expression::Variable(Variable::Direct(dv)) = node {
                 let name = atom(bytes_to_str(dv.name));

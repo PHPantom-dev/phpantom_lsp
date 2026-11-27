@@ -153,6 +153,8 @@ struct WriteWalker<'c> {
 }
 
 impl<'ast, 'arena> mago_syntax::walker::Walker<'ast, 'arena, FileWrites> for WriteWalker<'_> {
+    crate::ast_walk::iterative_binary_walk!(FileWrites);
+
     fn walk_in_expression(&self, node: &'ast Expression<'arena>, ctx: &mut FileWrites) {
         match node {
             Expression::Assignment(assign) => record_target(assign.lhs, WriteForm::Modify, ctx),

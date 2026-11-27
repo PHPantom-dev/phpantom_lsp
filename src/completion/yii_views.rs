@@ -267,6 +267,8 @@ struct ViewBaseWalker {
 impl<'ast, 'arena> mago_syntax::walker::Walker<'ast, 'arena, ViewBaseFinder<'ast, 'arena>>
     for ViewBaseWalker
 {
+    crate::ast_walk::iterative_binary_walk!(ViewBaseFinder<'ast, 'arena>);
+
     fn walk_in_class(&self, node: &'ast Class<'arena>, found: &mut ViewBaseFinder<'ast, 'arena>) {
         let span = node.span();
         if span.start.offset <= self.quote && self.quote < span.end.offset {

@@ -402,6 +402,8 @@ struct ConfigCalls<'ast, 'arena> {
     assignments: BTreeMap<u32, &'ast Expression<'arena>>,
 }
 impl<'ast, 'arena> Walker<'ast, 'arena, ConfigCalls<'ast, 'arena>> for Calls {
+    crate::ast_walk::iterative_binary_walk!(ConfigCalls<'ast, 'arena>);
+
     fn walk_in_expression(
         &self,
         expr: &'ast Expression<'arena>,

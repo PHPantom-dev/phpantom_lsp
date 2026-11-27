@@ -277,6 +277,7 @@ impl Drop for PurgeThreadHeapOnDrop {
 }
 
 pub mod analyse;
+pub(crate) mod ast_walk;
 pub mod atom;
 mod backend;
 pub mod benevolent_builtins;

@@ -98,6 +98,8 @@ struct ConfigDirMethod<'a> {
 }
 
 impl<'ast, 'arena> Walker<'ast, 'arena, Option<ConfigDir>> for ConfigDirMethod<'_> {
+    crate::ast_walk::iterative_binary_walk!(Option<ConfigDir>);
+
     fn walk_in_method(&self, node: &'ast Method<'arena>, found: &mut Option<ConfigDir>) {
         if node.name.span.start.offset != self.name_offset {
             return;

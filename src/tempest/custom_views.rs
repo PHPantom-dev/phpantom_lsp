@@ -181,6 +181,8 @@ fn is_this(expr: &Expression<'_>) -> bool {
 struct ViewValues;
 
 impl<'ast, 'arena> Walker<'ast, 'arena, Vec<Value<'ast, 'arena>>> for ViewValues {
+    crate::ast_walk::iterative_binary_walk!(Vec<Value<'ast, 'arena>>);
+
     fn walk_in_assignment(
         &self,
         assignment: &'ast Assignment<'arena>,

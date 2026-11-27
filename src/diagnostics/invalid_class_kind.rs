@@ -249,6 +249,8 @@ struct VariableInstantiationWalker;
 impl<'ast, 'arena> mago_syntax::walker::Walker<'ast, 'arena, Vec<VariableInstantiation>>
     for VariableInstantiationWalker
 {
+    crate::ast_walk::iterative_binary_walk!(Vec<VariableInstantiation>);
+
     fn walk_in_instantiation(
         &self,
         node: &'ast Instantiation<'arena>,

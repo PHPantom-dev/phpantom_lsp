@@ -236,6 +236,8 @@ pub(crate) fn php_connections(
         names: &'n OwnedResolvedNames,
     }
     impl<'ast, 'arena> mago_syntax::walker::Walker<'ast, 'arena, Vec<Connection>> for Calls<'_> {
+        crate::ast_walk::iterative_binary_walk!(Vec<Connection>);
+
         fn walk_in_static_method_call(
             &self,
             node: &'ast StaticMethodCall<'arena>,

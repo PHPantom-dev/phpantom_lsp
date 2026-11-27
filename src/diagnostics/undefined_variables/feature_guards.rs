@@ -37,6 +37,8 @@ pub(super) fn has_dynamic_variables(body: ScopeBody<'_, '_>) -> bool {
 struct DynamicVariableWalker;
 
 impl<'ast, 'arena> Walker<'ast, 'arena, bool> for DynamicVariableWalker {
+    crate::ast_walk::iterative_binary_walk!(bool);
+
     fn walk_in_indirect_variable(&self, _node: &'ast IndirectVariable<'arena>, context: &mut bool) {
         *context = true;
     }
@@ -92,6 +94,8 @@ fn has_named_call(body: ScopeBody<'_, '_>, name: &'static [u8]) -> bool {
 struct NamedCallWalker(&'static [u8]);
 
 impl<'ast, 'arena> Walker<'ast, 'arena, bool> for NamedCallWalker {
+    crate::ast_walk::iterative_binary_walk!(bool);
+
     fn walk_in_function_call(&self, node: &'ast FunctionCall<'arena>, context: &mut bool) {
         if is_named_call(node, self.0) {
             *context = true;
@@ -115,6 +119,8 @@ pub(crate) fn collect_compact_vars(body: ScopeBody<'_, '_>) -> HashSet<String> {
 struct CompactWalker;
 
 impl<'ast, 'arena> Walker<'ast, 'arena, HashSet<String>> for CompactWalker {
+    crate::ast_walk::iterative_binary_walk!(HashSet<String>);
+
     fn walk_in_function_call(
         &self,
         node: &'ast FunctionCall<'arena>,
@@ -224,6 +230,8 @@ pub(crate) fn collect_import_offsets(body: ScopeBody<'_, '_>) -> Vec<u32> {
 struct ImportWalker;
 
 impl<'ast, 'arena> Walker<'ast, 'arena, Vec<u32>> for ImportWalker {
+    crate::ast_walk::iterative_binary_walk!(Vec<u32>);
+
     fn walk_in_construct(&self, node: &'ast Construct<'arena>, context: &mut Vec<u32>) {
         if node.is_import() {
             context.push(node.span().start.offset);

@@ -234,6 +234,8 @@ impl Site<'_, '_, '_> {
 struct SiteFinder;
 
 impl<'ast, 'arena, 's> Walker<'ast, 'arena, Site<'ast, 'arena, 's>> for SiteFinder {
+    crate::ast_walk::iterative_binary_walk!(Site<'ast, 'arena, 's>);
+
     fn walk_in_function(
         &self,
         function: &'ast Function<'arena>,
@@ -371,6 +373,8 @@ macro_rules! count_enclosing_loop {
 }
 
 impl<'ast, 'arena, 'n> Walker<'ast, 'arena, Writes<'ast, 'arena, 'n>> for WriteCollector {
+    crate::ast_walk::iterative_binary_walk!(Writes<'ast, 'arena, 'n>);
+
     fn walk_closure(&self, _: &'ast Closure<'arena>, _: &mut Writes<'ast, 'arena, 'n>) {}
     fn walk_arrow_function(
         &self,

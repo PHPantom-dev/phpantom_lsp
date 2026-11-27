@@ -607,6 +607,8 @@ type Forwarded<'ast, 'arena> = Vec<(&'ast Expression<'arena>, &'ast str, usize)>
 impl<'ast, 'arena> mago_syntax::walker::Walker<'ast, 'arena, Forwarded<'ast, 'arena>>
     for ForwardFinder<'_>
 {
+    crate::ast_walk::iterative_binary_walk!(Forwarded<'ast, 'arena>);
+
     fn walk_in_method_call(
         &self,
         node: &'ast MethodCall<'arena>,
@@ -814,6 +816,8 @@ impl<'ast, 'arena, 'w, 'sites>
     mago_syntax::walker::Walker<'ast, 'arena, CollectCtx<'w, 'ast, 'arena, 'sites>>
     for ReceiverCallWalker<'_, 'sites>
 {
+    crate::ast_walk::iterative_binary_walk!(CollectCtx<'w, 'ast, 'arena, 'sites>);
+
     fn walk_in_call(
         &self,
         node: &'ast Call<'arena>,

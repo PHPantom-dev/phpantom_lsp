@@ -353,6 +353,8 @@ struct OwnYields;
 impl<'ast, 'arena: 'ast, F: FnMut(&'ast mago_syntax::cst::Yield<'arena>)>
     mago_syntax::walker::Walker<'ast, 'arena, F> for OwnYields
 {
+    crate::ast_walk::iterative_binary_walk!(F);
+
     fn walk_closure(&self, _: &'ast mago_syntax::cst::Closure<'arena>, _: &mut F) {}
     fn walk_arrow_function(&self, _: &'ast mago_syntax::cst::ArrowFunction<'arena>, _: &mut F) {}
     fn walk_function(&self, _: &'ast mago_syntax::cst::Function<'arena>, _: &mut F) {}

@@ -225,6 +225,8 @@ impl Backend {
 struct MatchCollector;
 
 impl<'ast, 'arena> Walker<'ast, 'arena, MatchSites<'ast, 'arena>> for MatchCollector {
+    crate::ast_walk::iterative_binary_walk!(MatchSites<'ast, 'arena>);
+
     fn walk_in_try(&self, try_statement: &'ast Try<'arena>, sites: &mut MatchSites<'ast, 'arena>) {
         if !try_statement.catch_clauses.is_empty() {
             sites.tries.push(try_statement);

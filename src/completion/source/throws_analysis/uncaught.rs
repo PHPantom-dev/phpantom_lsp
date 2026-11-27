@@ -266,6 +266,8 @@ impl<'ast, 'arena> DocumentedFunction<'_, 'ast, 'arena> {
 struct FindDocumented;
 
 impl<'ast, 'arena> Walker<'ast, 'arena, DocumentedFunction<'_, 'ast, 'arena>> for FindDocumented {
+    crate::ast_walk::iterative_binary_walk!(DocumentedFunction<'_, 'ast, 'arena>);
+
     fn walk_in_function(
         &self,
         function: &'ast Function<'arena>,

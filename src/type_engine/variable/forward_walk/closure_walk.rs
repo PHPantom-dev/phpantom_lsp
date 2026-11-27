@@ -459,6 +459,8 @@ impl ClosureFinder {
 }
 
 impl<'ast, 'arena> mago_syntax::walker::Walker<'ast, 'arena, Option<u32>> for ClosureFinder {
+    crate::ast_walk::iterative_binary_walk!(Option<u32>);
+
     fn walk_closure(&self, closure: &'ast Closure<'arena>, last_end: &mut Option<u32>) {
         Self::found(closure.span().end.offset, last_end);
     }

@@ -321,6 +321,8 @@ impl<'ast, 'arena, 'w>
     mago_syntax::walker::Walker<'ast, 'arena, ExpressionCollectCtx<'w, 'ast, 'arena>>
     for ExpressionAtOffsetWalker<'_>
 {
+    crate::ast_walk::iterative_binary_walk!(ExpressionCollectCtx<'w, 'ast, 'arena>);
+
     fn walk_in_expression(
         &self,
         node: &'ast Expression<'arena>,

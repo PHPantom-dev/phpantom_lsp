@@ -154,6 +154,8 @@ struct CloneWithWalker;
 impl<'ast, 'arena> mago_syntax::walker::Walker<'ast, 'arena, PropertyCheckCtx<'_>>
     for CloneWithWalker
 {
+    crate::ast_walk::iterative_binary_walk!(PropertyCheckCtx<'_>);
+
     fn walk_in_function_call(
         &self,
         node: &'ast FunctionCall<'arena>,

@@ -205,6 +205,8 @@ fn invoke_closure_literal_held_by(
 struct ClosureAtOffset(u32);
 
 impl<'ast, 'arena> Walker<'ast, 'arena, Option<&'ast Closure<'arena>>> for ClosureAtOffset {
+    crate::ast_walk::iterative_binary_walk!(Option<&'ast Closure<'arena>>);
+
     fn walk_in_closure(
         &self,
         closure: &'ast Closure<'arena>,

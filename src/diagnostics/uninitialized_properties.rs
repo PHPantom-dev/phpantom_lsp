@@ -445,6 +445,8 @@ pub(super) fn marks_injected(docblock: &str) -> bool {
 struct BodyWalker;
 
 impl<'ast, 'arena, 'a> mago_syntax::walker::Walker<'ast, 'arena, FileBodies<'a>> for BodyWalker {
+    crate::ast_walk::iterative_binary_walk!(FileBodies<'a>);
+
     fn walk_in_class(&self, node: &'ast Class<'arena>, ctx: &mut FileBodies<'a>) {
         ctx.open_body(
             node.left_brace.start.offset,

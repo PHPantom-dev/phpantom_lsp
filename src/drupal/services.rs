@@ -246,6 +246,8 @@ impl Collector<'_> {
 }
 
 impl<'ast, 'arena> mago_syntax::walker::Walker<'ast, 'arena, Collected> for Collector<'_> {
+    crate::ast_walk::iterative_binary_walk!(Collected);
+
     fn walk_in_method_call(&self, call: &'ast MethodCall<'arena>, found: &mut Collected) {
         self.setter_call(&call.method, &call.argument_list, found);
     }

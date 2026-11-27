@@ -47,6 +47,8 @@ pub(crate) fn scope_body_reads_func_args(body: crate::scope_collector::ScopeBody
 struct FuncArgsWalker;
 
 impl<'ast, 'arena> mago_syntax::walker::Walker<'ast, 'arena, bool> for FuncArgsWalker {
+    crate::ast_walk::iterative_binary_walk!(bool);
+
     fn walk_in_function_call(&self, call: &'ast FunctionCall<'arena>, found: &mut bool) {
         if let Expression::Identifier(ident) = call.function {
             let name = bytes_to_str(ident.value());

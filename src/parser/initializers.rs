@@ -22,6 +22,8 @@ pub(crate) fn expand_file_constants(expression: &str, uri: &str) -> Option<Strin
     use mago_syntax::{cst::MagicConstant, walker::Walker};
     struct Constants;
     impl<'ast, 'arena> Walker<'ast, 'arena, Vec<(usize, usize, bool)>> for Constants {
+        crate::ast_walk::iterative_binary_walk!(Vec<(usize, usize, bool)>);
+
         fn walk_in_magic_constant(
             &self,
             magic: &'ast MagicConstant<'arena>,
@@ -368,6 +370,8 @@ fn constant_names(expression: &str) -> Vec<(usize, usize, bool)> {
     };
     struct Names;
     impl<'ast, 'arena> Walker<'ast, 'arena, Vec<(usize, usize, bool)>> for Names {
+        crate::ast_walk::iterative_binary_walk!(Vec<(usize, usize, bool)>);
+
         fn walk_in_constant_access(
             &self,
             access: &'ast ConstantAccess<'arena>,

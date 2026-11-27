@@ -146,6 +146,8 @@ impl Backend {
 struct OperandCollector;
 
 impl<'ast, 'arena> Walker<'ast, 'arena, Vec<&'ast Expression<'arena>>> for OperandCollector {
+    crate::ast_walk::iterative_binary_walk!(Vec<&'ast Expression<'arena>>);
+
     fn walk_in_echo(&self, echo: &'ast Echo<'arena>, operands: &mut Vec<&'ast Expression<'arena>>) {
         operands.extend(echo.values.iter().copied().filter(|e| may_be_object(e)));
     }

@@ -143,6 +143,8 @@ struct Lists<'a> {
 struct ListFinder;
 
 impl<'ast, 'arena> Walker<'ast, 'arena, Lists<'_>> for ListFinder {
+    crate::ast_walk::iterative_binary_walk!(Lists<'_>);
+
     fn walk_in_block(&self, node: &'ast Block<'arena>, ctx: &mut Lists<'_>) {
         scan_statements(&node.statements, ctx);
     }
@@ -592,7 +594,9 @@ impl<'ast, 'arena> Walker<'ast, 'arena, ScanState<'_>> for Scan {
             self.guarded(node.lhs, ctx);
             self.walk_expression(node.rhs, ctx);
         } else {
-            mago_syntax::walker::walk_binary(self, node, ctx);
+            crate::ast_walk::walk_binary_descending(self, node, ctx, |inner| {
+                !matches!(inner.operator, BinaryOperator::NullCoalesce(_))
+            });
         }
     }
 
@@ -815,6 +819,8 @@ impl<'ast, 'arena> Walker<'ast, 'arena, ScanState<'_>> for Scan {
 struct AliasFinder;
 
 impl<'ast, 'arena> Walker<'ast, 'arena, HashSet<Vec<u8>>> for AliasFinder {
+    crate::ast_walk::iterative_binary_walk!(HashSet<Vec<u8>>);
+
     fn walk_in_unary_prefix(&self, node: &'ast UnaryPrefix<'arena>, ctx: &mut HashSet<Vec<u8>>) {
         if node.operator.is_reference()
             && let Expression::Variable(Variable::Direct(variable)) = node.operand

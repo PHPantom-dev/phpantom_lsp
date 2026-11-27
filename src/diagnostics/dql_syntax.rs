@@ -704,6 +704,8 @@ impl CallFinder {
 impl<'ast, 'arena, 'w> mago_syntax::walker::Walker<'ast, 'arena, Calls<'w, 'ast, 'arena>>
     for CallFinder
 {
+    crate::ast_walk::iterative_binary_walk!(Calls<'w, 'ast, 'arena>);
+
     fn walk_in_method_call(
         &self,
         node: &'ast MethodCall<'arena>,

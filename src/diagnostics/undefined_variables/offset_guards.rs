@@ -93,6 +93,8 @@ struct SuppressedCtx {
 struct SuppressedWalker;
 
 impl<'ast, 'arena> Walker<'ast, 'arena, SuppressedCtx> for SuppressedWalker {
+    crate::ast_walk::iterative_binary_walk!(SuppressedCtx);
+
     fn walk_unary_prefix(&self, node: &'ast UnaryPrefix<'arena>, context: &mut SuppressedCtx) {
         if node.operator.is_error_control() {
             context.error_depth += 1;
@@ -129,6 +131,8 @@ pub(super) fn collect_guarded_offsets(body: ScopeBody<'_, '_>) -> HashSet<u32> {
 struct GuardedWalker;
 
 impl<'ast, 'arena> Walker<'ast, 'arena, HashSet<u32>> for GuardedWalker {
+    crate::ast_walk::iterative_binary_walk!(HashSet<u32>);
+
     fn walk_in_isset_construct(
         &self,
         node: &'ast IssetConstruct<'arena>,
@@ -209,6 +213,8 @@ struct ShortCircuitState {
 }
 
 impl<'ast, 'arena> Walker<'ast, 'arena, ShortCircuitState> for ShortCircuitWalker {
+    crate::ast_walk::iterative_binary_walk!(ShortCircuitState);
+
     fn walk_in_binary(&self, node: &'ast Binary<'arena>, context: &mut ShortCircuitState) {
         let is_or = match node.operator {
             BinaryOperator::And(_) | BinaryOperator::LowAnd(_) => false,
@@ -365,6 +371,8 @@ impl IssetRegionWalker {
 }
 
 impl<'ast, 'arena> Walker<'ast, 'arena, Vec<IssetGuardedRegion>> for IssetRegionWalker {
+    crate::ast_walk::iterative_binary_walk!(Vec<IssetGuardedRegion>);
+
     fn walk_in_if(&self, node: &'ast If<'arena>, context: &mut Vec<IssetGuardedRegion>) {
         match &node.body {
             IfBody::Statement(body) => {
@@ -463,6 +471,8 @@ struct VarNameOffsetCtx<'n> {
 struct VarNameOffsetWalker;
 
 impl<'ast, 'arena, 'n> Walker<'ast, 'arena, VarNameOffsetCtx<'n>> for VarNameOffsetWalker {
+    crate::ast_walk::iterative_binary_walk!(VarNameOffsetCtx<'n>);
+
     fn walk_in_direct_variable(
         &self,
         node: &'ast DirectVariable<'arena>,

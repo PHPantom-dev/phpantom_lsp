@@ -21,18 +21,7 @@ surfaced: one entry is one root cause, however many shapes it shows up in.
 
 ## Crashes
 
-### B916. Long operator chains overflow the stack in release builds
-
-**Impact: Medium · Complexity: Medium**
-
-`crash_sandbox::generated_length_operator_chains_do_not_overflow` and
-its `_framework_scanners` twin abort with a stack overflow under
-`cargo nextest run --release`, while both pass in the debug profile. The
-input is a function with 20,000-operand `+`, `&&`, `||` and `.` chains,
-analysed on a thread sized `PARSE_WORKER_STACK_SIZE`. Something that
-walks the chain still recurses once per operator, and the release
-build's frame sizes (inlining merges frames) run out of stack first.
-Find the walker that recurses on the left operand and make it iterate.
+No outstanding items.
 
 ## Type comparison
 

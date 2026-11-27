@@ -397,6 +397,8 @@ impl MessageSourceFinder<'_> {
 impl<'ast, 'arena> mago_syntax::walker::Walker<'ast, 'arena, Vec<PathBuf>>
     for MessageSourceFinder<'_>
 {
+    crate::ast_walk::iterative_binary_walk!(Vec<PathBuf>);
+
     fn walk_in_instantiation(&self, node: &'ast Instantiation<'arena>, out: &mut Vec<PathBuf>) {
         if !self.is_message_source(node.class) {
             return;

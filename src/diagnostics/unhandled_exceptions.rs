@@ -76,6 +76,8 @@ impl<'ast, 'arena> Found<'ast, 'arena> {
 }
 
 impl<'ast, 'arena> Walker<'ast, 'arena, Found<'ast, 'arena>> for CollectFunctionLikes<'_> {
+    crate::ast_walk::iterative_binary_walk!(Found<'ast, 'arena>);
+
     fn walk_in_function(&self, function: &'ast Function<'arena>, found: &mut Found<'ast, 'arena>) {
         found.push(self.content, function, &function.body);
     }

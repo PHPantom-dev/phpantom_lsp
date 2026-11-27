@@ -135,6 +135,8 @@ impl Backend {
 struct DestructuringCollector;
 
 impl<'ast, 'arena> Walker<'ast, 'arena, Vec<&'ast Assignment<'arena>>> for DestructuringCollector {
+    crate::ast_walk::iterative_binary_walk!(Vec<&'ast Assignment<'arena>>);
+
     fn walk_in_assignment(
         &self,
         assignment: &'ast Assignment<'arena>,

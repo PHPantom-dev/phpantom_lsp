@@ -27,6 +27,8 @@ struct AnonymousClassWalker<'a, 'd> {
 }
 
 impl<'a, 'd> Walker<'a, 'a, Vec<ClassInfo>> for AnonymousClassWalker<'a, 'd> {
+    crate::ast_walk::iterative_binary_walk!('a, 'a, Vec<ClassInfo>);
+
     fn walk_in_anonymous_class(&self, node: &'a AnonymousClass<'a>, classes: &mut Vec<ClassInfo>) {
         classes.push(Backend::extract_anonymous_class_info(node, self.doc_ctx));
     }

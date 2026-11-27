@@ -190,6 +190,8 @@ fn string_range(expr: &Expression<'_>) -> Option<(u32, u32)> {
 impl<'ast, 'arena> mago_syntax::walker::Walker<'ast, 'arena, Vec<GroupString<'ast, 'arena>>>
     for GroupFinder<'_>
 {
+    crate::ast_walk::iterative_binary_walk!(Vec<GroupString<'ast, 'arena>>);
+
     fn walk_in_attribute(
         &self,
         node: &'ast Attribute<'arena>,

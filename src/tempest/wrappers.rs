@@ -240,6 +240,8 @@ fn method<'a>(
 pub(super) fn declaration(program: &Program<'_>, offset: u32) -> Option<(u32, u32)> {
     struct Finder;
     impl<'ast, 'arena> Walker<'ast, 'arena, (u32, Option<(u32, u32)>)> for Finder {
+        crate::ast_walk::iterative_binary_walk!((u32, Option<(u32, u32)>));
+
         fn walk_in_function(
             &self,
             node: &'ast Function<'arena>,

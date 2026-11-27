@@ -632,6 +632,8 @@ fn item_removal(
 struct UsageWalker;
 
 impl<'ast, 'arena, 'a> mago_syntax::walker::Walker<'ast, 'arena, Scan<'a>> for UsageWalker {
+    crate::ast_walk::iterative_binary_walk!(Scan<'a>);
+
     fn walk_in_class(&self, node: &'ast Class<'arena>, ctx: &mut Scan<'a>) {
         ctx.open_body(node.left_brace.start.offset, &node.members);
     }

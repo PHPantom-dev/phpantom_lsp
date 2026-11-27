@@ -112,6 +112,8 @@ impl SelectorCheck<'_> {
 struct SelectorWalker;
 
 impl<'ast, 'arena> Walker<'ast, 'arena, SelectorCheck<'_>> for SelectorWalker {
+    crate::ast_walk::iterative_binary_walk!(SelectorCheck<'_>);
+
     fn walk_in_property_access(
         &self,
         node: &'ast PropertyAccess<'arena>,

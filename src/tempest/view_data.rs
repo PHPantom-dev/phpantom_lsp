@@ -435,6 +435,8 @@ pub(super) fn call_target(
 struct Calls;
 
 impl<'ast, 'arena> Walker<'ast, 'arena, Vec<&'ast Expression<'arena>>> for Calls {
+    crate::ast_walk::iterative_binary_walk!(Vec<&'ast Expression<'arena>>);
+
     fn walk_in_expression(
         &self,
         expr: &'ast Expression<'arena>,

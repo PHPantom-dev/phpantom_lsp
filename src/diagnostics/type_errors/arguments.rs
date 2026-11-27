@@ -263,6 +263,8 @@ struct CallArgWalker<'s> {
 }
 
 impl<'a, 's> Walker<'a, 'a, ArgExpressions<'a>> for CallArgWalker<'s> {
+    crate::ast_walk::iterative_binary_walk!('a, 'a, ArgExpressions<'a>);
+
     fn walk_in_argument_list(
         &self,
         node: &'a mago_syntax::cst::argument::ArgumentList<'a>,

@@ -103,6 +103,8 @@ struct DefinitionArrays<'s> {
 type FoundDefinitions<'a> = Vec<(&'a TokenSeparatedSequence<'a, ArrayElement<'a>>, Atom)>;
 
 impl<'a> Walker<'a, 'a, FoundDefinitions<'a>> for DefinitionArrays<'_> {
+    crate::ast_walk::iterative_binary_walk!('a, 'a, FoundDefinitions<'a>);
+
     fn walk_in_array(&self, array: &'a Array<'a>, found: &mut FoundDefinitions<'a>) {
         if let Some(class) = self.classes.get(&array.span().start.offset) {
             found.push((&array.elements, *class));

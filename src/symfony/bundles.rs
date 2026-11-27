@@ -133,6 +133,8 @@ struct ConfiguratorCalls;
 impl<'ast, 'arena> mago_syntax::walker::Walker<'ast, 'arena, HashMap<u32, StringKeyKind>>
     for ConfiguratorCalls
 {
+    crate::ast_walk::iterative_binary_walk!(HashMap<u32, StringKeyKind>);
+
     fn walk_in_method_call(
         &self,
         node: &'ast MethodCall<'arena>,

@@ -126,6 +126,8 @@ struct MethodPrefix<'a> {
 }
 
 impl<'ast, 'arena> Walker<'ast, 'arena, (u32, Option<Prefix>)> for MethodPrefix<'_> {
+    crate::ast_walk::iterative_binary_walk!((u32, Option<Prefix>));
+
     fn walk_in_method(&self, method: &'ast Method<'arena>, found: &mut (u32, Option<Prefix>)) {
         if method.name.span.start.offset == found.0 {
             found.1 = method_prefix(method, self.file);

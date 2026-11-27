@@ -831,6 +831,8 @@ impl<'ast, 'arena> PhpExpressions<'ast, 'arena> {
 
 struct Expressions;
 impl<'ast, 'arena> Walker<'ast, 'arena, PhpExpressions<'ast, 'arena>> for Expressions {
+    crate::ast_walk::iterative_binary_walk!(PhpExpressions<'ast, 'arena>);
+
     fn walk_in_expression(
         &self,
         expr: &'ast Expression<'arena>,
@@ -862,6 +864,8 @@ impl<'ast, 'arena> Walker<'ast, 'arena, PhpExpressions<'ast, 'arena>> for Expres
 
 struct Variables;
 impl<'ast, 'arena> Walker<'ast, 'arena, BTreeSet<&'ast str>> for Variables {
+    crate::ast_walk::iterative_binary_walk!(BTreeSet<&'ast str>);
+
     fn walk_in_direct_variable(
         &self,
         var: &'ast DirectVariable<'arena>,

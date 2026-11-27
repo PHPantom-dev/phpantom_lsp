@@ -135,6 +135,8 @@ struct IncludeFinder<'a> {
 impl<'ast, 'arena> mago_syntax::walker::Walker<'ast, 'arena, Vec<IncludeLink>>
     for IncludeFinder<'_>
 {
+    crate::ast_walk::iterative_binary_walk!(Vec<IncludeLink>);
+
     fn walk_in_construct(&self, construct: &'ast Construct<'arena>, links: &mut Vec<IncludeLink>) {
         let value = match construct {
             Construct::Include(c) => c.value,

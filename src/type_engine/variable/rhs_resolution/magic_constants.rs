@@ -55,6 +55,8 @@ struct FinderState {
 struct EnclosingFunctionFinder;
 
 impl<'ast, 'arena> Walker<'ast, 'arena, FinderState> for EnclosingFunctionFinder {
+    crate::ast_walk::iterative_binary_walk!(FinderState);
+
     fn walk_in_function(&self, node: &'ast Function<'arena>, ctx: &mut FinderState) {
         ctx.function_stack.push(EnclosingFunction::Named(
             bytes_to_str(node.name.value).to_string(),

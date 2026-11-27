@@ -81,6 +81,8 @@ struct BundleFinder {
 impl<'ast, 'arena> mago_syntax::walker::Walker<'ast, 'arena, Option<&'ast Class<'arena>>>
     for BundleFinder
 {
+    crate::ast_walk::iterative_binary_walk!(Option<&'ast Class<'arena>>);
+
     fn walk_in_class(&self, node: &'ast Class<'arena>, found: &mut Option<&'ast Class<'arena>>) {
         let span = node.span();
         if span.start.offset <= self.quote && self.quote < span.end.offset {

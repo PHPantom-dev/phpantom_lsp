@@ -89,6 +89,8 @@ struct CategoryFinder<'c> {
 struct CategoryWalker;
 
 impl<'ast, 'arena> Walker<'ast, 'arena, CategoryFinder<'_>> for CategoryWalker {
+    crate::ast_walk::iterative_binary_walk!(CategoryFinder<'_>);
+
     fn walk_in_method_call(&self, node: &'ast MethodCall<'arena>, finder: &mut CategoryFinder<'_>) {
         // A call is entered before the receiver it is made on.
         if let Expression::Call(Call::Method(receiver)) = node.object {

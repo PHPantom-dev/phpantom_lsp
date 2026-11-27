@@ -24,6 +24,8 @@ impl Backend {
         use mago_syntax::walker::Walker;
         struct Imports;
         impl<'ast, 'arena> Walker<'ast, 'arena, Vec<&'ast Use<'arena>>> for Imports {
+            crate::ast_walk::iterative_binary_walk!(Vec<&'ast Use<'arena>>);
+
             fn walk_in_use(
                 &self,
                 statement: &'ast Use<'arena>,

@@ -1743,6 +1743,8 @@ struct BaseFieldWalker;
 impl<'ast, 'arena> mago_syntax::walker::Walker<'ast, 'arena, BaseFieldSites<'ast, 'arena>>
     for BaseFieldWalker
 {
+    crate::ast_walk::iterative_binary_walk!(BaseFieldSites<'ast, 'arena>);
+
     fn walk_in_assignment(
         &self,
         assignment: &'ast Assignment<'arena>,
@@ -1859,6 +1861,8 @@ struct BuilderWalker;
 impl<'ast, 'arena> mago_syntax::walker::Walker<'ast, 'arena, BuilderSites<'ast, 'arena>>
     for BuilderWalker
 {
+    crate::ast_walk::iterative_binary_walk!(BuilderSites<'ast, 'arena>);
+
     fn walk_in_method_call(
         &self,
         call: &'ast MethodCall<'arena>,
@@ -2591,6 +2595,8 @@ type FoundCall<'ast, 'arena> = (
 impl<'ast, 'arena> mago_syntax::walker::Walker<'ast, 'arena, Vec<FoundCall<'ast, 'arena>>>
     for InvokingCallWalker
 {
+    crate::ast_walk::iterative_binary_walk!(Vec<FoundCall<'ast, 'arena>>);
+
     fn walk_in_method_call(
         &self,
         call: &'ast MethodCall<'arena>,
@@ -3046,6 +3052,8 @@ struct ReturnWalker;
 impl<'ast, 'arena> mago_syntax::walker::Walker<'ast, 'arena, Vec<&'ast Expression<'arena>>>
     for ReturnWalker
 {
+    crate::ast_walk::iterative_binary_walk!(Vec<&'ast Expression<'arena>>);
+
     fn walk_in_return(
         &self,
         statement: &'ast Return<'arena>,

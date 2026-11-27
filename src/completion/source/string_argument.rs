@@ -53,6 +53,8 @@ fn literal<'a>(expression: &'a Expression<'_>) -> Option<&'a str> {
 }
 
 impl<'a> Walker<'a, 'a, Option<StringArgument>> for ArgumentVisitor {
+    crate::ast_walk::iterative_binary_walk!('a, 'a, Option<StringArgument>);
+
     fn walk_in_argument_list(&self, list: &'a ArgumentList<'a>, out: &mut Option<StringArgument>) {
         // Every fragment starts with `<?php f(`. Nested calls belong to a
         // different expression and must not supply keys for this argument.

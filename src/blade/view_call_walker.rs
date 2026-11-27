@@ -36,6 +36,8 @@ pub(super) struct BladeDirectiveWalker;
 impl<'ast, 'arena> mago_syntax::walker::Walker<'ast, 'arena, BladeDirectiveCollectCtx<'ast, 'arena>>
     for BladeDirectiveWalker
 {
+    crate::ast_walk::iterative_binary_walk!(BladeDirectiveCollectCtx<'ast, 'arena>);
+
     fn walk_in_function_call(
         &self,
         node: &'ast FunctionCall<'arena>,
@@ -237,6 +239,8 @@ impl ViewCallWalker<'_> {
 impl<'ast, 'arena, 'w> mago_syntax::walker::Walker<'ast, 'arena, CollectCtx<'w, 'ast, 'arena>>
     for ViewCallWalker<'_>
 {
+    crate::ast_walk::iterative_binary_walk!(CollectCtx<'w, 'ast, 'arena>);
+
     fn walk_in_function_call(
         &self,
         node: &'ast FunctionCall<'arena>,

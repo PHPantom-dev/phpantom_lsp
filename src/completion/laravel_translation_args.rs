@@ -82,6 +82,8 @@ struct ArgumentVisitor<'a> {
 }
 
 impl<'a> Walker<'a, 'a, Option<Arguments>> for ArgumentVisitor<'_> {
+    crate::ast_walk::iterative_binary_walk!('a, 'a, Option<Arguments>);
+
     fn walk_in_argument_list(&self, list: &'a ArgumentList<'a>, out: &mut Option<Arguments>) {
         if list.left_parenthesis.start.offset as usize != self.paren {
             return;

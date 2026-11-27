@@ -628,6 +628,8 @@ struct ViewPathWalker<'d> {
 }
 
 impl<'ast, 'arena> Walker<'ast, 'arena, ViewPathCalls> for ViewPathWalker<'_> {
+    crate::ast_walk::iterative_binary_walk!(ViewPathCalls);
+
     fn walk_in_method_call(&self, node: &'ast MethodCall<'arena>, calls: &mut ViewPathCalls) {
         if let ClassLikeMemberSelector::Identifier(method) = &node.method {
             calls.record(bytes_to_str(method.value), &node.argument_list, self.dir);

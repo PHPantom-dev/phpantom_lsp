@@ -254,6 +254,8 @@ struct Reads {
 struct ReadWalker;
 
 impl<'ast, 'arena> mago_syntax::walker::Walker<'ast, 'arena, Reads> for ReadWalker {
+    crate::ast_walk::iterative_binary_walk!(Reads);
+
     fn walk_in_variable(&self, node: &'ast Variable<'arena>, reads: &mut Reads) {
         match node {
             Variable::Direct(variable) => {

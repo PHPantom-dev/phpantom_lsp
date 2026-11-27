@@ -274,6 +274,8 @@ struct ValueFound<'ast, 'arena> {
 impl<'ast, 'arena> mago_syntax::walker::Walker<'ast, 'arena, ValueFound<'ast, 'arena>>
     for ValueWalker<'_>
 {
+    crate::ast_walk::iterative_binary_walk!(ValueFound<'ast, 'arena>);
+
     fn walk_in_expression(
         &self,
         node: &'ast Expression<'arena>,

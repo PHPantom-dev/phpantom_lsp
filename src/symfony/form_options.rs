@@ -169,6 +169,8 @@ struct SiteFinder;
 impl<'ast, 'arena> mago_syntax::walker::Walker<'ast, 'arena, Vec<OptionsSite<'ast, 'arena>>>
     for SiteFinder
 {
+    crate::ast_walk::iterative_binary_walk!(Vec<OptionsSite<'ast, 'arena>>);
+
     fn walk_in_method_call(
         &self,
         node: &'ast MethodCall<'arena>,
@@ -567,6 +569,8 @@ impl ResolverEscapes<'_> {
 }
 
 impl<'ast, 'arena> mago_syntax::walker::MutWalker<'ast, 'arena, ()> for ResolverEscapes<'_> {
+    crate::ast_walk::iterative_binary_walk_mut!(());
+
     fn walk_in_argument_list(&mut self, node: &'ast ArgumentList<'arena>, _: &mut ()) {
         if self.passes_resolver(node) {
             self.passed += 1;

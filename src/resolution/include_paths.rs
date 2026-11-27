@@ -168,6 +168,8 @@ pub(crate) type IncludeSites<'ast, 'arena> = Vec<(&'ast Expression<'arena>, u32)
 struct IncludeWalker;
 
 impl<'ast, 'arena> Walker<'ast, 'arena, IncludeSites<'ast, 'arena>> for IncludeWalker {
+    crate::ast_walk::iterative_binary_walk!(IncludeSites<'ast, 'arena>);
+
     fn walk_function(
         &self,
         _node: &'ast Function<'arena>,

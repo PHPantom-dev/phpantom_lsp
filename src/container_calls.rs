@@ -519,6 +519,10 @@ fn callback_arguments(
     impl<'ast, 'arena> Walker<'ast, 'arena, Option<(ByteRange<usize>, Option<ByteRange<usize>>)>>
         for Finder
     {
+        crate::ast_walk::iterative_binary_walk!(
+            Option<(ByteRange<usize>, Option<ByteRange<usize>>)>
+        );
+
         fn walk_in_argument_list(
             &self,
             list: &'ast ArgumentList<'arena>,
@@ -587,6 +591,8 @@ fn parameters_at(content: &str, offset: u32) -> Option<Vec<(ParameterInfo, u32)>
         }
     }
     impl<'ast, 'arena> Walker<'ast, 'arena, Option<Vec<(ParameterInfo, u32)>>> for Finder {
+        crate::ast_walk::iterative_binary_walk!(Option<Vec<(ParameterInfo, u32)>>);
+
         fn walk_in_method(
             &self,
             node: &'ast Method<'arena>,

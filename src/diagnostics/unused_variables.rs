@@ -90,6 +90,8 @@ struct UnusedVariableWalker;
 impl<'ast, 'arena, 'a> mago_syntax::walker::Walker<'ast, 'arena, DiagnosticCtx<'a>>
     for UnusedVariableWalker
 {
+    crate::ast_walk::iterative_binary_walk!(DiagnosticCtx<'a>);
+
     fn walk_in_function(&self, func: &'ast Function<'arena>, ctx: &mut DiagnosticCtx<'a>) {
         let body_start = func.body.left_brace.start.offset;
         let body_end = func.body.right_brace.end.offset;

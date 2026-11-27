@@ -307,6 +307,8 @@ struct RenderWalker<'v, 'k> {
 impl<'ast, 'arena> mago_syntax::walker::Walker<'ast, 'arena, Vec<&'ast MethodCall<'arena>>>
     for RenderWalker<'_, '_>
 {
+    crate::ast_walk::iterative_binary_walk!(Vec<&'ast MethodCall<'arena>>);
+
     fn walk_in_method_call(
         &self,
         node: &'ast MethodCall<'arena>,

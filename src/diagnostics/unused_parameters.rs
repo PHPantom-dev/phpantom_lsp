@@ -73,6 +73,8 @@ struct Candidate<'ast, 'arena> {
 struct CollectCandidates;
 
 impl<'ast, 'arena> Walker<'ast, 'arena, Vec<Candidate<'ast, 'arena>>> for CollectCandidates {
+    crate::ast_walk::iterative_binary_walk!(Vec<Candidate<'ast, 'arena>>);
+
     fn walk_in_function(
         &self,
         function: &'ast Function<'arena>,

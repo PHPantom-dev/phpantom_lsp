@@ -46,6 +46,8 @@ impl<'ast, 'arena: 'ast, F> Walker<'ast, 'arena, F> for NamedMethodCalls
 where
     F: FnMut(&'ast Expression<'arena>, &'arena str, AccessKind, &'ast ArgumentList<'arena>),
 {
+    crate::ast_walk::iterative_binary_walk!(F);
+
     fn walk_in_call(&self, node: &'ast Call<'arena>, visit: &mut F) {
         let (object, selector, access, args) = match node {
             Call::Method(c) => (c.object, &c.method, AccessKind::Arrow, &c.argument_list),

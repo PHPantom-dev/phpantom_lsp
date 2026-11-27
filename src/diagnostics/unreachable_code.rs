@@ -133,6 +133,8 @@ struct FunctionExpressionBodies;
 impl<'ast, 'arena> mago_syntax::walker::Walker<'ast, 'arena, Vec<DeadRun>>
     for FunctionExpressionBodies
 {
+    crate::ast_walk::iterative_binary_walk!(Vec<DeadRun>);
+
     fn walk_in_closure(&self, closure: &'ast Closure<'arena>, runs: &mut Vec<DeadRun>) {
         scan_block(&closure.body, runs);
     }
