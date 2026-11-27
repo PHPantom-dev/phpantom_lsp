@@ -867,23 +867,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Crashes">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b916-long-operator-chains-overflow-the-stack-in-release-builds" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B916. Long operator chains overflow the stack in release builds
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -2704,23 +2687,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Crashes">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b916-long-operator-chains-overflow-the-stack-in-release-builds" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B916. Long operator chains overflow the stack in release builds
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -4106,16 +4072,7 @@ task, or sweeps of the sample projects under <code>projects/</code>. Entries are
 grouped by the mechanism that has to change, not by the symptom that
 surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <h2 id="crashes">Crashes<a class="headerlink" href="#crashes" title="Permanent link">&para;</a></h2>
-<h3 id="b916-long-operator-chains-overflow-the-stack-in-release-builds">B916. Long operator chains overflow the stack in release builds<a class="headerlink" href="#b916-long-operator-chains-overflow-the-stack-in-release-builds" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<p><code>crash_sandbox::generated_length_operator_chains_do_not_overflow</code> and
-its <code>_framework_scanners</code> twin abort with a stack overflow under
-<code>cargo nextest run --release</code>, while both pass in the debug profile. The
-input is a function with 20,000-operand <code>+</code>, <code>&amp;&amp;</code>, <code>||</code> and <code>.</code> chains,
-analysed on a thread sized <code>PARSE_WORKER_STACK_SIZE</code>. Something that
-walks the chain still recurses once per operator, and the release
-build's frame sizes (inlining merges frames) run out of stack first.
-Find the walker that recurses on the left operand and make it iterate.</p>
+<p>No outstanding items.</p>
 <h2 id="type-comparison">Type comparison<a class="headerlink" href="#type-comparison" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="conditional-return-types">Conditional return types<a class="headerlink" href="#conditional-return-types" title="Permanent link">&para;</a></h2>
