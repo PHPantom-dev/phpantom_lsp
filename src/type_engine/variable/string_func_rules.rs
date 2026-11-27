@@ -104,6 +104,7 @@ fn literal_type(name: &str, args: &dyn ArrayFuncArgs) -> Option<PhpType> {
             mb_convert_subject(args, 2, &modes)?
         }
         "mb_substr" => mb_substr(args)?,
+        "substr" => substr(args)?,
         "ucfirst" => map_subject(args, |s| change_first(s, u8::to_ascii_uppercase))?,
         "lcfirst" => map_subject(args, |s| change_first(s, u8::to_ascii_lowercase))?,
         "ucwords" if !args.has_arg(1) => map_subject(args, |s| ucwords(s, UCWORDS_DELIMITERS))?,
@@ -488,8 +489,9 @@ fn parse_format(format: &str) -> Option<Format> {
 /// length (`strlen(123)` is `3`); otherwise the length is the range its
 /// type allows, `int<1, max>` for a non-empty string or a number.
 ///
-/// `mb_strlen()` counts characters only in UTF-8; in any other encoding a
-/// known value still gets the range its emptiness allows.
+/// `mb_strlen()` counts characters in UTF-8 and bytes in a single-byte
+/// encoding; in any other a known value still gets the range its
+/// emptiness allows.
 fn length_type(args: &dyn ArrayFuncArgs, multibyte: bool) -> Option<PhpType> {
     use crate::type_engine::type_ops::int_interval::IntInterval;
     use crate::type_engine::variable::rhs_resolution::php_string_of_type;
@@ -498,7 +500,17 @@ fn length_type(args: &dyn ArrayFuncArgs, multibyte: bool) -> Option<PhpType> {
         return None;
     }
     let ty = args.arg_raw_type(0)?;
-    let mut utf8 = !multibyte || is_utf8_encoding(args, 1);
+    // How each encoding the call may use counts a string: in characters
+    // (UTF-8) or in bytes. Empty when some encoding counts another way.
+    let mut counts: Vec<Count> = if multibyte {
+        if is_utf8_encoding(args, 1) {
+            vec![Count::Chars]
+        } else {
+            Vec::new()
+        }
+    } else {
+        vec![Count::Bytes]
+    };
     if multibyte && args.has_arg(1) && !args.is_spread(1) && !args.is_named(1) {
         // An encoding mbstring does not know is a `ValueError`, so only the
         // known alternatives can return.
@@ -510,24 +522,37 @@ fn length_type(args: &dyn ArrayFuncArgs, multibyte: bool) -> Option<PhpType> {
             if known.is_empty() {
                 return Some(PhpType::never());
             }
-            utf8 = known.iter().all(|name| {
-                name.eq_ignore_ascii_case("UTF-8") || name.eq_ignore_ascii_case("UTF8")
-            });
+            counts.clear();
+            for name in known {
+                let count =
+                    if name.eq_ignore_ascii_case("UTF-8") || name.eq_ignore_ascii_case("UTF8") {
+                        Count::Chars
+                    } else if values::is_single_byte_encoding(name) {
+                        Count::Bytes
+                    } else {
+                        counts.clear();
+                        break;
+                    };
+                if !counts.contains(&count) {
+                    counts.push(count);
+                }
+            }
         }
     }
-    let read_values = !names_a_constant(args, 0) && utf8;
+    let read_values = !names_a_constant(args, 0) && !counts.is_empty();
     let mut lengths: Vec<i64> = Vec::new();
     let mut ranges: Vec<IntInterval> = Vec::new();
     for member in ty.union_members() {
         if let Some(text) = read_values.then(|| php_string_of_type(member)).flatten() {
-            let length = if multibyte {
-                text.chars().count()
-            } else {
-                text.len()
-            };
-            let length = i64::try_from(length).ok()?;
-            if !lengths.contains(&length) {
-                lengths.push(length);
+            for count in &counts {
+                let length = match count {
+                    Count::Chars => text.chars().count(),
+                    Count::Bytes => text.len(),
+                };
+                let length = i64::try_from(length).ok()?;
+                if !lengths.contains(&length) {
+                    lengths.push(length);
+                }
             }
             continue;
         }
@@ -561,6 +586,13 @@ fn length_type(args: &dyn ArrayFuncArgs, multibyte: bool) -> Option<PhpType> {
         max: Some(length),
     }));
     Some(IntInterval::hull_of(&ranges).into_type())
+}
+
+/// What a string length counts.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Count {
+    Chars,
+    Bytes,
 }
 
 /// `number_format()`: a `numeric-string` when no thousands separator is
@@ -1117,33 +1149,65 @@ fn mb_substr(args: &dyn ArrayFuncArgs) -> Option<Vec<String>> {
     if !is_utf8_encoding(args, 3) {
         return None;
     }
-    let start = literal_int(args, 1)?;
-    let length = match args.arg_raw_type(2) {
-        _ if !args.has_arg(2) => None,
-        Some(ty) if ty.is_null() => None,
-        _ => Some(literal_int(args, 2)?),
-    };
+    let (start, length) = slice_arguments(args)?;
     let subjects = literal_alternatives_any(args, 0)?;
     Some(
         subjects
             .iter()
             .map(|subject| {
                 let chars: Vec<char> = subject.chars().collect();
-                let count = chars.len() as i64;
-                let from = if start < 0 {
-                    (count + start).max(0)
-                } else {
-                    start.min(count)
-                };
-                let to = match length {
-                    None => count,
-                    Some(length) if length < 0 => (count + length).max(from),
-                    Some(length) => from.saturating_add(length).min(count),
-                };
-                chars[from as usize..to as usize].iter().collect()
+                let (from, to) = slice_bounds(chars.len(), start, length);
+                chars[from..to].iter().collect()
             })
             .collect(),
     )
+}
+
+/// `substr()` of literal strings with a literal offset and length,
+/// counting bytes. A cut through a multibyte character declines: the
+/// result is not text a literal can spell.
+fn substr(args: &dyn ArrayFuncArgs) -> Option<Vec<String>> {
+    if (0..3).any(|index| args.is_spread(index) || args.is_named(index)) {
+        return None;
+    }
+    let (start, length) = slice_arguments(args)?;
+    literal_alternatives_any(args, 0)?
+        .iter()
+        .map(|subject| {
+            let (from, to) = slice_bounds(subject.len(), start, length);
+            subject.get(from..to).map(str::to_owned)
+        })
+        .collect()
+}
+
+/// The literal offset and optional length of a `substr()` or
+/// `mb_substr()` call.
+fn slice_arguments(args: &dyn ArrayFuncArgs) -> Option<(i64, Option<i64>)> {
+    let start = literal_int(args, 1)?;
+    let length = match args.arg_raw_type(2) {
+        _ if !args.has_arg(2) => None,
+        Some(ty) if ty.is_null() => None,
+        _ => Some(literal_int(args, 2)?),
+    };
+    Some((start, length))
+}
+
+/// The range `substr()` keeps of a string `count` units long: a negative
+/// offset counts from the end, a negative length stops that far before it,
+/// and an offset past the end gives the empty string (PHP 8).
+fn slice_bounds(count: usize, start: i64, length: Option<i64>) -> (usize, usize) {
+    let count = count as i64;
+    let from = if start < 0 {
+        (count + start).max(0)
+    } else {
+        start.min(count)
+    };
+    let to = match length {
+        None => count,
+        Some(length) if length < 0 => (count + length).max(from),
+        Some(length) => from.saturating_add(length).min(count),
+    };
+    (from as usize, to as usize)
 }
 
 /// `sprintf()` whose format and values are all single literals and whose
@@ -1331,6 +1395,7 @@ pub(in crate::type_engine) fn has_string_func_rule(func_name: &str) -> bool {
                 | "mb_strtoupper"
                 | "mb_convert_case"
                 | "mb_substr"
+                | "substr"
                 | "ucfirst"
                 | "lcfirst"
                 | "ucwords"

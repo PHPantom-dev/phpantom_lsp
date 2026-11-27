@@ -10,40 +10,14 @@ use std::ops::ControlFlow;
 
 use crate::atom::bytes_to_str;
 
-/// Compute the assignment dependency depth for a loop body.
-///
-/// Does a cheap AST walk (no type resolution) to find which variables
-/// are assigned and which other variables appear on the RHS.  Then
-/// follows the dependency chain to compute the longest path.
-///
-/// For example, in:
-///   $a = $input;
-///   $b = transform($a);
-///   $c = $b + 1;
-///
-/// The dependency map is {$a → {$input}, $b → {$a}, $c → {$b}} and
-/// the longest chain is 3 ($input → $a → $b → $c).
-///
-/// This determines how many loop iterations are needed for types to
-/// propagate through the entire chain.  Typically 1-3 for real PHP.
-pub(crate) fn assignment_map_depth(statements: &[&Statement<'_>]) -> u32 {
-    assignment_map_depth_with_updates(statements, std::iter::empty())
-}
-
-/// `assignment_map_depth` for a loop whose header also assigns: the `for`
-/// update clause reassigns variables between two body executions, so those
-/// assignments belong in the same dependency graph as the body's.
-pub(crate) fn assignment_map_depth_with_updates<'a>(
-    statements: &[&Statement<'_>],
-    updates: impl Iterator<Item = &'a Expression<'a>>,
-) -> u32 {
-    loop_assignments(statements, updates).depth
-}
-
 /// What a loop's assignments say about how walks of its body settle.
 pub(crate) struct LoopAssignments {
     /// How many walks it takes for a type to propagate along the longest
-    /// assignment chain; see [`assignment_map_depth`].
+    /// assignment chain.
+    ///
+    /// In `$a = $input; $b = transform($a); $c = $b + 1;` the dependency
+    /// map is {$a → {$input}, $b → {$a}, $c → {$b}} and the longest chain
+    /// is 3 ($input → $a → $b → $c). Typically 1-3 for real PHP.
     pub(crate) depth: u32,
     /// The variables whose new value is computed from their own previous
     /// one, directly (`$i = $i + 1`) or through others (`$a = $b + 1; $b =
@@ -51,8 +25,10 @@ pub(crate) struct LoopAssignments {
     pub(crate) self_dependent: HashSet<String>,
 }
 
-/// The [`LoopAssignments`] of a loop body, plus a `for` loop's update
-/// clause (see [`assignment_map_depth_with_updates`]).
+/// The [`LoopAssignments`] of a loop body, from a cheap AST walk (no type
+/// resolution), plus a `for` loop's update clause: it reassigns variables
+/// between two body executions, so its assignments belong in the same
+/// dependency graph as the body's.
 pub(crate) fn loop_assignments<'a>(
     statements: &[&Statement<'_>],
     updates: impl Iterator<Item = &'a Expression<'a>>,

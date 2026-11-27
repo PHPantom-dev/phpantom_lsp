@@ -12,7 +12,8 @@ use super::super::array_shape_writes::ArrayWriteKey;
 use super::scope_state::RefTarget;
 
 use super::super::rhs_resolution::{
-    assignment_value, coalesce_assign_value, compound_assignment_result,
+    ArithmeticOpKind, assignment_value, coalesce_assign_value, compound_assignment_result,
+    infer_arithmetic_result_type,
 };
 
 /// Identifies which callee parameter a call argument fills.
@@ -28,9 +29,8 @@ pub(crate) enum ArgSelector {
 
 /// Process increment/decrement expressions (`$a++`, `++$a`, `$a--`, `--$a`).
 ///
-/// For numeric types (int, float), the base type is preserved.
-/// Numeric literals and refined numeric types are widened because the
-/// operation changes the value and may invalidate the refinement.
+/// For ints and floats the result is the operand plus or minus one, as
+/// the binary operator computes it: a literal folds and a range shifts.
 /// For numeric strings, the result becomes `int|float`.
 /// For general strings, PHP increments alphabetically (stays string), while
 /// decrementing a known non-numeric string is a no-op and stays exact.
@@ -92,7 +92,7 @@ pub(super) fn type_after_increment_decrement(
             }
         }
         _ if ty.is_null() => match operation {
-            IncrementDecrementKind::Increment => PhpType::int(),
+            IncrementDecrementKind::Increment => PhpType::literal_int("1"),
             IncrementDecrementKind::Decrement => PhpType::null(),
         },
         _ if ty.is_named_ci("numeric")
@@ -102,8 +102,19 @@ pub(super) fn type_after_increment_decrement(
         {
             PhpType::union(vec![PhpType::int(), PhpType::float()])
         }
-        _ if ty.is_int_subtype() => PhpType::int(),
-        _ if ty.is_float_subtype() => PhpType::float(),
+        // `$i++` on a number is `$i + 1`, so a literal folds and a range
+        // shifts the same way the binary operator's would.
+        _ if ty.is_int_subtype() || ty.is_float_subtype() => {
+            let op = match operation {
+                IncrementDecrementKind::Increment => ArithmeticOpKind::Addition,
+                IncrementDecrementKind::Decrement => ArithmeticOpKind::Subtraction,
+            };
+            infer_arithmetic_result_type(
+                &[ResolvedType::from_type_string(ty.clone())],
+                &[ResolvedType::from_type_string(PhpType::literal_int("1"))],
+                op,
+            )
+        }
         TypeKind::Literal(value) if matches!(&**value, LiteralValue::String(_)) => {
             let content = value.exact_string_content();
             match operation {
@@ -1215,6 +1226,31 @@ mod tests {
                 IncrementDecrementKind::Increment
             ),
             PhpType::named(atom("Number"))
+        );
+    }
+
+    #[test]
+    fn stepping_a_number_folds_like_adding_one() {
+        let step = |ty: PhpType, operation| type_after_increment_decrement(&ty, operation);
+        assert_eq!(
+            step(PhpType::literal_int("1"), IncrementDecrementKind::Increment),
+            PhpType::literal_int("2")
+        );
+        assert_eq!(
+            step(PhpType::literal_int("5"), IncrementDecrementKind::Decrement),
+            PhpType::literal_int("4")
+        );
+        assert_eq!(
+            step(PhpType::null(), IncrementDecrementKind::Increment),
+            PhpType::literal_int("1")
+        );
+        assert_eq!(
+            step(PhpType::int(), IncrementDecrementKind::Increment),
+            PhpType::int()
+        );
+        assert_eq!(
+            step(PhpType::float(), IncrementDecrementKind::Decrement),
+            PhpType::float()
         );
     }
 

@@ -63,15 +63,20 @@ fn range_value_type(start: &PhpType, end: &PhpType, step: Option<&PhpType>) -> P
             _ => int_ty,
         };
     }
-    if start.is_subtype_of(&float_ty) && end.is_subtype_of(&float_ty) {
-        return float_ty;
-    }
     let number = PhpType::union(vec![int_ty.clone(), float_ty.clone()]);
     if start.is_subtype_of(&number)
         && end.is_subtype_of(&number)
         && step.is_none_or(|step| step.is_subtype_of(&number))
     {
-        return number;
+        // A float bound makes every value a float. A float step between
+        // int bounds does so only when it has a fractional part:
+        // `range(1, 3, 1.0)` is `[1, 2, 3]`.
+        let is_float = |ty: &PhpType| ty.union_members().iter().all(|m| m.is_float_subtype());
+        return if is_float(start) || is_float(end) {
+            float_ty
+        } else {
+            number
+        };
     }
     // A string bound counts through characters, or through numbers when it
     // is empty or numeric, so the values can be any of the three.

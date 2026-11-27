@@ -485,7 +485,8 @@ pub(crate) fn seed_by_ref_capture_fixed_point<'b>(
         return;
     }
     let body_stmts: Vec<&Statement<'_>> = closure.body.statements.iter().collect();
-    let depth = assignment_map_depth(&body_stmts);
+    let assignments = loop_assignments(&body_stmts, std::iter::empty());
+    let depth = assignments.depth;
     if depth <= 1 {
         return;
     }
@@ -507,6 +508,15 @@ pub(crate) fn seed_by_ref_capture_fixed_point<'b>(
         for var_name in captured {
             let mut combined = seed_scope.get(var_name).to_vec();
             ResolvedType::extend_unique(&mut combined, probe.get(var_name).to_vec());
+            // A counter grows on every run, as it does in a loop.
+            if assignments.self_dependent.contains(var_name)
+                && let Some(widened) = crate::type_engine::type_ops::int_interval::widen_grown_ints(
+                    entry_scope.get(var_name),
+                    &combined,
+                )
+            {
+                combined = widened;
+            }
             if resolved_types_differ(&combined, entry_scope.get(var_name)) {
                 changed = true;
             }

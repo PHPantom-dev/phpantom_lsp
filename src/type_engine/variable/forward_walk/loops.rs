@@ -96,19 +96,20 @@ pub(crate) fn walk_loop_body_to_fixed_point<'b>(
         let mut walked = scope.clone();
         merge_exit_edges(&mut walked, &std::mem::take(&mut held_continues));
 
-        // Check for changes BEFORE re-walking: compare post-walk
-        // scope against the pre-loop scope.  If no variable has a
-        // type that differs from what was known before the loop,
-        // there's nothing new to propagate — skip the re-walk.
+        // Check for changes BEFORE re-walking: compare the scope the
+        // next iteration starts from (after a `for` loop's update clause)
+        // against the pre-loop scope.  If no variable has a type that
+        // differs from what was known before the loop, there's nothing
+        // new to propagate — skip the re-walk.
+        seed(&mut walked, LoopSeedPoint::AfterBody);
         if !scope_has_changes(pre_loop_scope, &walked) {
             break;
         }
 
         // A walk from the entry the previous one started from comes out
-        // the same, so the loop has reached its fixed point.  The walked
-        // scope is left as it ended rather than advanced by `AfterBody`,
-        // exactly as the check above leaves it.
-        let mut entry = merged_loop_entry_scope(pre_loop_scope, &mut walked, &mut seed);
+        // the same, so the loop has reached its fixed point.  `scope` is
+        // left as the body ended rather than advanced by `AfterBody`.
+        let mut entry = merged_loop_entry_scope(pre_loop_scope, &walked, &mut seed);
         if let Some(previous) = previous_entry.as_ref() {
             if entry.walks_the_same_as(previous) {
                 break;
@@ -135,6 +136,7 @@ pub(crate) fn walk_loop_body_to_fixed_point<'b>(
 
     if !walked_at_cursor && discovery_ctx.cursor_offset != ctx.cursor_offset {
         merge_exit_edges(scope, &std::mem::take(&mut held_continues));
+        seed(scope, LoopSeedPoint::AfterBody);
         *scope = merged_loop_entry_scope(pre_loop_scope, scope, &mut seed);
         if let Some(previous) = previous_entry.as_ref() {
             widen_grown_int_locals(previous, scope, self_dependent);
@@ -282,17 +284,15 @@ fn widen_grown_int_locals(
     }
 }
 
-/// The entry scope of the next walk of a loop body: the previous walk
-/// advanced past the end of the body, merged with what was known before
-/// the loop (the body may not have run yet), then narrowed the way the
-/// loop narrows its first iteration.
+/// The entry scope of the next walk of a loop body: the previous walk,
+/// already advanced past the end of the body, merged with what was known
+/// before the loop (the body may not have run yet), then narrowed the way
+/// the loop narrows its first iteration.
 fn merged_loop_entry_scope(
     pre_loop_scope: &ScopeState,
-    walked: &mut ScopeState,
+    walked: &ScopeState,
     seed: &mut impl FnMut(&mut ScopeState, LoopSeedPoint),
 ) -> ScopeState {
-    seed(walked, LoopSeedPoint::AfterBody);
-
     let mut next_scope = pre_loop_scope.clone();
     next_scope.merge_branch(walked);
     seed(&mut next_scope, LoopSeedPoint::Entry);

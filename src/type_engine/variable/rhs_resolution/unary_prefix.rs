@@ -75,9 +75,9 @@ pub(crate) fn unary_prefix_result_type(
 /// The type converting the expression `operand` with `kind` produces, for
 /// a cast and for the `intval()` / `strval()` family alike.
 ///
-/// `(int)`, `(float)` and `(bool)` of anything but a cheap operand are
-/// decided without it, so an `(int)` cast of a call pays nothing for
-/// resolving the call.
+/// `(int)`, `(float)` and `(bool)` of anything but a cheap operand (or one
+/// whose syntax decides the conversion) are decided without it, so an
+/// `(int)` cast of a call pays nothing for resolving the call.
 pub(super) fn cast_expression_type(
     kind: CastKind,
     operand: &Expression<'_>,
@@ -86,7 +86,19 @@ pub(super) fn cast_expression_type(
     cache: Option<&ResolvedClassCache>,
 ) -> PhpType {
     if matches!(kind, CastKind::Int | CastKind::Float | CastKind::Bool)
+        && let Some(ty) = syntactic_operand_type(operand)
+    {
+        return cast_result_type(
+            kind,
+            vec![ResolvedType::from_type_string(ty)],
+            class_loader,
+            cache,
+        );
+    }
+    // A `new` expression resolves to its class without walking anything.
+    if matches!(kind, CastKind::Int | CastKind::Float | CastKind::Bool)
         && !scalar_fold::is_cheap_scalar_operand(operand)
+        && !matches!(operand, Expression::Instantiation(_))
     {
         return match kind {
             CastKind::Int => PhpType::int(),
@@ -95,6 +107,45 @@ pub(super) fn cast_expression_type(
         };
     }
     cast_result_type(kind, resolve_operand(), class_loader, cache)
+}
+
+/// The type of an operand its syntax alone decides as far as a numeric or
+/// boolean conversion cares, so the cast need not resolve it: a comparison
+/// or logical operator is a `bool`, an array literal is empty or not by its
+/// entries, and a closure is a `Closure`.
+fn syntactic_operand_type(operand: &Expression<'_>) -> Option<PhpType> {
+    use mago_syntax::cst::{ArrayElement, BinaryOperator};
+
+    let non_empty = |mut elements: std::slice::Iter<'_, ArrayElement<'_>>| {
+        if elements.len() == 0 {
+            return Some(PhpType::array_shape(Vec::new()));
+        }
+        elements
+            .all(|element| matches!(element, ArrayElement::KeyValue(_) | ArrayElement::Value(_)))
+            .then(|| PhpType::named(atom("non-empty-array")))
+    };
+    match operand {
+        Expression::Parenthesized(inner) => syntactic_operand_type(inner.expression),
+        Expression::Binary(binary)
+            if !matches!(binary.operator, BinaryOperator::Spaceship(_))
+                && (binary.operator.is_comparison()
+                    || binary.operator.is_logical()
+                    || binary.operator.is_instanceof()) =>
+        {
+            Some(PhpType::bool())
+        }
+        Expression::UnaryPrefix(prefix)
+            if matches!(prefix.operator, unary::UnaryPrefixOperator::Not(_)) =>
+        {
+            Some(PhpType::bool())
+        }
+        Expression::Array(array) => non_empty(array.elements.as_slice().iter()),
+        Expression::LegacyArray(array) => non_empty(array.elements.as_slice().iter()),
+        Expression::Closure(_) | Expression::ArrowFunction(_) => {
+            Some(PhpType::named(atom("Closure")))
+        }
+        _ => None,
+    }
 }
 
 /// The scalar, array, object and `null` conversions a cast or `settype()`

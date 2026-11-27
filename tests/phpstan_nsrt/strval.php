@@ -37,12 +37,12 @@ function intvalTest(string $string): void
 	assertType('0', intval(null));
 	assertType('0', intval(false));
 	assertType('1', intval(true));
-	assertType('0|1', intval(rand(0, 1) === 0)); // SKIP: like a cast, a conversion of an operand that is not a literal, variable or constant is not resolved
+	assertType('0|1', intval(rand(0, 1) === 0));
 	assertType('42', intval(42));
-	assertType('int<0, max>', intval(rand())); // SKIP: like a cast, a conversion of an operand that is not a literal, variable or constant is not resolved
+	assertType('int<0, max>', intval(rand())); // SKIP: a conversion of a call does not resolve the call
 	assertType('int', intval(rand() * 0.1));
-	assertType('0', intval([])); // SKIP: like a cast, a conversion of an operand that is not a literal, variable or constant is not resolved
-	assertType('1', intval([null])); // SKIP: like a cast, a conversion of an operand that is not a literal, variable or constant is not resolved
+	assertType('0', intval([]));
+	assertType('1', intval([null]));
 	assertType('int', intval(new \stdClass()));
 	assertType('int', intval(function() {}));
 	assertType('int', intval(fopen('php://memory', 'r')));
@@ -57,12 +57,12 @@ function floatvalTest(string $string): void
 	assertType('0.0', floatval(null));
 	assertType('0.0', floatval(false));
 	assertType('1.0', floatval(true));
-	assertType('0.0|1.0', floatval(rand(0, 1) === 0)); // SKIP: like a cast, a conversion of an operand that is not a literal, variable or constant is not resolved
+	assertType('0.0|1.0', floatval(rand(0, 1) === 0));
 	assertType('42.0', floatval(42));
 	assertType('float', floatval(rand()));
 	assertType('float', floatval(rand() * 0.1));
-	assertType('0.0', floatval([])); // SKIP: like a cast, a conversion of an operand that is not a literal, variable or constant is not resolved
-	assertType('1.0', floatval([null])); // SKIP: like a cast, a conversion of an operand that is not a literal, variable or constant is not resolved
+	assertType('0.0', floatval([]));
+	assertType('1.0', floatval([null]));
 	assertType('float', floatval(new \stdClass()));
 	assertType('float', floatval(function() {}));
 	assertType('float', floatval(fopen('php://memory', 'r')));
@@ -81,10 +81,10 @@ function boolvalTest(string $string): void
 	assertType('true', boolval(42));
 	assertType('bool', boolval(rand()));
 	assertType('bool', boolval(rand() * 0.1));
-	assertType('false', boolval([])); // SKIP: like a cast, a conversion of an operand that is not a literal, variable or constant is not resolved
-	assertType('true', boolval([null])); // SKIP: like a cast, a conversion of an operand that is not a literal, variable or constant is not resolved
-	assertType('true', boolval(new \stdClass())); // SKIP: like a cast, a conversion of an operand that is not a literal, variable or constant is not resolved
-	assertType('true', boolval(function() {})); // SKIP: like a cast, a conversion of an operand that is not a literal, variable or constant is not resolved
+	assertType('false', boolval([]));
+	assertType('true', boolval([null]));
+	assertType('true', boolval(new \stdClass()));
+	assertType('true', boolval(function() {}));
 	assertType('bool', boolval(fopen('php://memory', 'r')));
 }
 

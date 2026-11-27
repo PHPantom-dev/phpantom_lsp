@@ -11,4 +11,5 @@ for ($i = 0; $i < 7; $i++) {
 	}
 }
 
-assertType('int<7, max>', $i);
+// PHPantom is more precise: the counter steps by one from 0, so it leaves at 7.
+assertType('7', $i);

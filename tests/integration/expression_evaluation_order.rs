@@ -242,7 +242,7 @@ function t(): void {
     $e; // here
 }
 "#;
-    assert_eq!(type_at_marker(php), "array{1, int}");
+    assert_eq!(type_at_marker(php), "array{1, 2}");
 }
 
 #[test]
@@ -254,7 +254,7 @@ function t(): void {
     $g; // here
 }
 "#;
-    assert_eq!(type_at_marker(php), "array{5, int, int, int}");
+    assert_eq!(type_at_marker(php), "array{5, 4, 3, 3}");
 }
 
 #[test]
@@ -267,7 +267,7 @@ function t(): void {
     $i; // here
 }
 "#;
-    assert_eq!(type_at_marker(php), "int");
+    assert_eq!(type_at_marker(php), "2");
 }
 
 // ─── A read before a later write ────────────────────────────────────────────

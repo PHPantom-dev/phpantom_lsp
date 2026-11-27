@@ -85,8 +85,8 @@ namespace PsalmTest_binary_operation_7 {
     $b = 1.1;
     $b += 1;
 
-    assertType('float', $a);
     // Folded, as in regularAddition above.
+    assertType('2.1', $a);
     assertType('2.1', $b);
 }
 

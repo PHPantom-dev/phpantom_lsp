@@ -249,6 +249,43 @@ fn mb_substr_counts_characters() {
 }
 
 #[test]
+fn substr_counts_bytes_and_declines_a_cut_through_a_character() {
+    let int = |v: &str| Some(PhpType::literal_int(v));
+    assert_eq!(
+        fold("substr", &[lit("de_DE"), int("0"), int("2")]).as_deref(),
+        Some("'de'")
+    );
+    assert_eq!(
+        fold("substr", &[lit("pretty-long"), int("5"), int("-5")]).as_deref(),
+        Some("'y'")
+    );
+    assert_eq!(
+        fold("substr", &[lit("de_DE"), int("5"), int("-5")]).as_deref(),
+        Some("''")
+    );
+    assert_eq!(
+        fold("substr", &[lit("école"), int("0"), int("2")]).as_deref(),
+        Some("'é'")
+    );
+    assert_eq!(fold("substr", &[lit("école"), int("0"), int("1")]), None);
+}
+
+#[test]
+fn mb_strlen_measures_in_utf8_and_single_byte_encodings() {
+    let length = |encoding: Option<PhpType>| fold("mb_strlen", &[lit("école"), encoding]);
+    assert_eq!(length(lit("ISO-8859-1")).as_deref(), Some("6"));
+    assert_eq!(
+        length(Some(PhpType::union(vec![
+            PhpType::literal_string_value("utf-8"),
+            PhpType::literal_string_value("8bit"),
+        ])))
+        .as_deref(),
+        Some("5|6")
+    );
+    assert_eq!(length(lit("UTF-16")).as_deref(), Some("int<1, max>"));
+}
+
+#[test]
 fn str_repeat_of_zero_is_empty_whatever_the_subject() {
     assert_eq!(
         fold(

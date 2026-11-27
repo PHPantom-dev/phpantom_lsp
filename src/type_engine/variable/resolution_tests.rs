@@ -817,12 +817,9 @@ function test(bool $flag) {
     assert_eq!(resolve_literal_test_var(content, "$numeric"), "int|float");
     assert_eq!(resolve_literal_test_var(content, "$alphabetic"), "'abd'");
     assert_eq!(resolve_literal_test_var(content, "$unchanged"), "'abc'");
-    assert_eq!(resolve_literal_test_var(content, "$integer"), "int");
-    assert_eq!(resolve_literal_test_var(content, "$float"), "float");
-    assert_eq!(
-        resolve_literal_test_var(content, "$number_union"),
-        "int|float"
-    );
+    assert_eq!(resolve_literal_test_var(content, "$integer"), "2");
+    assert_eq!(resolve_literal_test_var(content, "$float"), "2.5");
+    assert_eq!(resolve_literal_test_var(content, "$number_union"), "2|2.5");
     assert_eq!(resolve_literal_test_var(content, "$text"), "string");
     assert_eq!(
         resolve_literal_test_var(content, "$string_object"),

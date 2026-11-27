@@ -33,26 +33,31 @@ No outstanding items.
 
 ## Standard-library return types
 
-### B778. Other builtins over literal arguments are not folded
+### B778. A few builtins over known arguments are not folded
 
 **Impact: Low · Complexity: Low-Medium**
 
 ```php
 mb_strlen('école', $unknownEncoding);   // int<1, max>, should be 1|3|5|6
+array_key_exists(0, array_column([[]], 'x'));   // bool, should be false
+ltrim($class, '\\');   // string, should be class-string
+intval(rand());   // int, should be int<0, max>
 ```
 
-The string functions that rewrite a literal, the numeric conversions
-(`intval()` and friends, `abs()`, `pow()`), `str_increment()`,
-`str_decrement()`, `strlen()`/`mb_strlen()`, `implode()`,
-`array_sum()`/`array_product()`, `date()`, `range()` and an offset into a
-literal string fold, but the rest below do not. `mb_strlen()` with an
-encoding other than UTF-8 is not measured either (`// SKIP` lines in
-`tests/phpstan_nsrt/mb-strlen-php83.php`).
+`mb_strlen()` measures a literal only in UTF-8 and the single-byte
+encodings, not in UTF-16, UTF-32 or the CJK encodings, nor when the
+encoding is not a literal (`// SKIP` lines in
+`tests/phpstan_nsrt/mb-strlen-php83.php`). `array_key_exists()` with a
+literal key on an array shape is not decided from the shape. `ltrim()` of a
+`class-string` loses it. `intval()`, `floatval()` and `boolval()` of a call
+do not resolve the call, on purpose so a cast stays free (`// SKIP` in
+`tests/phpstan_nsrt/strval.php`).
 
-**Fix:** fold each function over its literal arguments, one at a time; each
-upstream fixture is the spec for its function.
+**Fix:** one rule per function; each upstream fixture is the spec for its
+function. Measuring the multibyte encodings means modelling how mbstring
+decodes each one, invalid bytes included.
 
-**Upstream cases** (PHPStan `nsrt/`): `constantTypes.php` (8), 19 more.
+**Upstream cases** (PHPStan `nsrt/`): `bug-8917.php` (2), `bug-7483.php` (2).
 
 ### B819. Built-ins whose result their arguments decide return the declared type
 
@@ -1267,7 +1272,7 @@ It also shows as:
 - `++` and compound assignment on an array offset do not change the offset's type
 - A compound assignment (`.=`) to a property or static property does not update its narrowed type
 
-**Cases** (PHPStan `nsrt/`, 21 assertions): `has-offset-type-bug.php` (7), `constantTypes.php` (5), `throw-points-assign-op.php` (4), `shopware-connection-profiler.php` (3), `array-keys-branches.php`, `generalize-scope.php`.
+**Cases** (PHPStan `nsrt/`, 21 assertions): `has-offset-type-bug.php` (7), `constantTypes.php` (6), `throw-points-assign-op.php` (4), `shopware-connection-profiler.php` (3), `array-keys-branches.php`, `generalize-scope.php`.
 
 ### B862. Array keys are not normalised the way PHP casts them
 
@@ -1835,6 +1840,31 @@ rewrite those tests.
 No outstanding items.
 
 ## Miscellaneous
+
+### B920. A closure generator's yields are read at the end of its body
+
+**Impact: Medium · Complexity: Medium**
+
+```php
+$gen = (static function (): iterable {
+    for ($i = 0; $i < 3; $i++) {
+        yield 'k' => $i;
+    }
+})();
+foreach ($gen as $v) {
+    $v;   // 3, should be int<0, 2>
+}
+```
+
+The key and value of each `yield` in a closure or arrow function are
+resolved against the scope the body ends with, so a variable the body
+changes after the `yield` (a loop counter, a reassignment) gives its
+final value instead of the one yielded. Shows on
+`php-standard-library`'s `IteratorTest.php`.
+
+**Fix:** collect each `yield`'s key and value during the body walk, with
+the scope at the `yield`, the way the walk already collects `return`
+values.
 
 ### B909. Hover on an assignment reads an arithmetic argument less precisely than the walker
 
