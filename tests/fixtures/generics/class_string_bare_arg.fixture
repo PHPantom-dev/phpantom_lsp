@@ -1,0 +1,16 @@
+// test: a bare class-string argument binds class-string<T> to object
+// feature: hover
+// expect_hover: $made => object
+---
+<?php
+
+/**
+ * @template T
+ * @param class-string<T> $class
+ * @return T
+ */
+function make(string $class) {}
+
+/** @var class-string $class */
+$made = make($class);
+$made<>

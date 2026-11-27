@@ -1552,25 +1552,6 @@ types `array_map()` gives it. See `tests/phpstan_nsrt/array_values.php`.
 
 **Upstream cases** (PHPStan `nsrt/`, 4 assertions): `bug-12691.php` (3), `bug-11861.php`.
 
-### B810. A bare `class-string` argument leaves `class-string<T>`'s template unbound
-
-**Impact: Low · Complexity: Low**
-
-```php
-/**
- * @template T
- * @param literal-string|class-string<T> $name
- * @return ($name is class-string ? T : mixed)
- */
-function get(string $name) {}
-
-/** @var class-string $class_string */
-get($class_string);   // mixed, should be object
-```
-
-**Fix:** bind `T` to `object` from an unparameterised `class-string`. See
-`tests/psalm_assertions/template_conditional_return_type.php`.
-
 ### B868. The callback of `array_diff_uassoc()`, `array_udiff()`, `array_intersect_ukey()` and friends gets no parameter types
 
 **Impact: Medium · Complexity: Low**

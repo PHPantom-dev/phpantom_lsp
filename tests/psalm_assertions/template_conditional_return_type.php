@@ -280,7 +280,7 @@ namespace PsalmTest_template_conditional_return_type_9 {
     $expect_mixed_from_literal = get("LiteralDirect");
 
     assertType('mixed', $expect_mixed);
-    assertType('object', $expect_object); // SKIP: a bare `class-string` argument leaves `class-string<T>`'s template unbound
+    assertType('object', $expect_object);
     assertType('A', $expect_a_object);
     assertType('mixed', $expect_mixed_from_literal);
 }

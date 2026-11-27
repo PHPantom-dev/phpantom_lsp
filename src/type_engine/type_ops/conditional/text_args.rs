@@ -925,21 +925,29 @@ impl TextArgs<'_> {
         // `class-string<Foo>` names `Foo` just as `Foo::class` does.
         if let Some(arg) = arg_text
             && let Some(arg_ty) = self.arg_type(param_idx, arg)
-            && let Some(inner) = class_string_inner_classes(&arg_ty)
         {
-            if concrete_class_string_bound.is_some() {
-                let all_satisfy = inner.iter().all(|ty| match ty.kind() {
-                    TypeKind::Named(name) => satisfies_bound(name.as_str()),
-                    _ => false,
-                });
-                return choose_branch(all_satisfy);
+            if let Some(inner) = class_string_inner_classes(&arg_ty) {
+                if concrete_class_string_bound.is_some() {
+                    let all_satisfy = inner.iter().all(|ty| match ty.kind() {
+                        TypeKind::Named(name) => satisfies_bound(name.as_str()),
+                        _ => false,
+                    });
+                    return choose_branch(all_satisfy);
+                }
+                let bound = if inner.len() == 1 {
+                    inner.into_iter().next().unwrap()
+                } else {
+                    PhpType::union(inner)
+                };
+                return substitute_bound(bound);
             }
-            let bound = if inner.len() == 1 {
-                inner.into_iter().next().unwrap()
-            } else {
-                PhpType::union(inner)
-            };
-            return substitute_bound(bound);
+            // A bare `class-string` names some class without saying which,
+            // so what it instantiates is an `object`.
+            if concrete_class_string_bound.is_none()
+                && matches!(arg_ty.kind(), TypeKind::ClassString(None))
+            {
+                return substitute_bound(PhpType::named(atom("object")));
+            }
         }
         // Argument isn't a ::class literal or resolvable variable → try else branch
         self.resolve(&cond.else_type)

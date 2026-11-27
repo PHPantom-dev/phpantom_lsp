@@ -33,6 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A plain `class-string` argument makes a `class-string<T>` template an `object`.** Passing a value typed `class-string` to a function declared `@param class-string<T>` / `@return T` now gives `object` instead of `mixed`. Contributed by @AJenbo.
 - **`static` through a narrowed `$this` keeps the other types.** After `if ($this instanceof Bar)`, a call such as `$this->returnStatic()` is typed `static(Ipsum)&Bar` instead of dropping `Bar`. Contributed by @AJenbo.
 - **Symfony, Yii and Tempest applications in a monorepo subdirectory.** When the workspace opens at a monorepo's top with the application in a folder such as `backend/`, its templates, bundle resources, aliases, params, migrations, view paths and discovery are read from that folder rather than the workspace root, as Laravel applications already were.
 - **`fix` and `format` only rewrite the project's own files.** Files reached through a symlink out of the project, or through a configured path outside it, are still read but no longer rewritten, unless you name the path on the command line. An `[indexing] include` entry such as `../shared` is treated as library code, as documented, rather than as part of the project.
