@@ -2081,28 +2081,3 @@ written-out literals on either side.
 
 **Cases** (PHPStan `nsrt/`): the `bool`/`float` `// SKIP` lines in
 `bug-11129.php`.
-
-### B922. Merging branches keeps literals a wider refined string already covers
-
-**Impact: Low · Complexity: Low**
-
-```php
-/** @param '1'|'2'|…|'17' $s @param 'a'|'b' $t @param non-empty-string $n */
-if (rand(0, 1)) { $s .= $suffix; }  // too many strings, generalized
-$s;  // '1'|'2'|…|'17'|(literal-string&non-falsy-string), should be literal-string&non-falsy-string
-
-$x = $t;
-if (rand(0, 1)) { $x = $n; }
-$x;  // string, should be non-empty-string
-```
-
-When the two sides of a branch merge, a literal that is a value of a refined
-string type on the other side (`literal-string&non-falsy-string`,
-`non-empty-string`) is kept next to it, or the whole union is widened to
-plain `string`. PHPStan's union normalization absorbs the literal into the
-wider type.
-
-**Fix:** absorb a literal string into a refined string member of the same
-union whose every accessory it satisfies, when the union is built.
-
-**Cases** (PHPStan `nsrt/`): `constant-string-unions.php` line 77.

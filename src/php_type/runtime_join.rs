@@ -150,6 +150,13 @@ pub(crate) fn is_runtime_value_subtype(subtype: &PhpType, supertype: &PhpType) -
         return members.iter().any(|m| is_runtime_value_subtype(subtype, m));
     }
 
+    // A value lies in `A&B` when it lies in each of them, so a literal
+    // satisfying every accessory of `literal-string&non-falsy-string`
+    // adds nothing beside it.
+    if let TypeKind::Intersection(members) = supertype.kind() {
+        return !members.is_empty() && members.iter().all(|m| is_runtime_value_subtype(subtype, m));
+    }
+
     if let TypeKind::ArrayShape(entries) = subtype.kind() {
         return shape_values_contained_in(entries, subtype.is_list_shape(), supertype);
     }

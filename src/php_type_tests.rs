@@ -4418,6 +4418,22 @@ mod simplification_tests {
         );
     }
 
+    #[test]
+    fn runtime_value_join_absorbs_literals_into_refined_string_intersection() {
+        let joined = PhpType::join_runtime_value_types(vec![
+            PhpType::parse("'1'|'17'"),
+            PhpType::parse("literal-string&non-falsy-string"),
+        ]);
+        assert_eq!(joined.to_string(), "literal-string&non-falsy-string");
+
+        // `'0'` is falsy, so the intersection does not cover it.
+        let kept = PhpType::join_runtime_value_types(vec![
+            PhpType::parse("'0'|'1'"),
+            PhpType::parse("literal-string&non-falsy-string"),
+        ]);
+        assert_eq!(kept.to_string(), "'0'|(literal-string&non-falsy-string)");
+    }
+
     /// A benevolent union stays benevolent through a join that adds nothing
     /// it does not already hold, and becomes enforced again once something
     /// outside it joins.
