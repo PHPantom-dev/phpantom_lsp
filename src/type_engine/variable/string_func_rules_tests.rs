@@ -271,7 +271,7 @@ fn substr_counts_bytes_and_declines_a_cut_through_a_character() {
 }
 
 #[test]
-fn mb_strlen_measures_in_utf8_and_single_byte_encodings() {
+fn mb_strlen_measures_in_the_named_encodings() {
     let length = |encoding: Option<PhpType>| fold("mb_strlen", &[lit("école"), encoding]);
     assert_eq!(length(lit("ISO-8859-1")).as_deref(), Some("6"));
     assert_eq!(
@@ -282,7 +282,12 @@ fn mb_strlen_measures_in_utf8_and_single_byte_encodings() {
         .as_deref(),
         Some("5|6")
     );
-    assert_eq!(length(lit("UTF-16")).as_deref(), Some("int<1, max>"));
+    assert_eq!(length(lit("UTF-16")).as_deref(), Some("3"));
+    // UTF-7's `+` starts an escape that is not decoded.
+    assert_eq!(
+        fold("mb_strlen", &[lit("a+b"), lit("UTF-7")]).as_deref(),
+        Some("int<1, max>")
+    );
 }
 
 #[test]
@@ -625,4 +630,36 @@ fn encoding_names_decide_mb_setters() {
         Some("never")
     );
     assert_eq!(fold("mb_ord", &[lit("")]).as_deref(), Some("never"));
+}
+
+#[test]
+fn mb_strlen_counts_in_the_named_encoding() {
+    let count = |text: &str, encoding: &str| fold("mb_strlen", &[lit(text), lit(encoding)]);
+    assert_eq!(count("école", "UTF-16").as_deref(), Some("3"));
+    assert_eq!(count("école", "ucs-4le").as_deref(), Some("1"));
+    assert_eq!(count("いい天気ですね〜", "SJIS").as_deref(), Some("13"));
+    assert_eq!(count("いい天気ですね〜", "EUC-JP").as_deref(), Some("15"));
+    assert_eq!(count("いい天気ですね〜", "EUC-TW").as_deref(), Some("16"));
+    assert_eq!(count("מזגן", "BIG-5").as_deref(), Some("4"));
+}
+
+#[test]
+fn mb_strlen_model_matches_mbstring() {
+    use super::mb_length::{Family, family_of, length};
+
+    let count = |text: &str, encoding: &str| length(text, family_of(encoding).unwrap());
+    // A surrogate pair is one UTF-16 character, read in either byte order.
+    assert_eq!(count("\u{620}\u{700}", "UTF-16BE"), Some(1));
+    assert_eq!(count("a\u{600}\u{80}", "UTF-16LE"), Some(3));
+    // A Shift_JIS-2004 pair can decode to a letter and a combining mark.
+    assert_eq!(length("\u{186}c", Family::Sjis2004), Some(3));
+    assert_eq!(length("\u{186}c", Family::Sjis), Some(2));
+    // Big5's `0xC8` stands alone before a byte that could start a pair.
+    assert_eq!(count("\u{221}", "BIG-5"), Some(2));
+    // Escape syntax is not decoded.
+    assert_eq!(count("a+AGE-", "UTF-7"), None);
+    assert_eq!(count("&amp;", "HTML-ENTITIES"), None);
+    assert_eq!(count("\u{1b}$B", "ISO-2022-JP"), None);
+    assert_eq!(count("é1", "BASE64"), Some(2));
+    assert_eq!(family_of("not an encoding"), None);
 }

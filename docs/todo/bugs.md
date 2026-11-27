@@ -33,32 +33,6 @@ No outstanding items.
 
 ## Standard-library return types
 
-### B778. A few builtins over known arguments are not folded
-
-**Impact: Low · Complexity: Low-Medium**
-
-```php
-mb_strlen('école', $unknownEncoding);   // int<1, max>, should be 1|3|5|6
-array_key_exists(0, array_column([[]], 'x'));   // bool, should be false
-ltrim($class, '\\');   // string, should be class-string
-intval(rand());   // int, should be int<0, max>
-```
-
-`mb_strlen()` measures a literal only in UTF-8 and the single-byte
-encodings, not in UTF-16, UTF-32 or the CJK encodings, nor when the
-encoding is not a literal (`// SKIP` lines in
-`tests/phpstan_nsrt/mb-strlen-php83.php`). `array_key_exists()` with a
-literal key on an array shape is not decided from the shape. `ltrim()` of a
-`class-string` loses it. `intval()`, `floatval()` and `boolval()` of a call
-do not resolve the call, on purpose so a cast stays free (`// SKIP` in
-`tests/phpstan_nsrt/strval.php`).
-
-**Fix:** one rule per function; each upstream fixture is the spec for its
-function. Measuring the multibyte encodings means modelling how mbstring
-decodes each one, invalid bytes included.
-
-**Upstream cases** (PHPStan `nsrt/`): `bug-8917.php` (2), `bug-7483.php` (2).
-
 ### B819. Built-ins whose result their arguments decide return the declared type
 
 **Impact: Medium · Complexity: Medium**

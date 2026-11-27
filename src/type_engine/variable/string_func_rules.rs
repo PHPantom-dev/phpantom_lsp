@@ -194,6 +194,15 @@ fn refined_type(name: &str, args: &dyn ArrayFuncArgs) -> Option<PhpType> {
         "sprintf" => sprintf_type(args, true),
         "vsprintf" => sprintf_type(args, false),
         "number_format" => number_format_type(args),
+        // A class name with its leading separator stripped names the same
+        // class.
+        "ltrim"
+            if !args.is_named(1)
+                && single_literal(args, 1).is_some_and(|chars| chars == "\\")
+                && is_subject(args, PhpType::class_string(None)) =>
+        {
+            args.arg_raw_type(0)
+        }
         "implode" | "join" => implode_type(args),
         // An increment never produces `'0'`; a decrement can (`'1'`).
         "str_increment" if args.has_arg(0) && !args.is_spread(0) => {
@@ -489,66 +498,57 @@ fn parse_format(format: &str) -> Option<Format> {
 /// length (`strlen(123)` is `3`); otherwise the length is the range its
 /// type allows, `int<1, max>` for a non-empty string or a number.
 ///
-/// `mb_strlen()` counts characters in UTF-8 and bytes in a single-byte
-/// encoding; in any other a known value still gets the range its
-/// emptiness allows.
+/// `mb_strlen()` counts in the encoding the call names, and in every
+/// encoding mbstring knows when that is not a literal; where an encoding's
+/// count is not modelled a known value still gets the range its emptiness
+/// allows.
 fn length_type(args: &dyn ArrayFuncArgs, multibyte: bool) -> Option<PhpType> {
     use crate::type_engine::type_ops::int_interval::IntInterval;
     use crate::type_engine::variable::rhs_resolution::php_string_of_type;
+    use mb_length::Family;
 
     if !args.has_arg(0) || args.is_spread(0) || args.is_named(0) {
         return None;
     }
     let ty = args.arg_raw_type(0)?;
-    // How each encoding the call may use counts a string: in characters
-    // (UTF-8) or in bytes. Empty when some encoding counts another way.
-    let mut counts: Vec<Count> = if multibyte {
-        if is_utf8_encoding(args, 1) {
-            vec![Count::Chars]
-        } else {
-            Vec::new()
-        }
-    } else {
-        vec![Count::Bytes]
-    };
-    if multibyte && args.has_arg(1) && !args.is_spread(1) && !args.is_named(1) {
+    // The encodings the call may count in.
+    let families: Vec<Family> = if !multibyte {
+        vec![Family::Bytes]
+    } else if is_utf8_encoding(args, 1) {
+        vec![Family::Utf8]
+    } else if args.is_spread(1) || args.is_named(1) {
+        Vec::new()
+    } else if let Some(names) = literal_alternatives_any(args, 1) {
         // An encoding mbstring does not know is a `ValueError`, so only the
         // known alternatives can return.
-        if let Some(names) = literal_alternatives_any(args, 1) {
-            let known: Vec<&String> = names
-                .iter()
-                .filter(|name| values::is_supported_encoding(name))
-                .collect();
-            if known.is_empty() {
-                return Some(PhpType::never());
-            }
-            counts.clear();
-            for name in known {
-                let count =
-                    if name.eq_ignore_ascii_case("UTF-8") || name.eq_ignore_ascii_case("UTF8") {
-                        Count::Chars
-                    } else if values::is_single_byte_encoding(name) {
-                        Count::Bytes
-                    } else {
-                        counts.clear();
-                        break;
-                    };
-                if !counts.contains(&count) {
-                    counts.push(count);
-                }
+        let mut families: Vec<Family> = Vec::new();
+        for family in names.iter().filter_map(|name| mb_length::family_of(name)) {
+            if !families.contains(&family) {
+                families.push(family);
             }
         }
-    }
-    let read_values = !names_a_constant(args, 0) && !counts.is_empty();
+        if families.is_empty() {
+            return Some(PhpType::never());
+        }
+        families
+    } else {
+        mb_length::ALL_FAMILIES.to_vec()
+    };
+    let read_values = !names_a_constant(args, 0) && !families.is_empty();
     let mut lengths: Vec<i64> = Vec::new();
     let mut ranges: Vec<IntInterval> = Vec::new();
     for member in ty.union_members() {
-        if let Some(text) = read_values.then(|| php_string_of_type(member)).flatten() {
-            for count in &counts {
-                let length = match count {
-                    Count::Chars => text.chars().count(),
-                    Count::Bytes => text.len(),
-                };
+        let measured = read_values
+            .then(|| php_string_of_type(member))
+            .flatten()
+            .and_then(|text| {
+                families
+                    .iter()
+                    .map(|&family| mb_length::length(&text, family))
+                    .collect::<Option<Vec<usize>>>()
+            });
+        if let Some(measured) = measured {
+            for length in measured {
                 let length = i64::try_from(length).ok()?;
                 if !lengths.contains(&length) {
                     lengths.push(length);
@@ -586,13 +586,6 @@ fn length_type(args: &dyn ArrayFuncArgs, multibyte: bool) -> Option<PhpType> {
         max: Some(length),
     }));
     Some(IntInterval::hull_of(&ranges).into_type())
-}
-
-/// What a string length counts.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Count {
-    Chars,
-    Bytes,
 }
 
 /// `number_format()`: a `numeric-string` when no thousands separator is
@@ -1420,6 +1413,8 @@ pub(in crate::type_engine) fn has_string_func_rule(func_name: &str) -> bool {
         )
 }
 
+#[path = "string_func_rules_mb_length.rs"]
+mod mb_length;
 #[path = "string_func_rules_values.rs"]
 mod values;
 

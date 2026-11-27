@@ -34,6 +34,8 @@
 //!   a value between their bounds.
 //! - `date()` is declared `string`, but a literal format decides which
 //!   strings it can produce.
+//! - `array_key_exists()` is declared `bool`, but a literal key and an array
+//!   shape decide whether the key is there.
 //!
 //! WordPress functions whose arguments decide their result the same way are
 //! in [`wordpress`].
@@ -148,6 +150,7 @@ enum CallSiteFunction {
     PregSplit,
     Random { swaps_bounds: bool },
     Date,
+    ArrayKeyExists,
     WordPress(wordpress::WordPressFunction),
 }
 
@@ -176,6 +179,10 @@ fn classify(func_name: &str) -> Option<CallSiteFunction> {
         Some(CallSiteFunction::PregSplit)
     } else if name.eq_ignore_ascii_case("date") {
         Some(CallSiteFunction::Date)
+    } else if name.eq_ignore_ascii_case("array_key_exists")
+        || name.eq_ignore_ascii_case("key_exists")
+    {
+        Some(CallSiteFunction::ArrayKeyExists)
     } else if name.eq_ignore_ascii_case("random_int") {
         Some(CallSiteFunction::Random {
             swaps_bounds: false,
@@ -252,8 +259,54 @@ pub(crate) fn call_site_return_type(
         CallSiteFunction::PregSplit => preg_split::return_type(&args),
         CallSiteFunction::Random { swaps_bounds } => random_return(&args, swaps_bounds),
         CallSiteFunction::Date => date_return(&args),
+        CallSiteFunction::ArrayKeyExists => array_key_exists_return(&args),
         CallSiteFunction::WordPress(function) => wordpress::return_type(function, &args),
     }
+}
+
+/// `array_key_exists()` of a literal key on an array shape: `true` when every
+/// shape the array may be requires the key, `false` when none can hold it.
+///
+/// `None` when the key is not a literal `int` or `string`, or the array is
+/// not a shape whose keys are all known.
+fn array_key_exists_return(args: &CallArgs<'_>) -> Option<PhpType> {
+    use crate::php_type::{LiteralValue, is_decimal_int_array_key, runtime_shape_keys};
+
+    let key = args.resolve(&args.text("$key")?)?;
+    let array = args.resolve(&args.text("$array")?)?;
+    // Each key as the runtime key it is stored under: a decimal integer
+    // string is the integer key it spells.
+    let keys: Vec<String> = key
+        .union_members()
+        .into_iter()
+        .map(|member| match member.as_literal()? {
+            LiteralValue::Int(raw) => is_decimal_int_array_key(raw).then(|| raw.to_string()),
+            literal @ LiteralValue::String(_) => Some(literal.string_content()?.into_owned()),
+            LiteralValue::Float(_) => None,
+        })
+        .collect::<Option<_>>()?;
+    let mut present = false;
+    let mut absent = false;
+    for member in array.union_members() {
+        let parts = member.shape_parts()?;
+        let shape_keys = runtime_shape_keys(parts.entries)?;
+        // A class-constant key is stored as its spelling, not its value.
+        if shape_keys.iter().any(|key| key.contains("::")) {
+            return None;
+        }
+        for key in &keys {
+            match shape_keys.iter().position(|shape_key| shape_key == key) {
+                Some(index) if !parts.entries[index].optional => present = true,
+                None if parts.tail.is_none() => absent = true,
+                _ => return Some(PhpType::bool()),
+            }
+        }
+    }
+    Some(match (present, absent) {
+        (true, false) => PhpType::true_(),
+        (false, true) => PhpType::false_(),
+        _ => PhpType::bool(),
+    })
 }
 
 /// One call's arguments, bound to the parameters they fill.

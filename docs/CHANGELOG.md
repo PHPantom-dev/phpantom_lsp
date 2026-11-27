@@ -51,7 +51,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A `for` loop whose only change is in its update clause.** After `for ($i = 0; $i < 7; $i += 1) {}` the counter is `7` instead of an impossible type.
 - **Converting a comparison, an array literal, a closure or a new object is exact.** `(int) ($a === $b)` is `0|1`, `intval([])` is `0`, and `boolval(new Foo())` is `true`.
 - **`range()` with a `float` step between integer bounds may hold integers.** `range(1, 3, $step)` is typed `list<int|float>`, since a whole-number step such as `1.0` gives `[1, 2, 3]`.
-- **`substr()` and `mb_strlen()` fold over more literals.** `substr()` of a literal string with a literal offset gives the exact substring, and `mb_strlen()` measures a literal in single-byte encodings such as `ISO-8859-1` as well as UTF-8.
+- **`substr()` and `mb_strlen()` fold over more literals.** `substr()` of a literal string with a literal offset gives the exact substring, and `mb_strlen()` measures a literal in whichever encoding the call names, or in every encoding mbstring knows when the encoding is not a literal: `mb_strlen('école', $encoding)` is `1|3|5|6`.
+- **`array_key_exists()` is decided by an array shape.** A literal key that every shape requires gives `true`, and one no shape can hold gives `false`.
+- **`ltrim($class, '\\')` keeps a `class-string`.** Stripping the leading separator from a class name still names the same class.
+- **Casting a call to `rand()` and similar builtins is exact.** `intval(rand())` and `(int) rand()` are `int<0, max>` instead of `int`.
 - **`method_exists()` and `property_exists()` narrow a plain object.** Inside the guard, an `object` reads as `object&hasMethod(name)` or `object&hasProperty(name)`, and goes back to `object` once the branches join.
 - **`array_splice()` updates its array.** The array passed in loses the removed entries, gains the replacement's values and has its int keys renumbered, so an int-keyed array becomes a list. The call returns the removed entries rather than the whole array.
 - **`new $class` always builds an object.** When the variable holds a plain string, a `class-string`, `mixed` or an object, the result is `object`, or the variable's own class when it holds an instance, instead of having no type.

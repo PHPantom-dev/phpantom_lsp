@@ -197,11 +197,12 @@ pub(super) fn single_scalar(types: &[ResolvedType]) -> Option<Scalar> {
 }
 
 /// Whether an operand is cheap enough to resolve just to see whether it
-/// folds: a literal, a variable, a constant, or a sign/cast/concatenation/
-/// interpolation built from them. A concatenation or interpolated string
-/// counts as cheap without looking inside: resolving it applies this same
-/// check to its own operands, so a long concatenation chain is still only
-/// walked once.
+/// folds: a literal, a variable, a constant, a call to a builtin whose
+/// arguments decide its result (`strtolower()`, `rand()`), or a
+/// sign/cast/concatenation/interpolation built from them. A concatenation
+/// or interpolated string counts as cheap without looking inside:
+/// resolving it applies this same check to its own operands, so a long
+/// concatenation chain is still only walked once.
 pub(super) fn is_cheap_scalar_operand(expr: &Expression<'_>) -> bool {
     match expr {
         Expression::Parenthesized(inner) => is_cheap_scalar_operand(inner.expression),
@@ -212,12 +213,15 @@ pub(super) fn is_cheap_scalar_operand(expr: &Expression<'_>) -> bool {
         | Expression::Access(Access::ClassConstant(_))
         | Expression::CompositeString(_) => true,
         Expression::Call(mago_syntax::cst::Call::Function(call)) => {
-            matches!(call.function, Expression::Identifier(name) if crate::type_engine::variable::string_func_rules::has_string_func_rule(bytes_to_str(name.value())))
-                && call
-                    .argument_list
-                    .arguments
-                    .iter()
-                    .all(|argument| is_cheap_scalar_operand(argument.value()))
+            matches!(call.function, Expression::Identifier(name) if {
+                let name = bytes_to_str(name.value());
+                crate::type_engine::variable::string_func_rules::has_string_func_rule(name)
+                    || crate::type_engine::type_ops::call_site_returns::has_call_site_return(name)
+            }) && call
+                .argument_list
+                .arguments
+                .iter()
+                .all(|argument| is_cheap_scalar_operand(argument.value()))
         }
         Expression::Binary(binary) => binary.operator.is_concatenation(),
         Expression::UnaryPrefix(unary) => {

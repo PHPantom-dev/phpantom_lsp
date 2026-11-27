@@ -72,7 +72,16 @@ fn range_value_type(start: &PhpType, end: &PhpType, step: Option<&PhpType>) -> P
         // int bounds does so only when it has a fractional part:
         // `range(1, 3, 1.0)` is `[1, 2, 3]`.
         let is_float = |ty: &PhpType| ty.union_members().iter().all(|m| m.is_float_subtype());
-        return if is_float(start) || is_float(end) {
+        let is_fractional = |ty: &PhpType| {
+            ty.union_members().iter().all(|m| match m.as_literal() {
+                Some(crate::php_type::LiteralValue::Float(raw)) => raw
+                    .replace('_', "")
+                    .parse::<f64>()
+                    .is_ok_and(|value| value.fract() != 0.0),
+                _ => false,
+            })
+        };
+        return if is_float(start) || is_float(end) || step.is_some_and(is_fractional) {
             float_ty
         } else {
             number

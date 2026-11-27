@@ -47,9 +47,9 @@ class MbStrlenPhp83
 		assertType('*NEVER*', mb_strlen('', 'invalid encoding'));
 		assertType('5|6', mb_strlen('école', $utf8And8bit)); // PHPantom keeps the literal lengths
 		assertType('5', mb_strlen('école', $utf8AndInvalidEncoding));
-		assertType('1|3|5|6', mb_strlen('école', $unknownEncoding)); // SKIP: a string is not measured in a multibyte encoding other than UTF-8
-		assertType('2|4|5|8', mb_strlen('מזגן', $unknownEncoding)); // SKIP: a string is not measured in a multibyte encoding other than UTF-8
-		assertType('6|8|12|13|15|16|24', mb_strlen('いい天気ですね〜', $unknownEncoding)); // SKIP: a string is not measured in a multibyte encoding other than UTF-8
+		assertType('1|3|5|6', mb_strlen('école', $unknownEncoding));
+		assertType('2|4|5|8', mb_strlen('מזגן', $unknownEncoding));
+		assertType('6|8|12|13|15|16|24', mb_strlen('いい天気ですね〜', $unknownEncoding));
 		assertType('3', mb_strlen(123, $utf8AndInvalidEncoding));
 		assertType('*NEVER*', mb_strlen('foo', $encodingsValidOnlyUntilPhp72));
 	}

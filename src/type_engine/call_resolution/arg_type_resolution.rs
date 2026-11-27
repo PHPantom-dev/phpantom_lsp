@@ -82,16 +82,15 @@ impl<'a, 'ctx> TextArrayFuncArgs<'a, 'ctx> {
 impl ArrayFuncArgs for TextArrayFuncArgs<'_, '_> {
     fn arg_raw_type(&self, index: usize) -> Option<PhpType> {
         let text = self.arg_text(index)?;
-        // Keep quoted scalar values for rules that can fold literal inputs.
-        // Arrays still go through the inline resolver, which resolves their
-        // element expressions in the caller's context.
-        let literal = text
-            .starts_with(['\'', '"'])
-            .then(|| {
-                crate::type_engine::variable::rhs_resolution::infer_type_from_constant_value(text)
-            })
-            .flatten()
-            .filter(|ty| ty.as_literal().is_some());
+        // Keep quoted and numeric scalar values for rules that can fold
+        // literal inputs (`range(0, 1, 0.25)` steps by a fraction). Arrays
+        // still go through the inline resolver, which resolves their element
+        // expressions in the caller's context.
+        let literal = (text.starts_with(['\'', '"'])
+            || text.starts_with(|c: char| c.is_ascii_digit()))
+        .then(|| crate::type_engine::variable::rhs_resolution::infer_type_from_constant_value(text))
+        .flatten()
+        .filter(|ty| ty.as_literal().is_some());
         // The inline resolver only answers for array-like arguments, but
         // some rules read a scalar one too: `range()`'s bounds and step,
         // `explode()`'s limit. Like the AST counterpart, anything it

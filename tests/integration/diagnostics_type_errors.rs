@@ -12079,12 +12079,13 @@ function floats(): void
 "#;
     let messages = messages_with_code(&collect_with_full_stubs(php), "type_mismatch_argument");
     assert_eq!(messages.len(), 3, "got {messages:?}");
-    assert!(
-        messages
-            .iter()
-            .all(|m| m.contains("parameter 1 accepts int, but is passed float")),
-        "{messages:?}"
-    );
+    for passed in ["0.0|1.0", "0.0|0.25|0.5|0.75|1.0", "1.0|2.0"] {
+        let expected = format!("parameter 1 accepts int, but is passed {passed})");
+        assert!(
+            messages.iter().any(|m| m.contains(&expected)),
+            "{messages:?}"
+        );
+    }
 }
 
 /// A quotient is a float unless it comes out even, so a range up to one
