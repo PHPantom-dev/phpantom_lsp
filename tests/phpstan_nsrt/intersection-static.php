@@ -59,10 +59,10 @@ abstract class Ipsum implements Foo
 	{
 		assertType('static(IntersectionStatic\Ipsum)', $this->returnStatic());
 		if ($this instanceof Bar) {
-			assertType('static(IntersectionStatic\Ipsum)&IntersectionStatic\Bar', $this->returnStatic()); // SKIP: a `static` return through a `$this` narrowed to an intersection drops the other members
+			assertType('static(IntersectionStatic\Ipsum)&IntersectionStatic\Bar', $this->returnStatic());
 		}
 		if ($this instanceof Baz) {
-			assertType('static(IntersectionStatic\Ipsum)&IntersectionStatic\Baz', $this->returnStatic()); // SKIP: a `static` return through a `$this` narrowed to an intersection drops the other members
+			assertType('static(IntersectionStatic\Ipsum)&IntersectionStatic\Baz', $this->returnStatic());
 		}
 	}
 

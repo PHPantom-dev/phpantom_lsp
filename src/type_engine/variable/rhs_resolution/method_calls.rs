@@ -70,6 +70,16 @@ pub(super) fn resolve_method_receiver<'b>(
             {
                 return (ResolvedType::into_arced_classes(narrowed.clone()), narrowed);
             }
+            // A `$this` narrowed to an intersection keeps its members on the
+            // receiver so a `static` return carries them too; any other
+            // narrowing leaves the receiver empty to bind `static` late.
+            Some(narrowed)
+                if narrowed
+                    .iter()
+                    .any(|rt| matches!(rt.type_string.kind(), TypeKind::Intersection(_))) =>
+            {
+                return (ResolvedType::into_arced_classes(narrowed.clone()), narrowed);
+            }
             Some(narrowed) => ResolvedType::into_arced_classes(narrowed),
             None => crate::class_lookup::find_class_by_fqn(
                 ctx.file.all_classes,
@@ -542,7 +552,28 @@ pub(super) fn resolve_named_member_call<'b>(
                     // class late static binding lands on satisfies all of them,
                     // not only the one that declared the method.
                     None => match receiver_intersection {
-                        Some(ref inter) => ty.replace_self_over_type(&owner_key, inter),
+                        Some(ref inter) => {
+                            let inter = match (&lsb_class, inter.kind()) {
+                                (Some(this_class), TypeKind::Intersection(parts))
+                                    if ctx.current_class.kind
+                                        != crate::types::ClassLikeKind::Trait =>
+                                {
+                                    PhpType::intersection(
+                                        parts
+                                            .iter()
+                                            .map(|p| match p.kind() {
+                                                TypeKind::Named(n) if n == this_class => {
+                                                    PhpType::static_type(*this_class)
+                                                }
+                                                _ => p.clone(),
+                                            })
+                                            .collect(),
+                                    )
+                                }
+                                _ => inter.clone(),
+                            };
+                            ty.replace_self_over_type(&owner_key, &inter)
+                        }
                         None => match exact_called_class {
                             Some(ref called) => ty.replace_self_exact(&owner_key, called),
                             None => match lsb_class {

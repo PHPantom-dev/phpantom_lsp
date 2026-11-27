@@ -1535,26 +1535,6 @@ inherited `@phpstan-assert` before applying it. `// SKIP` line in
 
 **Upstream cases** (PHPStan `nsrt/`, 6 assertions): `assert-methods.php` (5), `assert-class-type.php`.
 
-### B813. A `static` return through a `$this` narrowed to an intersection drops the other members
-
-**Impact: Low · Complexity: Low**
-
-```php
-abstract class Ipsum implements Foo {
-    public function testThis(): void {
-        if ($this instanceof Bar) {
-            $this->returnStatic();   // static(Ipsum), should be static(Ipsum)&Bar
-        }
-    }
-}
-```
-
-`$this` itself is narrowed to `Ipsum&Bar`, but a forwarding call binds
-`static` to the enclosing class alone, so the `Bar` the check proved is lost.
-
-**Fix:** bind `static` over the narrowed `$this` the way an intersection
-receiver variable already is. See `tests/phpstan_nsrt/intersection-static.php`.
-
 ### B806. A generic function passed as a first-class callable to `array_map()` leaves its template unbound
 
 **Impact: Low · Complexity: Medium**
