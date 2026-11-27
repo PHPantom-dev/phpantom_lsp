@@ -33,6 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Symfony, Yii and Tempest applications in a monorepo subdirectory.** When the workspace opens at a monorepo's top with the application in a folder such as `backend/`, its templates, bundle resources, aliases, params, migrations, view paths and discovery are read from that folder rather than the workspace root, as Laravel applications already were.
 - **`fix` and `format` only rewrite the project's own files.** Files reached through a symlink out of the project, or through a configured path outside it, are still read but no longer rewritten, unless you name the path on the command line. An `[indexing] include` entry such as `../shared` is treated as library code, as documented, rather than as part of the project.
 - **A closure's return type comes from its whole body.** Every `return` counts, including those inside `if`/`else`, locals assigned in the body, and a bare `return;`. A closure that returns nothing is `void`, and one that always throws or calls a `never` function is `never`. Generator closures keep their yielded literals, follow `yield from`, and refine a declared `Generator` or `iterable` return.
 - **More standard-library calls are typed from their arguments.** `version_compare()` over literal versions gives the exact ordering or answer, `gettimeofday(true)` is a `float`, `stat()` results have their numeric keys, and an `mb_*` call naming an encoding mbstring does not know is recognised as throwing.

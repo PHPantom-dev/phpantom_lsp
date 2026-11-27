@@ -105,12 +105,7 @@ pub(super) fn sources(backend: &Backend, catalog: &super::discovery::Catalog) ->
 /// Read configuration values through the declaring file's PHP loaders.
 pub(super) fn collect(backend: &Backend, sources: &BTreeSet<String>) -> Configuration {
     let mut config = Configuration::default();
-    let root = backend
-        .workspace
-        .workspace_root
-        .read()
-        .clone()
-        .unwrap_or_default();
+    let root = backend.tempest_root().unwrap_or_default();
     for uri in sources {
         let Some(content) = backend.get_file_content_arc(uri) else {
             continue;

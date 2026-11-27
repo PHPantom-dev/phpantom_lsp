@@ -87,7 +87,7 @@ impl Backend {
     pub(crate) fn twig_template_file(&self, name: &str) -> Option<PathBuf> {
         let default_dir = self
             .is_symfony_project()
-            .then(|| self.workspace.workspace_root.read().clone())
+            .then(|| self.symfony_root())
             .flatten()
             .map(|root| root.join("templates"));
         self.twig_roots()
@@ -238,7 +238,10 @@ impl Backend {
         let Some(workspace_root) = self.workspace.workspace_root.read().clone() else {
             return false;
         };
-        let discovered = TwigRoots::discover(&workspace_root, files);
+        let project_dir = self
+            .symfony_root()
+            .unwrap_or_else(|| workspace_root.clone());
+        let discovered = TwigRoots::discover(&workspace_root, &project_dir, files);
         let mut roots = self.twig.roots.write();
         if **roots == discovered {
             return false;

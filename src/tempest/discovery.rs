@@ -164,7 +164,7 @@ impl Backend {
             return Arc::clone(catalog);
         }
         let mut catalog = Catalog::default();
-        if let Some(root) = self.workspace.workspace_root.read().clone() {
+        if let Some(root) = self.tempest_root() {
             let (mappings, vendor) = composer::parse_composer_json(&root);
             let mut roots: Vec<_> = mappings
                 .iter()
@@ -234,7 +234,7 @@ impl Backend {
     /// relative to the caller, then relative to each discovery root.
     pub(crate) fn tempest_view_file(&self, uri: &str, name: &str) -> Option<PathBuf> {
         let caller = crate::util::uri_to_path(uri)?;
-        let root = self.workspace.workspace_root.read().clone();
+        let root = self.tempest_root();
         let path = Path::new(name);
         let direct = if path.is_absolute() {
             path.to_path_buf()

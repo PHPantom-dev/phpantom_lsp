@@ -8,29 +8,72 @@
 //! per-field clone semantics `Backend`'s clone had when these were individual
 //! fields.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64};
 
 use parking_lot::{Mutex, RwLock};
 
 use crate::ClassCompletionOrigin;
-use crate::composer;
+use crate::composer::{self, ComposerPackage};
 use crate::config;
 use crate::resolution::ProjectScopes;
 use crate::types::PhpVersion;
+
+/// Where each framework's application lives when it is a subproject of the
+/// workspace.  `None` means the application, if any, lives at the workspace
+/// root.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct AppRoots {
+    pub(crate) laravel: Option<PathBuf>,
+    pub(crate) symfony: Option<PathBuf>,
+    pub(crate) yii: Option<PathBuf>,
+    pub(crate) tempest: Option<PathBuf>,
+}
+
+impl AppRoots {
+    pub(crate) fn get(&self, framework: composer::AppFramework) -> Option<&PathBuf> {
+        match framework {
+            composer::AppFramework::Laravel => self.laravel.as_ref(),
+            composer::AppFramework::Symfony => self.symfony.as_ref(),
+            composer::AppFramework::Yii => self.yii.as_ref(),
+            composer::AppFramework::Tempest => self.tempest.as_ref(),
+        }
+    }
+
+    /// The applications nested in a workspace at `root`, whose own
+    /// `composer.json` reads as `root_package`, among its `subprojects`.
+    pub(crate) fn detect<'a>(
+        root: &Path,
+        root_package: Option<&ComposerPackage>,
+        subprojects: impl IntoIterator<Item = (&'a Path, Option<&'a ComposerPackage>)> + Clone,
+    ) -> Self {
+        let find = |framework: composer::AppFramework| {
+            if framework.is_root_project(root, root_package) {
+                None
+            } else {
+                framework.subproject(subprojects.clone())
+            }
+        };
+        Self {
+            laravel: find(composer::AppFramework::Laravel),
+            symfony: find(composer::AppFramework::Symfony),
+            yii: find(composer::AppFramework::Yii),
+            tempest: find(composer::AppFramework::Tempest),
+        }
+    }
+}
 
 /// Workspace root, PSR-4 mappings, vendor locations, PHP version, and the
 /// loaded `.phpantom.toml` configuration.
 pub(crate) struct WorkspaceEnv {
     /// The root directory of the workspace (set during `initialize`).
     pub(crate) workspace_root: Arc<RwLock<Option<PathBuf>>>,
-    /// The base path of the Laravel application, when it is a Composer
-    /// subproject of the workspace rather than the workspace root itself
-    /// (a monorepo opened at its top with the app in `backend/`).  `None`
-    /// means the app, if any, lives at `workspace_root`.  Read through
-    /// [`Backend::laravel_root`](crate::Backend::laravel_root).
-    pub(crate) laravel_app_root: Arc<RwLock<Option<PathBuf>>>,
+    /// The base paths of the framework applications that are Composer
+    /// subprojects of the workspace rather than the workspace root itself
+    /// (a monorepo opened at its top with the app in `backend/`).  Read
+    /// through [`Backend::app_root`](crate::Backend::app_root).
+    pub(crate) app_roots: Arc<RwLock<AppRoots>>,
     /// PSR-4 autoload mappings parsed from `composer.json`.
     pub(crate) psr4_mappings: Arc<RwLock<Vec<composer::Psr4Mapping>>>,
     /// `file://` URI prefixes for all known vendor directories.
@@ -222,7 +265,7 @@ impl WorkspaceEnv {
     fn with_global_config(global_config_path: Option<PathBuf>) -> Self {
         Self {
             workspace_root: Arc::new(RwLock::new(None)),
-            laravel_app_root: Arc::new(RwLock::new(None)),
+            app_roots: Arc::new(RwLock::new(AppRoots::default())),
             psr4_mappings: Arc::new(RwLock::new(Vec::new())),
             vendor_uri_prefixes: Mutex::new(Vec::new()),
             vendor_dir_paths: Mutex::new(Vec::new()),
@@ -273,7 +316,7 @@ impl Clone for WorkspaceEnv {
     fn clone(&self) -> Self {
         Self {
             workspace_root: Arc::clone(&self.workspace_root),
-            laravel_app_root: Arc::clone(&self.laravel_app_root),
+            app_roots: Arc::clone(&self.app_roots),
             psr4_mappings: Arc::clone(&self.psr4_mappings),
             vendor_uri_prefixes: Mutex::new(self.vendor_uri_prefixes.lock().clone()),
             vendor_dir_paths: Mutex::new(self.vendor_dir_paths.lock().clone()),

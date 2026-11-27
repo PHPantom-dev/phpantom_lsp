@@ -102,27 +102,81 @@ pub(crate) fn has_laravel_aware_phpstan(package: &ComposerPackage) -> bool {
         })
 }
 
-/// The Laravel application among a workspace's nested Composer projects,
-/// for a workspace whose own root is not one.
-///
-/// A project with an `artisan` file is an application by Laravel's own
-/// convention, so it is preferred over one that only depends on the
-/// framework (see [`is_laravel_application`]).  Among equals the first
-/// wins, which is the shallowest since that is the order the projects are
-/// discovered in.
-pub(crate) fn laravel_app_subproject<'a>(
-    subprojects: impl IntoIterator<Item = (&'a Path, Option<&'a ComposerPackage>)> + Clone,
-) -> Option<PathBuf> {
-    subprojects
-        .clone()
-        .into_iter()
-        .find(|(dir, _)| dir.join("artisan").is_file())
-        .or_else(|| {
-            subprojects
-                .into_iter()
-                .find(|(_, package)| package.is_some_and(is_laravel_application))
-        })
-        .map(|(dir, _)| dir.to_path_buf())
+/// A framework whose application files are looked up by their conventional
+/// place under the application's base directory.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum AppFramework {
+    Laravel,
+    Symfony,
+    Yii,
+    Tempest,
+}
+
+impl AppFramework {
+    /// The files that make a directory this framework's application by the
+    /// framework's own convention: its console script, or Symfony's bundle
+    /// list.
+    fn markers(self) -> &'static [&'static str] {
+        match self {
+            Self::Laravel => &["artisan"],
+            Self::Symfony => &["bin/console", "config/bundles.php"],
+            Self::Yii => &["yii"],
+            Self::Tempest => &["tempest"],
+        }
+    }
+
+    fn has_marker(self, dir: &Path) -> bool {
+        self.markers()
+            .iter()
+            .any(|marker| dir.join(marker).is_file())
+    }
+
+    /// Whether a project that depends on `package` is an application of
+    /// this framework.
+    fn is_application(self, package: &ComposerPackage) -> bool {
+        match self {
+            Self::Laravel => is_laravel_application(package),
+            Self::Symfony => is_symfony_project(package),
+            Self::Yii => is_yii_project(package),
+            Self::Tempest => is_tempest_project(package),
+        }
+    }
+
+    /// Whether the workspace root at `root`, with its `composer.json` read
+    /// as `package`, is itself a project of this framework, so its files
+    /// are looked up there rather than in a nested project.
+    pub(crate) fn is_root_project(self, root: &Path, package: Option<&ComposerPackage>) -> bool {
+        self.has_marker(root)
+            || package.is_some_and(|package| match self {
+                // A library on Illuminate components is no application, but
+                // a root that is one is not a monorepo holding one either.
+                Self::Laravel => is_laravel_project(package),
+                _ => self.is_application(package),
+            })
+    }
+
+    /// The application of this framework among a workspace's nested
+    /// Composer projects, for a workspace whose own root is not one.
+    ///
+    /// A project holding the framework's marker file is an application by
+    /// the framework's own convention, so it is preferred over one that only
+    /// depends on the framework.  Among equals the first wins, which is the
+    /// shallowest since that is the order the projects are discovered in.
+    pub(crate) fn subproject<'a>(
+        self,
+        subprojects: impl IntoIterator<Item = (&'a Path, Option<&'a ComposerPackage>)> + Clone,
+    ) -> Option<PathBuf> {
+        subprojects
+            .clone()
+            .into_iter()
+            .find(|(dir, _)| self.has_marker(dir))
+            .or_else(|| {
+                subprojects.into_iter().find(|(_, package)| {
+                    package.is_some_and(|package| self.is_application(package))
+                })
+            })
+            .map(|(dir, _)| dir.to_path_buf())
+    }
 }
 
 /// Detect whether the project depends on Laravel or a standalone

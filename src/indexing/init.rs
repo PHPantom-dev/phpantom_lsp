@@ -14,6 +14,7 @@ use crate::Backend;
 use crate::classmap_scanner::{self, WorkspaceScanResult};
 use crate::composer;
 use crate::config::IndexingStrategy;
+use crate::workspace_env::AppRoots;
 
 impl Backend {
     /// Build the symbol indexes for whichever shape the workspace at
@@ -168,21 +169,15 @@ impl Backend {
             .write()
             .laravel_mut()
             .set_enabled(is_laravel);
-        // A root that is no Laravel project of its own can still hold the
+        // A root that is no framework project of its own can still hold the
         // application in a nested project with its own dependencies.
-        let root_is_laravel = root.join("artisan").is_file()
-            || composer_json
-                .as_ref()
-                .is_some_and(composer::is_laravel_project);
-        *self.workspace.laravel_app_root.write() = if root_is_laravel {
-            None
-        } else {
-            composer::laravel_app_subproject(
-                subprojects
-                    .iter()
-                    .map(|(sub_root, package)| (sub_root.as_path(), package.as_ref())),
-            )
-        };
+        *self.workspace.app_roots.write() = AppRoots::detect(
+            root,
+            composer_json.as_ref(),
+            subprojects
+                .iter()
+                .map(|(sub_root, package)| (sub_root.as_path(), package.as_ref())),
+        );
 
         // A library's configuration is declared by whatever application
         // installs it, so the keys it reads cannot be judged.  An `artisan`
@@ -723,7 +718,9 @@ impl Backend {
             .write()
             .laravel_mut()
             .set_enabled(any_laravel);
-        *self.workspace.laravel_app_root.write() = composer::laravel_app_subproject(
+        *self.workspace.app_roots.write() = AppRoots::detect(
+            root,
+            None,
             subprojects
                 .iter()
                 .zip(&packages)
@@ -811,7 +808,7 @@ impl Backend {
             .write()
             .laravel_mut()
             .set_enabled(false);
-        *self.workspace.laravel_app_root.write() = None;
+        *self.workspace.app_roots.write() = AppRoots::default();
 
         // Marked before the filters are read, as for a Composer project,
         // so the walk sees Drupal's `.module`, `.install`, … files as PHP.

@@ -26,7 +26,34 @@ impl Backend {
     /// (`config/`, `resources/views/`, `routes/`, `lang/`, `.env`, …) goes
     /// through this rather than [`workspace_root`](Self::workspace_root).
     pub(crate) fn laravel_root(&self) -> Option<PathBuf> {
-        if let Some(app_root) = self.workspace.laravel_app_root.read().as_ref() {
+        self.app_root(composer::AppFramework::Laravel)
+    }
+
+    /// The Symfony application's project directory, the one
+    /// `%kernel.project_dir%` names: the Symfony subproject a monorepo
+    /// workspace holds, or the workspace root otherwise.
+    pub(crate) fn symfony_root(&self) -> Option<PathBuf> {
+        self.app_root(composer::AppFramework::Symfony)
+    }
+
+    /// The Yii application's root, where its `config/` and
+    /// `composer.json` are read: the Yii subproject a monorepo workspace
+    /// holds, or the workspace root otherwise.
+    pub(crate) fn yii_root(&self) -> Option<PathBuf> {
+        self.app_root(composer::AppFramework::Yii)
+    }
+
+    /// The Tempest application's root, where discovery and view paths
+    /// start: the Tempest subproject a monorepo workspace holds, or the
+    /// workspace root otherwise.
+    pub(crate) fn tempest_root(&self) -> Option<PathBuf> {
+        self.app_root(composer::AppFramework::Tempest)
+    }
+
+    /// The base path of `framework`'s application: the subproject of the
+    /// workspace that holds it, or the workspace root when none does.
+    pub(crate) fn app_root(&self, framework: composer::AppFramework) -> Option<PathBuf> {
+        if let Some(app_root) = self.workspace.app_roots.read().get(framework) {
             return Some(app_root.clone());
         }
         self.workspace.workspace_root.read().clone()

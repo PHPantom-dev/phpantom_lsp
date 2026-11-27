@@ -592,7 +592,7 @@ impl Backend {
 
     /// The directories the migrator reads migrations from.
     fn yii_migration_dirs(&self) -> Vec<PathBuf> {
-        let Some(root) = self.workspace.workspace_root.read().clone() else {
+        let Some(root) = self.yii_root() else {
             return Vec::new();
         };
         let params = self.yii_params();

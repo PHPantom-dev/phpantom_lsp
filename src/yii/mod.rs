@@ -147,7 +147,7 @@ impl Backend {
         if let Some(aliases) = self.yii.aliases.read().as_ref() {
             return Arc::clone(aliases);
         }
-        let root = self.workspace.workspace_root.read().clone();
+        let root = self.yii_root();
         let aliases = Arc::new(
             root.map(|root| aliases::Aliases::load(&root))
                 .unwrap_or_default(),

@@ -422,7 +422,7 @@ impl Backend {
             return;
         }
 
-        let workspace_root = self.workspace.workspace_root.read().clone();
+        let project_dir = self.symfony_root();
         let renames: Vec<(PathBuf, PathBuf)> = directory_renames
             .iter()
             .filter_map(|(old_uri, new_uri)| {
@@ -455,7 +455,7 @@ impl Backend {
                 let Some(rewritten) = rewrite_framework_path_for_directory_renames(
                     value,
                     file_dir,
-                    workspace_root.as_deref(),
+                    project_dir.as_deref(),
                     &renames,
                 ) else {
                     continue;

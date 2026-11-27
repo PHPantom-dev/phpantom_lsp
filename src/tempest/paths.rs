@@ -149,11 +149,8 @@ impl Backend {
         let caller_dir =
             dunce::canonicalize(caller_dir).unwrap_or_else(|_| caller_dir.to_path_buf());
         let catalog = self.tempest_catalog();
-        let workspace = self
-            .workspace
-            .workspace_root
-            .read()
-            .clone()
+        let project_root = self
+            .tempest_root()
             .and_then(|root| dunce::canonicalize(root).ok());
         let mut names = BTreeSet::new();
         for file in &catalog.files {
@@ -168,7 +165,7 @@ impl Backend {
                 });
             }
             if !relative {
-                for root in catalog.roots.iter().chain(workspace.iter()) {
+                for root in catalog.roots.iter().chain(project_root.iter()) {
                     if let Ok(path) = file.strip_prefix(root) {
                         names.insert(path.to_string_lossy().replace('\\', "/"));
                     }

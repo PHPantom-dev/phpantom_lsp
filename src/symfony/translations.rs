@@ -369,7 +369,7 @@ impl Backend {
         if !projects.is_empty() {
             return projects;
         }
-        let Some(root) = self.workspace_root().read().clone() else {
+        let Some(root) = self.symfony_root() else {
             return Vec::new();
         };
         let vendor_dir = crate::composer::read_composer_package(&root).map_or_else(

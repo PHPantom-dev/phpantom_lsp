@@ -754,3 +754,122 @@ async fn a_laravel_root_stays_the_application_over_a_nested_one() {
 
     assert_eq!(backend.laravel_root(), Some(dir.path().to_path_buf()));
 }
+
+/// A Composer project requiring `package`, its dependencies installed, with
+/// `marker` written as the framework's console script when given.
+fn write_framework_project(dir: &Path, package: &str, marker: Option<&str>) {
+    write(
+        &dir.join("composer.json"),
+        &format!(r#"{{ "require": {{ "{package}": "*" }} }}"#),
+    );
+    write(
+        &dir.join("vendor/composer/installed.json"),
+        r#"{ "packages": [] }"#,
+    );
+    if let Some(marker) = marker {
+        write(&dir.join(marker), "#!/usr/bin/env php\n<?php\n");
+    }
+}
+
+#[tokio::test]
+async fn each_framework_root_of_a_monorepo_is_its_application() {
+    let dir = tempfile::tempdir().unwrap();
+    // A package requiring the framework sorts first, but the project with
+    // the framework's console script is the application.
+    write_framework_project(
+        &dir.path().join("a-bundle"),
+        "symfony/framework-bundle",
+        None,
+    );
+    write_framework_project(
+        &dir.path().join("shop"),
+        "symfony/framework-bundle",
+        Some("bin/console"),
+    );
+    write_framework_project(&dir.path().join("cms"), "yiisoft/view", Some("yii"));
+    write_framework_project(
+        &dir.path().join("site"),
+        "tempest/framework",
+        Some("tempest"),
+    );
+
+    let backend = index_workspace(dir.path()).await;
+
+    assert_eq!(backend.symfony_root(), Some(dir.path().join("shop")));
+    assert_eq!(backend.yii_root(), Some(dir.path().join("cms")));
+    assert_eq!(backend.tempest_root(), Some(dir.path().join("site")));
+    assert_eq!(backend.laravel_root(), Some(dir.path().to_path_buf()));
+}
+
+#[tokio::test]
+async fn symfony_bundle_list_marks_the_application() {
+    let dir = tempfile::tempdir().unwrap();
+    write_framework_project(
+        &dir.path().join("a-bundle"),
+        "symfony/framework-bundle",
+        None,
+    );
+    write_framework_project(
+        &dir.path().join("backend"),
+        "symfony/framework-bundle",
+        Some("config/bundles.php"),
+    );
+    write(
+        &dir.path().join("composer.json"),
+        r#"{ "require-dev": {} }"#,
+    );
+
+    let backend = index_project(dir.path()).await;
+
+    assert_eq!(backend.symfony_root(), Some(dir.path().join("backend")));
+}
+
+#[tokio::test]
+async fn a_framework_root_stays_the_application_over_a_nested_one() {
+    let dir = tempfile::tempdir().unwrap();
+    write_framework_project(dir.path(), "symfony/framework-bundle", None);
+    write_framework_project(
+        &dir.path().join("tests/fixtures/app"),
+        "symfony/framework-bundle",
+        Some("bin/console"),
+    );
+
+    let backend = index_project(dir.path()).await;
+
+    assert_eq!(backend.symfony_root(), Some(dir.path().to_path_buf()));
+}
+
+#[tokio::test]
+async fn a_nested_symfony_application_keeps_its_templates() {
+    let dir = tempfile::tempdir().unwrap();
+    write_framework_project(
+        &dir.path().join("backend"),
+        "symfony/framework-bundle",
+        Some("bin/console"),
+    );
+
+    let backend = index_workspace(dir.path()).await;
+
+    assert_eq!(
+        backend.twig_template_file("page/new.html.twig"),
+        Some(dir.path().join("backend/templates/page/new.html.twig"))
+    );
+}
+
+#[tokio::test]
+async fn a_nested_yii_application_keeps_its_aliases() {
+    let dir = tempfile::tempdir().unwrap();
+    let app = dir.path().join("backend");
+    write_framework_project(&app, "yiisoft/view", Some("yii"));
+    write(
+        &app.join("config/params.php"),
+        "<?php\nreturn [\n    'yiisoft/aliases' => [\n        'aliases' => [\n            '@root' => dirname(__DIR__),\n            '@views' => '@root/views',\n        ],\n    ],\n];\n",
+    );
+
+    let backend = index_workspace(dir.path()).await;
+
+    assert!(
+        backend.yii_aliases().resolve("@views").is_some(),
+        "the aliases of the nested application must be read"
+    );
+}

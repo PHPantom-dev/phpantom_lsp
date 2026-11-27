@@ -317,7 +317,7 @@ impl Backend {
     /// laid out the modern way.
     fn bundle_resource_path(&self, resource: &str) -> Option<PathBuf> {
         let (name, rest) = resource.strip_prefix('@')?.split_once('/')?;
-        let root = self.workspace_root().read().clone()?;
+        let root = self.symfony_root()?;
         let config_dir = self.symfony_config_dir(&root);
         let class_dir = self.class_file(&bundle_class(config_dir.as_deref(), name))?;
         let class_dir = class_dir.parent()?;

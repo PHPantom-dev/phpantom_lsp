@@ -1837,28 +1837,7 @@ It also shows as:
 
 ## Framework names in strings
 
-### B911. Symfony, Yii and Tempest files are looked up from the workspace root, not their project's
-
-**Impact: Medium · Complexity: Low**
-
-In a monorepo opened at its top, with the application in a subdirectory
-(`backend/`) and no `composer.json` at the root, the framework's own files
-are looked for relative to the workspace root. Laravel already finds its
-application's base path at indexing time (`Backend::laravel_root`), but
-the other frameworks read `workspace_root` directly: Symfony's
-`%kernel.project_dir%` (`framework.rs`, `symfony/route_world.rs`,
-`symfony/translations.rs`), Yii's aliases, params, views, migrations and
-assets (`yii/`), and Tempest's discovery (`tempest/discovery.rs`). Their
-route, service, template and translation names then resolve against the
-wrong directory.
-
-The fix is the same shape as Laravel's: record the subproject holding the
-framework's application when the root is not one (Symfony's `bin/console`
-and `config/bundles.php`, Yii's `yii` script and `config/`, Tempest's
-`tempest` script), and route each conventional lookup through an accessor
-that falls back to the workspace root. Laravel's detection is
-`composer::laravel_app_subproject`; a per-framework variant of it, or one
-helper keyed by marker file, would serve all three.
+No outstanding items.
 
 ## Name resolution
 

@@ -96,13 +96,18 @@ impl Default for TwigRoots {
 impl TwigRoots {
     /// Discover the roots of the templates in `files`, each with the plain
     /// names (see [`plain_relative`]) it references, inside the workspace
-    /// at `workspace_root`.
+    /// at `workspace_root`, and Symfony's `templates/` under the project
+    /// directory at `project_dir`.
     ///
     /// A name resolves against the closest directory above the template that
     /// holds it: a template in a subdirectory of a root that names another
     /// file of that subdirectory names it by its path from the root.
-    pub(crate) fn discover(workspace_root: &Path, files: &HashMap<PathBuf, Vec<String>>) -> Self {
-        let templates_dir = Some(workspace_root.join("templates")).filter(|dir| dir.is_dir());
+    pub(crate) fn discover(
+        workspace_root: &Path,
+        project_dir: &Path,
+        files: &HashMap<PathBuf, Vec<String>>,
+    ) -> Self {
+        let templates_dir = Some(project_dir.join("templates")).filter(|dir| dir.is_dir());
         let mut roots: Vec<PathBuf> = templates_dir.iter().cloned().collect();
         let mut extensions = vec!["twig".to_string()];
         for (path, references) in files {
@@ -233,6 +238,7 @@ mod tests {
         let root = Path::new("/p");
         let found = TwigRoots::discover(
             root,
+            root,
             &files(
                 root,
                 &[
@@ -284,6 +290,7 @@ mod tests {
     fn without_html_templates_only_twig_names_count() {
         let root = Path::new("/p");
         let found = TwigRoots::discover(
+            root,
             root,
             &files(
                 root,

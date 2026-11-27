@@ -773,7 +773,7 @@ impl Backend {
         if let Some(plan) = self.yii.config_plan.read().as_ref() {
             return Arc::clone(plan);
         }
-        let root = self.workspace.workspace_root.read().clone();
+        let root = self.yii_root();
         let plan = Arc::new(root.map(|root| ConfigPlan::load(&root)).unwrap_or_default());
         *self.yii.config_plan.write() = Some(Arc::clone(&plan));
         plan
