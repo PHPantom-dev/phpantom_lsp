@@ -703,6 +703,7 @@ impl PhpType {
         match self.raw_kind() {
             TypeKind::KeyOf(_) => PhpType::named(atom("array-key")),
             TypeKind::ValueOf(_) | TypeKind::IndexAccess(..) => PhpType::mixed(),
+            TypeKind::Generic(_) if self.is_int_mask() => PhpType::int(),
             TypeKind::Raw(_) | TypeKind::Named(_) if self.is_class_member_reference() => {
                 PhpType::mixed()
             }
@@ -1065,6 +1066,10 @@ impl PhpType {
                 }
             }
 
+            // Substituting a flag may be what makes the mask evaluable.
+            TypeKind::Generic(g) if self.is_int_mask() => {
+                evaluate_int_mask(g.name, g.args.iter().map(|a| a.substitute(subs)).collect())
+            }
             TypeKind::Generic(g) => {
                 let args =
                     || -> Vec<PhpType> { g.args.iter().map(|a| a.substitute(subs)).collect() };

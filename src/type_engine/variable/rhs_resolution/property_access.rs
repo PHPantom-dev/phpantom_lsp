@@ -289,17 +289,26 @@ fn static_property_type(
         let resolved =
             resolve_property_with_hint(prop_name, cls, ctx.file.all_classes, ctx.file.class_loader);
         if !resolved.is_empty() {
-            return if forwards_lsb {
-                resolved
-            } else {
-                resolved
-                    .into_iter()
-                    .map(|mut rt| {
+            return resolved
+                .into_iter()
+                .map(|mut rt| {
+                    if !forwards_lsb {
                         rt.type_string = rt.type_string.replace_self_bound(&cls.fqn(), None);
-                        rt
-                    })
-                    .collect()
-            };
+                    }
+                    // A declaration that reads a constant (`int-mask-of<self::FLAG_*>`,
+                    // `key-of<self::TABLE>`) is finished here, as for an instance
+                    // property.
+                    if let Some(evaluated) =
+                        crate::type_engine::call_resolution::evaluate_constant_operands(
+                            &rt.type_string,
+                            &ctx.as_resolution_ctx(),
+                        )
+                    {
+                        rt.type_string = evaluated;
+                    }
+                    rt
+                })
+                .collect();
         }
     }
     vec![]

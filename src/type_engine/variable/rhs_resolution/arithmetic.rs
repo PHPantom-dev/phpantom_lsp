@@ -176,14 +176,54 @@ pub(crate) fn bitwise_result_type(
     }
     // A mask built from constants (`$flags = JSON_PRETTY_PRINT |
     // JSON_THROW_ON_ERROR`) keeps its value, so a call that is handed it
-    // can still read the bits it sets.
-    if let Some(value) = single_literal_int(lhs_types)
-        .zip(single_literal_int(rhs_types))
-        .and_then(|(lhs, rhs)| const_fold::apply_bitwise(op, lhs, rhs))
+    // can still read the bits it sets.  An operand with a few known values
+    // (`int<0, 3>`, `1|4`) is worked out for each pair of them, as PHPStan
+    // does.
+    if let Some(lhs) = finite_int_values(lhs_types)
+        && let Some(rhs) = finite_int_values(rhs_types)
+        && lhs.len() * rhs.len() <= INT_COMBINATION_LIMIT
     {
-        return PhpType::literal_int(value.to_string());
+        let mut results: Vec<i64> = Vec::with_capacity(lhs.len() * rhs.len());
+        for &a in &lhs {
+            for &b in &rhs {
+                let Some(value) = const_fold::apply_bitwise(op, a, b) else {
+                    return PhpType::int();
+                };
+                results.push(value);
+            }
+        }
+        results.sort_unstable();
+        results.dedup();
+        return PhpType::union(results.into_iter().map(literal_int).collect());
     }
     PhpType::int()
+}
+
+/// Every value an integer operand can hold, when it is made of integer
+/// literals and ranges small enough to list (at most
+/// [`INT_COMBINATION_LIMIT`] values in all).
+fn finite_int_values(types: &[ResolvedType]) -> Option<Vec<i64>> {
+    let mut values: Vec<i64> = Vec::new();
+    for rt in types {
+        for member in rt.type_string.union_members() {
+            if let Some(value) = const_fold::literal_int_value(member) {
+                values.push(value);
+                continue;
+            }
+            let interval = IntInterval::of_int(member)?;
+            let (min, max) = interval.min.zip(interval.max)?;
+            if usize::try_from(max.checked_sub(min)?).ok()? >= INT_COMBINATION_LIMIT {
+                return None;
+            }
+            values.extend(min..=max);
+            if values.len() > INT_COMBINATION_LIMIT {
+                return None;
+            }
+        }
+    }
+    values.sort_unstable();
+    values.dedup();
+    (!values.is_empty()).then_some(values)
 }
 
 /// A built-in class whose instances overload PHP's arithmetic operators.
@@ -758,15 +798,6 @@ fn operand_is_undecided(types: &[ResolvedType]) -> bool {
 /// reject the `int` the whole expression is declared to return.
 fn operand_is_unenforceable(types: &[ResolvedType]) -> bool {
     operand_is_undecided(types) || types.iter().any(|rt| rt.type_string.is_benevolent())
-}
-
-/// The integer an operand holds, when it resolved to exactly one literal
-/// integer. An operand that could be several types is not a known value.
-fn single_literal_int(types: &[ResolvedType]) -> Option<i64> {
-    let [only] = types else {
-        return None;
-    };
-    const_fold::literal_int_value(&only.type_string)
 }
 
 /// A single literal numeric operand, keeping whether it was spelled as an

@@ -2070,22 +2070,3 @@ class Bar extends SimpleXMLElement {}
 Two parts: the nullability PHPStan gives magic element/attribute reads, and a user subclass of SimpleXMLElement losing its magic child access entirely (foreach over it gives mixed).
 
 **Cases** (PHPStan `nsrt/`, 11 assertions): `simplexml.php` (8), `bug-9575.php` (3).
-
-### B893. `int-mask<…>` and `int-mask-of<…>` are not expanded to their values
-
-**Impact: Low · Complexity: Low**
-
-```php
-const A = 0; const B = 1; const C = 2;
-/** @var int-mask-of<self::*> */ private static $t;
-self::$t;       // int-mask-of<self::TYPE_*>, should be 0|1|2|3
-self::$t | 1;   // int, should be 1|3
-```
-
-The mask type is kept as unresolved text, so bitwise operators on it fall back to int.
-
-It also shows as:
-
-- `int-mask<...>` and `int-mask-of<...>` over non-contiguous values resolve to `int`
-
-**Cases** (PHPStan `nsrt/`, 12 assertions): `bug-9384.php` (9), `int-mask.php` (3).

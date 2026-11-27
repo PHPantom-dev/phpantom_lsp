@@ -254,6 +254,14 @@ fn read_class_member_references(ty: &PhpType, ctx: &ResolutionCtx<'_>) -> PhpTyp
             false => read_non_class_name(name, ctx).unwrap_or_else(|| ty.clone()),
         },
         _ if !ty.needs_constant_evaluation() => ty.clone(),
+        // The flags of a bitmask are the constants it names.
+        TypeKind::Generic(g) if ty.is_int_mask() => crate::php_type::evaluate_int_mask(
+            g.name,
+            g.args
+                .iter()
+                .map(|arg| read_class_member_references(arg, ctx))
+                .collect(),
+        ),
         TypeKind::ArrayShape(entries) => {
             let entries = entries
                 .iter()

@@ -479,11 +479,20 @@ impl PhpType {
         }
     }
 
+    /// Whether this is an `int-mask<…>` or `int-mask-of<…>` whose flags are
+    /// still to be read (see [`evaluate_int_mask`]): some `int`, until then.
+    pub fn is_int_mask(&self) -> bool {
+        matches!(
+            self.kind(),
+            TypeKind::Generic(g) if matches!(g.name.as_str(), "int-mask" | "int-mask-of")
+        )
+    }
+
     /// Whether this type is `int` or any PHPDoc integer refinement (case-insensitive).
     ///
     /// Returns `true` for `int`, `integer`, `positive-int`, `negative-int`,
     /// `non-negative-int`, `non-positive-int`, `non-zero-int`, `IntRange(…)`,
-    /// and integer literals.
+    /// integer literals, and an unevaluated `int-mask`.
     pub fn is_int_subtype(&self) -> bool {
         match self.kind() {
             TypeKind::Named(s) => with_keyword_lowercase(s, |lower| {
@@ -491,6 +500,7 @@ impl PhpType {
             }),
             TypeKind::IntRange(_, _) => true,
             TypeKind::Literal(l) => matches!(**l, LiteralValue::Int(_)),
+            TypeKind::Generic(_) => self.is_int_mask(),
             TypeKind::Nullable(inner) => inner.is_int_subtype(),
             TypeKind::Union(members) => {
                 !members.is_empty() && members.iter().all(|m| m.is_int_subtype())

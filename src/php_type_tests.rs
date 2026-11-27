@@ -512,6 +512,18 @@ fn parse_generic_star_does_not_mangle_constant_pattern() {
 }
 
 #[test]
+fn int_mask_of_literal_flags_is_expanded() {
+    assert_eq!(PhpType::parse("int-mask<1, 2>").to_string(), "int<0, 3>");
+    assert_eq!(PhpType::parse("int-mask-of<1|4>").to_string(), "0|1|4|5");
+    // Past 128 values the mask is the range it spans.
+    assert_eq!(
+        PhpType::parse("int-mask<1, 4, 16, 64, 256, 1024, 4096, 16384>").to_string(),
+        "int<0, 21845>"
+    );
+    assert_eq!(PhpType::parse("int-mask<1, 'a'>").to_string(), "int");
+}
+
+#[test]
 fn parse_generic_star_with_spaces() {
     // Spaces around the `*` wildcard
     let ty = PhpType::parse("BelongsTo< * , * >");

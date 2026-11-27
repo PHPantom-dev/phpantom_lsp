@@ -594,6 +594,20 @@ fn convert(src: &str, ty: &cst::Type<'_>) -> PhpType {
         cst::Type::KeyOf(k) => evaluate_key_of(&convert(src, &k.parameter.entry.inner)),
         cst::Type::ValueOf(v) => evaluate_value_of(&convert(src, &v.parameter.entry.inner)),
 
+        // -- int-mask / int-mask-of -------------------------------------------
+        cst::Type::IntMask(m) => evaluate_int_mask(
+            atom(&normalize_keyword_casing(bytes_to_str(m.keyword.value))),
+            m.parameters
+                .entries
+                .iter()
+                .map(|e| convert(src, &e.inner))
+                .collect(),
+        ),
+        cst::Type::IntMaskOf(m) => evaluate_int_mask(
+            atom(&normalize_keyword_casing(bytes_to_str(m.keyword.value))),
+            vec![convert(src, &m.parameter.entry.inner)],
+        ),
+
         // -- int range --------------------------------------------------------
         cst::Type::IntRange(r) => PhpType::int_range(r.min.to_string(), r.max.to_string()),
 
@@ -905,8 +919,77 @@ fn literal_subject_satisfies(subject: &PhpType, condition: &PhpType) -> Option<b
 }
 
 // ---------------------------------------------------------------------------
-// Type operator evaluation (key-of, value-of, T[K])
+// Type operator evaluation (key-of, value-of, T[K], int-mask)
 // ---------------------------------------------------------------------------
+
+/// The most values a bitmask is spelled out as before it widens to the range
+/// it spans, as PHPStan's `CALCULATE_SCALARS_LIMIT` does.
+const INT_MASK_VALUE_LIMIT: usize = 128;
+
+/// Evaluate `int-mask<A, B>` / `int-mask-of<A|B>` (`name` is the keyword as
+/// written) once every flag is a known integer: every value a bitwise OR of
+/// the flags can produce, as a range when they are contiguous.
+///
+/// A flag still to be read (a class or global constant, a template) keeps
+/// the mask standing for a later pass to finish.  Flags that are known but
+/// not all integers make no mask, and read as `int`.
+pub(crate) fn evaluate_int_mask(name: Atom, args: Vec<PhpType>) -> PhpType {
+    let mut flags: Vec<i64> = Vec::new();
+    let mut all_ints = true;
+    for arg in &args {
+        for member in arg.union_members() {
+            match member.as_literal().and_then(LiteralValue::parse_i64) {
+                Some(flag) => flags.push(flag),
+                None => all_ints = false,
+            }
+        }
+    }
+    if all_ints && !flags.is_empty() {
+        return int_mask_values(&flags);
+    }
+    if args.iter().any(PhpType::needs_constant_evaluation) {
+        return PhpType::generic_atom(name, args);
+    }
+    PhpType::int()
+}
+
+fn int_mask_values(flags: &[i64]) -> PhpType {
+    let mut values: std::collections::BTreeSet<i64> = std::collections::BTreeSet::new();
+    values.insert(0);
+    for &flag in flags {
+        if values.contains(&flag) {
+            continue;
+        }
+        let combined: Vec<i64> = values.iter().map(|value| value | flag).collect();
+        values.extend(combined);
+        if values.len() > INT_MASK_VALUE_LIMIT {
+            // The flags set so far already overflow the limit, so the mask is
+            // the range its values span: for non-negative flags `0` up to
+            // all of them at once.  A negative flag spans too much to name.
+            if flags.iter().any(|flag| *flag < 0) {
+                return PhpType::int();
+            }
+            let max = flags.iter().fold(0, |acc, flag| acc | flag);
+            return PhpType::int_range("0", max.to_string());
+        }
+    }
+    let (min, max) = match (values.first(), values.last()) {
+        (Some(min), Some(max)) => (*min, *max),
+        _ => return PhpType::int(),
+    };
+    if min == max {
+        return PhpType::literal_int(min.to_string());
+    }
+    if usize::try_from(max - min).is_ok_and(|span| span == values.len() - 1) {
+        return PhpType::int_range(min.to_string(), max.to_string());
+    }
+    PhpType::union(
+        values
+            .into_iter()
+            .map(|value| PhpType::literal_int(value.to_string()))
+            .collect(),
+    )
+}
 
 /// Evaluate `key-of<T>` when `T` is a concrete array or shape type.
 ///

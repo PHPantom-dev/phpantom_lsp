@@ -167,6 +167,14 @@ impl PhpType {
             return Some(as_union.is_subtype_of(supertype));
         }
 
+        // A bitmask whose flags nobody could read is some `int`.
+        if self.is_int_mask() {
+            return Some(PhpType::int().is_subtype_of(supertype));
+        }
+        if supertype.is_int_mask() {
+            return Some(self.is_subtype_of(&PhpType::int()));
+        }
+
         // `Foo::class` reads as `class-string<Foo>` through `kind()`, which
         // would let the name of any subclass pass for it. Only the one
         // string it spells does.
