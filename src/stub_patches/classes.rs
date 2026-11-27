@@ -34,6 +34,9 @@ pub fn apply_class_stub_patches(class: &mut ClassInfo) {
         "mysqli_result" => patch_fetch_object(class, "fetch_object", "T|false|null"),
         "Throwable" | "Exception" => patch_exception_get_code(class),
         "Error" => patch_method_return_type(class, "getCode", PhpType::int()),
+        "SplFileObject" => {
+            patch_method_return_type(class, "fstat", PhpType::parse(super::functions::STAT_SHAPE))
+        }
         _ => {}
     }
     if matches!(

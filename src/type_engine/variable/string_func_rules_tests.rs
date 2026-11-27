@@ -524,3 +524,68 @@ fn number_format_is_numeric_without_a_thousands_separator() {
     );
     assert_eq!(fold("number_format", &[float, two]), None);
 }
+
+#[test]
+fn version_compare_matches_php() {
+    for (a, b, want) in [
+        ("7.0.0", "7.0.1", -1),
+        ("1.0", "1.0.0", -1),
+        ("1.0.0", "1", 1),
+        ("1.0-dev", "1.0", -1),
+        ("1.0a", "1.0b", -1),
+        ("1.0RC1", "1.0", -1),
+        ("1.0pl1", "1.0", 1),
+        ("1.0rc1", "1.0RC1", 0),
+        ("1.10", "1.9", 1),
+        ("1.0-beta", "1.0alpha", 1),
+        ("1.0.x", "1.0.0", -1),
+        ("01", "1", 0),
+    ] {
+        assert_eq!(values::version_compare(a, b), want, "{a} vs {b}");
+    }
+}
+
+#[test]
+fn version_compare_folds_literal_versions() {
+    assert_eq!(
+        fold("version_compare", &[lit("7.0.0"), lit("7.0.1")]).as_deref(),
+        Some("-1")
+    );
+    assert_eq!(
+        fold("version_compare", &[lit("7.0.0"), lit("7.0.1"), lit("<")]).as_deref(),
+        Some("true")
+    );
+    // An unknown operator is a `ValueError`.
+    assert_eq!(
+        fold("version_compare", &[lit("7.0.0"), lit("7.0.1"), lit("~")]).as_deref(),
+        Some("never")
+    );
+    // Stray punctuation is left to the declared type.
+    assert_eq!(fold("version_compare", &[lit("1..0"), lit("1")]), None);
+}
+
+#[test]
+fn encoding_names_decide_mb_setters() {
+    assert_eq!(
+        fold("mb_internal_encoding", &[lit("utf-8")]).as_deref(),
+        Some("true")
+    );
+    assert_eq!(
+        fold("mb_internal_encoding", &[lit("foo")]).as_deref(),
+        Some("never")
+    );
+    // `BASE64` is an mbstring encoding, but not one Oniguruma can match in.
+    assert_eq!(
+        fold("mb_http_output", &[lit("BASE64")]).as_deref(),
+        Some("true")
+    );
+    assert_eq!(
+        fold("mb_regex_encoding", &[lit("BASE64")]).as_deref(),
+        Some("never")
+    );
+    assert_eq!(
+        fold("mb_chr", &[Some(PhpType::literal_int("68")), lit("foo")]).as_deref(),
+        Some("never")
+    );
+    assert_eq!(fold("mb_ord", &[lit("")]).as_deref(), Some("never"));
+}

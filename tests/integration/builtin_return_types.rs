@@ -104,8 +104,8 @@ function probe(bool $asFloat): void {
         content,
         &[
             ("$seconds", "float"),
-            ("$text", "string"),
-            ("$unknown", "float|string"),
+            ("$text", "non-falsy-string"),
+            ("$unknown", "float|non-falsy-string"),
         ],
     );
 }
@@ -362,11 +362,11 @@ function probe(string $a, string $b, ?string $op, ?string $enc): void {
         content,
         &[
             ("$current", "string"),
-            ("$changed", "bool"),
+            ("$changed", "true"),
             ("$eitherEncoding", "string|bool"),
-            ("$ordering", "int"),
+            ("$ordering", "-1|0|1"),
             ("$satisfied", "bool"),
-            ("$eitherCompare", "int|bool"),
+            ("$eitherCompare", "-1|0|1|bool"),
         ],
     );
 }

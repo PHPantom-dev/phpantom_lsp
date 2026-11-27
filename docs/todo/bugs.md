@@ -70,14 +70,12 @@ A result that is not a number (`NAN`) is a plain `float`, since there is no
 **Impact: Medium · Complexity: Medium**
 
 ```php
-version_compare('7.0.0', '7.0.1');   // int, should be -1
-mb_http_output();                    // string|bool, should be string
-gettimeofday(true);                  // array<int>|float, should be float
+parse_url('http://abc.def');         // array{scheme?: lowercase-string, ...}|false, should be array{scheme: 'http', host: 'abc.def'}
 $dt->format('');                     // string, should be ''
 $px->getColor(1);                    // array{r: int|float, ...}, should be array{r: float, ...}
 ```
 
-No argument-aware return rules for: version_compare, microtime(null), mb_http_output/mb_regex_encoding/mb_internal_encoding/mb_encoding_aliases/mb_chr/mb_ord, gettimeofday, DateTimeInterface::format literals, ImagickPixel::getColor, fpm_get_status, sscanf scansets, proc_open's $pipes, getopt, CachingIterator::getCache, get_called_class, array_find_key on literal keys. Each needs its own rule; grouped because the mechanism (a per-function return rule) is the same.
+No argument-aware return rules for: parse_url over a literal URL (`// SKIP` lines in `tests/phpstan_nsrt/functions.php`), DateTimeInterface::format literals, ImagickPixel::getColor, fpm_get_status, sscanf scansets, proc_open's $pipes, getopt, CachingIterator::getCache, get_called_class, array_find_key on literal keys. Each needs its own rule; grouped because the mechanism (a per-function return rule) is the same.
 
 It also shows as:
 
@@ -85,7 +83,7 @@ It also shows as:
 - PECL extension calls whose return type PHPStan picks from the arguments use the stub's full union
 - `PDO::connect()` does not return the driver subclass named by the DSN
 - By-reference arrays of `socket_select()` and `proc_open()` are not typed from their inputs
-- `stat()`, `lstat()`, `fstat()` and `ssh2_sftp_stat()` return shapes lack the numeric keys
+- `ssh2_sftp_stat()`'s return shape lacks the numeric keys
 - `ArrayObject` offset reads are not nullable
 - `Closure::bind()`, `bindTo()` and `Closure::getCurrent()` lose the closure's signature
 - `ReflectionEnum` methods are not specialized by the reflected enum
@@ -96,7 +94,7 @@ It also shows as:
 
 **Fix:** add per-function rules (stub patches with conditional returns, or the array/function rule tables) one function at a time; each upstream fixture is the spec for its function.
 
-**Cases** (PHPStan `nsrt/`, 358 assertions): `functions.php` (42), `array-functions.php` (23), `array-search.php` (20), `mb-convert-encoding-php8.php` (18), `sscanf.php` (18), `get-parent-class.php` (12), `pr-1244-php-84.php` (12), `DateTimeDynamicReturnTypes.php` (12), `DateTimeCreateDynamicReturnTypes.php` (10), `mb_substitute_character-php8.php` (10), `get-defined-vars.php` (10), `bug-3789.php` (8), 54 more.
+**Cases** (PHPStan `nsrt/`, 316 assertions): `array-functions.php` (23), `array-search.php` (20), `mb-convert-encoding-php8.php` (18), `sscanf.php` (18), `get-parent-class.php` (12), `pr-1244-php-84.php` (12), `DateTimeDynamicReturnTypes.php` (12), `DateTimeCreateDynamicReturnTypes.php` (10), `mb_substitute_character-php8.php` (10), `get-defined-vars.php` (10), `bug-3789.php` (8), 54 more.
 
 ### B820. `array_splice()` neither returns the removed slice nor updates its array
 

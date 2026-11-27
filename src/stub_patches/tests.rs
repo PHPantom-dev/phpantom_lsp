@@ -262,7 +262,7 @@ fn argument_dependent_builtins_get_conditional_returns() {
         (
             "microtime",
             &[("$as_float", "bool")],
-            "$as_float is true ? float : string",
+            "$as_float is true ? float : non-falsy-string",
         ),
         (
             "getenv",

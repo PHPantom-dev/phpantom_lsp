@@ -706,34 +706,67 @@ pub(crate) fn preg_matched_type<'b>(
 ) -> Option<PhpType> {
     let flags = match call.flags {
         None => 0,
-        Some(flags) => preg_flag_bits(flags, scope, ctx)?,
+        Some(flags) => match preg_flag_bits(flags, scope, ctx) {
+            PregFlags::Known(bits) => bits,
+            PregFlags::Unmodelled => return None,
+            PregFlags::Unknown => {
+                return (!call.matches_all)
+                    .then(crate::type_engine::regex_shape::any_flags_matches_type);
+            }
+        },
     };
     call.pattern
-        .as_deref()
         .and_then(|pattern| {
-            crate::type_engine::regex_shape::matches_type(pattern, flags, call.matches_all)
+            // Only a pattern that is not a plain literal needs the resolver.
+            let resolve = |expr: &Expression<'_>| {
+                let scope_resolver = scope.snapshot_resolver();
+                let var_ctx = ctx.var_ctx_for_with_scope(
+                    "",
+                    ctx.cursor_offset,
+                    &scope_resolver,
+                    Some(scope.proofs()),
+                );
+                crate::type_engine::variable::iterable_elements::resolve_expression_type(
+                    expr, &var_ctx,
+                )
+            };
+            let texts = crate::type_engine::regex_shape::pattern_texts(pattern, &resolve)?;
+            crate::type_engine::regex_shape::matches_type_of_any(&texts, flags, call.matches_all)
         })
         .or_else(|| crate::type_engine::regex_shape::opaque_matches_type(flags, call.matches_all))
+}
+
+/// What a `preg_match` `$flags` argument says about the result's shape.
+enum PregFlags {
+    /// A constant mask whose every bit the shape analysis models.
+    Known(i64),
+    /// A constant mask with a bit the analysis does not model.
+    Unmodelled,
+    /// Not a constant: any combination of flags may be in play.
+    Unknown,
 }
 
 /// The flag mask a `preg_match` `$flags` argument holds.
 ///
 /// Resolved through the shared pipeline so a named constant, a class
-/// constant, and a variable holding one all read the same. Returns `None`
-/// when the argument does not resolve to a single integer value, or to one
-/// whose bits the shape analysis does not model — the result's shape depends
-/// on the flags, so a mask that cannot be read is not one to guess at.
+/// constant, and a variable holding one all read the same.
 fn preg_flag_bits<'b>(
     expr: &'b Expression<'b>,
     scope: &ScopeState,
     ctx: &ForwardWalkCtx<'_>,
-) -> Option<i64> {
+) -> PregFlags {
     let scope_resolver = scope.snapshot_resolver();
     let var_ctx =
         ctx.var_ctx_for_with_scope("", ctx.cursor_offset, &scope_resolver, Some(scope.proofs()));
     let flags =
         crate::type_engine::variable::iterable_elements::resolve_expression_type(expr, &var_ctx)
             .as_ref()
-            .and_then(crate::type_engine::type_ops::const_fold::literal_int_value)?;
-    crate::type_engine::regex_shape::flags_are_modelled(flags).then_some(flags)
+            .and_then(crate::type_engine::type_ops::const_fold::literal_int_value);
+    match flags {
+        Some(flags) if crate::type_engine::regex_shape::flags_are_modelled(flags) => {
+            PregFlags::Known(flags)
+        }
+        Some(_) => PregFlags::Unmodelled,
+        None => PregFlags::Unknown,
+    }
 }

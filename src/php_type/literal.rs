@@ -24,13 +24,34 @@ impl LiteralValue {
     }
 
     pub fn string_value(value: impl AsRef<str>) -> Self {
-        Self::String(
-            format!(
-                "'{}'",
-                value.as_ref().replace('\\', "\\\\").replace('\'', "\\'")
-            )
-            .into(),
-        )
+        let value = value.as_ref();
+        // A control character would land raw in a hover or a message, so a
+        // value holding one is spelled double-quoted with escapes, as PHP
+        // (and PHPStan) would write it.
+        if value.chars().any(|c| c.is_ascii_control()) {
+            let mut spelled = String::with_capacity(value.len() + 2);
+            spelled.push('"');
+            for c in value.chars() {
+                match c {
+                    '\\' => spelled.push_str("\\\\"),
+                    '"' => spelled.push_str("\\\""),
+                    '$' => spelled.push_str("\\$"),
+                    '\n' => spelled.push_str("\\n"),
+                    '\r' => spelled.push_str("\\r"),
+                    '\t' => spelled.push_str("\\t"),
+                    '\u{b}' => spelled.push_str("\\v"),
+                    '\u{c}' => spelled.push_str("\\f"),
+                    '\u{1b}' => spelled.push_str("\\e"),
+                    c if c.is_ascii_control() => {
+                        spelled.push_str(&format!("\\x{:02x}", c as u32));
+                    }
+                    c => spelled.push(c),
+                }
+            }
+            spelled.push('"');
+            return Self::String(spelled.into());
+        }
+        Self::String(format!("'{}'", value.replace('\\', "\\\\").replace('\'', "\\'")).into())
     }
 
     pub fn as_raw(&self) -> String {

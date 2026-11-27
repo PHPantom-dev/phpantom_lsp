@@ -44,14 +44,14 @@ class MbStrlenPhp83
 		assertType('int<0, 1>', mb_strlen($emptyStringBoolNull));
 		assertType('8', mb_strlen('паляниця', 'utf-8'));
 		assertType('11', mb_strlen('alias test🤔', 'utf8'));
-		assertType('*NEVER*', mb_strlen('', 'invalid encoding')); // SKIP: an invalid encoding does not make the call `*NEVER*`
+		assertType('*NEVER*', mb_strlen('', 'invalid encoding'));
 		assertType('int<5, 6>', mb_strlen('école', $utf8And8bit)); // SKIP: a string is only measured in UTF-8
-		assertType('5', mb_strlen('école', $utf8AndInvalidEncoding)); // SKIP: a string is only measured in UTF-8
+		assertType('5', mb_strlen('école', $utf8AndInvalidEncoding));
 		assertType('1|3|5|6', mb_strlen('école', $unknownEncoding)); // SKIP: a string is only measured in UTF-8
 		assertType('2|4|5|8', mb_strlen('מזגן', $unknownEncoding)); // SKIP: a string is only measured in UTF-8
 		assertType('6|8|12|13|15|16|24', mb_strlen('いい天気ですね〜', $unknownEncoding)); // SKIP: a string is only measured in UTF-8
-		assertType('3', mb_strlen(123, $utf8AndInvalidEncoding)); // SKIP: a string is only measured in UTF-8
-		assertType('*NEVER*', mb_strlen('foo', $encodingsValidOnlyUntilPhp72)); // SKIP: an invalid encoding does not make the call `*NEVER*`
+		assertType('3', mb_strlen(123, $utf8AndInvalidEncoding));
+		assertType('*NEVER*', mb_strlen('foo', $encodingsValidOnlyUntilPhp72));
 	}
 
 }

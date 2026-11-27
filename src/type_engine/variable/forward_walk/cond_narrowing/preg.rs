@@ -49,7 +49,7 @@ pub(crate) fn apply_preg_match_narrowing(
         let narrowed = if matched_when_true == truthy {
             matched
         } else {
-            crate::type_engine::regex_shape::no_match_type(&matched, matches_all).unwrap_or(matched)
+            crate::type_engine::regex_shape::no_match_type(matches_all).unwrap_or(matched)
         };
         scope.set(&matches_var, vec![ResolvedType::from_type_string(narrowed)]);
     }
@@ -86,7 +86,7 @@ pub(crate) fn record_preg_outcome<'b>(
     let matched = if matched_when_true {
         matched
     } else {
-        match crate::type_engine::regex_shape::no_match_type(&matched, call.matches_all) {
+        match crate::type_engine::regex_shape::no_match_type(call.matches_all) {
             Some(no_match) => no_match,
             None => return,
         }

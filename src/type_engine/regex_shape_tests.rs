@@ -1,16 +1,10 @@
 use super::{
-    PREG_OFFSET_CAPTURE, PREG_SET_ORDER, PREG_UNMATCHED_AS_NULL, capture_groups, matches_type,
+    PREG_OFFSET_CAPTURE, PREG_SET_ORDER, PREG_UNMATCHED_AS_NULL, matches_type_of_any,
     opaque_matches_type, split_delimiters,
 };
 
-/// The group list as `name?:optional` pairs, for compact assertions.
-fn groups(pattern: &str) -> Option<Vec<(Option<String>, bool)>> {
-    Some(
-        capture_groups(pattern)?
-            .into_iter()
-            .map(|g| (g.name, g.optional))
-            .collect(),
-    )
+fn matches_type(pattern: &str, flags: i64, matches_all: bool) -> Option<crate::php_type::PhpType> {
+    matches_type_of_any(&[pattern], flags, matches_all)
 }
 
 fn shape(pattern: &str) -> String {
@@ -55,134 +49,72 @@ fn rejects_malformed_patterns() {
 
 #[test]
 fn counts_plain_groups() {
-    assert_eq!(groups("/(a)(b)/"), Some(vec![(None, false), (None, false)]));
+    assert_eq!(shape("/(a)(b)/"), "array{0: string, 1: 'a', 2: 'b'}");
     // Non-capturing, lookahead, lookbehind and atomic groups do not count.
-    assert_eq!(groups("/(?:a)(?=b)(?<=c)(?>d)/"), Some(vec![]));
-    assert_eq!(groups("/Price: (?:£|€)(\\d+)/"), Some(vec![(None, false)]));
+    assert_eq!(shape("/(?:a)(?=b)(?<=c)(?>d)/"), "array{0: string}");
+    assert_eq!(
+        shape("/Price: (?:£|€)(\\d+)/"),
+        "array{0: string, 1: string}"
+    );
 }
 
 #[test]
 fn ignores_parens_that_are_not_groups() {
-    assert_eq!(groups(r"/\(a\)/"), Some(vec![]));
-    assert_eq!(groups("/[(]/"), Some(vec![]));
-    assert_eq!(groups(r"/[\](]/"), Some(vec![]));
-    assert_eq!(groups("/[])(]/"), Some(vec![]));
-    assert_eq!(groups("/[[:alpha:](]/"), Some(vec![]));
-    assert_eq!(groups("/(?#a comment with a ( in it)/"), Some(vec![]));
+    for pattern in [
+        r"/\(a\)/",
+        "/[(]/",
+        r"/[\](]/",
+        "/[])(]/",
+        "/[[:alpha:](]/",
+        "/(?#a comment with a ( in it)/",
+        r"/\Q(a)\E/",
+    ] {
+        assert_eq!(shape(pattern), "array{0: string}", "{pattern}");
+    }
 }
 
 #[test]
 fn reads_named_groups() {
-    let expected = Some(vec![(Some("num".to_string()), false)]);
-    assert_eq!(groups("/(?<num>\\d+)/"), expected);
-    assert_eq!(groups("/(?P<num>\\d+)/"), expected);
-    assert_eq!(groups("/(?'num'\\d+)/"), expected);
+    let expected = "array{0: string, num: string, 1: string}";
+    assert_eq!(shape("/(?<num>\\d+)/"), expected);
+    assert_eq!(shape("/(?P<num>\\d+)/"), expected);
+    assert_eq!(shape("/(?'num'\\d+)/"), expected);
 }
 
 #[test]
-fn zero_allowing_quantifiers_make_a_group_optional() {
-    assert_eq!(groups("/(a)?/"), Some(vec![(None, true)]));
-    assert_eq!(groups("/(a)*/"), Some(vec![(None, true)]));
-    assert_eq!(groups("/(a){0,3}/"), Some(vec![(None, true)]));
-    assert_eq!(groups("/(a){,3}/"), Some(vec![(None, true)]));
-    assert_eq!(groups("/(a)*?/"), Some(vec![(None, true)]));
-    assert_eq!(groups("/(a)?+/"), Some(vec![(None, true)]));
-    // A quantifier that demands at least one repetition does not.
-    assert_eq!(groups("/(a)+/"), Some(vec![(None, false)]));
-    assert_eq!(groups("/(a){2,3}/"), Some(vec![(None, false)]));
-    assert_eq!(groups("/(a){2}/"), Some(vec![(None, false)]));
-    // A `{` that does not spell a quantifier is a literal.
-    assert_eq!(groups("/(a){x}/"), Some(vec![(None, false)]));
-}
-
-#[test]
-fn optionality_propagates_from_enclosing_groups() {
+fn a_group_of_fixed_text_holds_its_literals() {
     assert_eq!(
-        groups("/(?:(a)(b))?/"),
-        Some(vec![(None, true), (None, true)])
+        shape("/Price: (£|€)\\d+/"),
+        "array{0: string, 1: '£'|'€'}"
     );
-    assert_eq!(
-        groups("/((a))?/"),
-        Some(vec![(None, true), (None, true)]),
-        "the outer group's quantifier reaches the nested one"
-    );
-    // A negative lookaround's groups cannot have participated in a match.
-    assert_eq!(groups("/x(?!(a))/"), Some(vec![(None, true)]));
-    assert_eq!(groups("/(?<!(a))x/"), Some(vec![(None, true)]));
+    assert_eq!(shape("/([157])/"), "array{0: string, 1: '1'|'5'|'7'}");
+    assert_eq!(shape("/(ba[rz])/"), "array{0: string, 1: 'bar'|'baz'}");
+    assert_eq!(shape(r"/(\.)/"), "array{0: string, 1: '.'}");
+    assert_eq!(shape("/()/"), "array{0: string, 1: ''}");
+    // A newline is spelled the way PHP would write it.
+    assert_eq!(shape("/(\\n)/"), "array{0: string, 1: \"\\n\"}");
 }
 
 #[test]
-fn alternation_makes_the_branches_optional() {
-    assert_eq!(groups("/(a)|(b)/"), Some(vec![(None, true), (None, true)]));
-    assert_eq!(
-        groups("/(?:(a)|(b))/"),
-        Some(vec![(None, true), (None, true)])
-    );
-    assert_eq!(
-        groups("/((a)|(b))/"),
-        Some(vec![(None, false), (None, true), (None, true)]),
-        "the group holding the alternation still matches"
-    );
-    assert_eq!(
-        groups("/Price: (£|€)/"),
-        Some(vec![(None, false)]),
-        "an alternation of literals says nothing about the group's presence"
-    );
-}
-
-#[test]
-fn refuses_constructs_it_cannot_model() {
-    // Branch reset restarts the group counter.
-    assert_eq!(groups("/(?|(a)|(b))/"), None);
-    // Conditional groups, recursion and subroutine calls.
-    assert_eq!(groups("/(a)(?(1)b|c)/"), None);
-    assert_eq!(groups("/(a(?R))/"), None);
-    assert_eq!(groups("/(a)(?1)/"), None);
-    assert_eq!(groups("/(a)(?&name)/"), None);
-    // Control verbs, one of which adds a `MARK` key.
-    assert_eq!(groups("/(a)(*MARK:x)/"), None);
-    // `\Q…\E` makes a `(` literal.
-    assert_eq!(groups(r"/\Q(a)\E/"), None);
-    // Extended mode changes what counts as whitespace and a comment.
-    assert_eq!(groups("/(a) # comment/x"), None);
-    assert_eq!(groups("/(?x)(a) # comment/"), None);
-    // Unbalanced parens.
-    assert_eq!(groups("/(a/"), None);
-    assert_eq!(groups("/a)/"), None);
-    // An unknown modifier means the pattern is not one PHP would accept.
-    assert_eq!(groups("/(a)/z"), None);
-}
-
-#[test]
-fn inline_modifiers_are_transparent() {
-    assert_eq!(groups("/(?i)(a)/"), Some(vec![(None, false)]));
-    assert_eq!(groups("/(?i:(a))/"), Some(vec![(None, false)]));
-    assert_eq!(groups("/(?i-m:(a))?/"), Some(vec![(None, true)]));
-}
-
-#[test]
-fn no_auto_capture_modifier_leaves_only_named_groups() {
-    assert_eq!(
-        groups("/(a)(?<name>b)/n"),
-        Some(vec![(Some("name".to_string()), false)])
-    );
-}
-
-/// The `J` modifier lets two groups share a name, and only one of them can
-/// hold the key.
-#[test]
-fn a_repeated_group_name_abandons_the_analysis() {
-    assert_eq!(groups("/(?<n>a)|(?<n>b)/J"), None);
-}
-
-#[test]
-fn shapes_the_whole_match_and_every_group() {
-    assert_eq!(shape("/Price: /i"), "array{0: string}");
-    assert_eq!(shape("/(a)(b)/"), "array{0: string, 1: string, 2: string}");
-    assert_eq!(
-        shape("/\\w-(?P<num>\\d+)-(\\w)/"),
-        "array{0: string, num: string, 1: string, 2: string}"
-    );
+fn a_group_that_can_match_varied_text_is_a_string() {
+    for pattern in [
+        "/(.)/",
+        "/(\\d)/",
+        "/([a-z])/",
+        "/([^a])/",
+        "/(a+)/",
+        // A letter under case-insensitive matching is not one text.
+        "/(a)/i",
+        "/(?i)(a)/",
+        "/([ab])/i",
+    ] {
+        assert_eq!(shape(pattern), "array{0: string, 1: string}", "{pattern}");
+    }
+    // Case-insensitivity cannot change a group without letters.
+    assert_eq!(shape("/(1)/i"), "array{0: string, 1: '1'}");
+    // A repeated group holds one repetition, but the literals are dropped as
+    // PHPStan drops them.
+    assert_eq!(shape("/(a)+/"), "array{0: string, 1: string}");
 }
 
 #[test]
@@ -191,11 +123,130 @@ fn only_trailing_optional_groups_get_optional_keys() {
     // drops only the trailing ones.
     assert_eq!(
         shape("/(a)(b)*(c)(d)*/"),
-        "array{0: string, 1: string, 2: string, 3: string, 4?: string}"
+        "list{0: string, 1: 'a', 2: string, 3: 'c', 4?: string}"
     );
     assert_eq!(
         shape("/(a)(b)*(c)(?<name>d)*/"),
-        "array{0: string, 1: string, 2: string, 3: string, name?: string, 4?: string}"
+        "array{0: string, 1: 'a', 2: string, 3: 'c', name?: string, 4?: string}"
+    );
+    // An optional group before a required one may be `''`.
+    assert_eq!(
+        shape("/(a)?(b)/"),
+        "array{0: string, 1: 'a'|'', 2: 'b'}"
+    );
+}
+
+/// A shape with and without the group, which fold into one with the group's
+/// key optional, as PHPStan folds them.
+#[test]
+fn a_single_optional_group_may_be_left_out() {
+    assert_eq!(shape("/x(a)?/"), "list{0: string, 1?: 'a'}");
+    // Two optional groups take the general rule: each may be missing.
+    assert_eq!(
+        shape("/x(?:(a)(b))?/"),
+        "list{0: string, 1?: 'a'|'', 2?: 'b'}"
+    );
+}
+
+#[test]
+fn a_top_level_alternation_gives_a_shape_per_branch() {
+    // An earlier branch's groups read `''`; a later one's are left out.
+    assert_eq!(
+        shape(r"/^(?:(\d+)x(\d+)|(\d+)|x(\d+))$/"),
+        "array{0: string, 1: string, 2: string}|array{0: string, 1: '', 2: '', 3: string}|array{0: string, 1: '', 2: '', 3: '', 4: string}"
+    );
+    // A branch with no group adds the whole match on its own, which folds
+    // into the other branch's shape.
+    assert_eq!(shape("/foo|(bar)/"), "list{0: string, 1?: 'bar'}");
+}
+
+#[test]
+fn a_negative_lookaround_never_fills_its_groups() {
+    assert_eq!(shape("/x(?!(a))/"), "list{0: string, 1?: 'a'}");
+}
+
+#[test]
+fn branch_reset_numbers_each_branch_from_the_same_group() {
+    assert_eq!(
+        shape("/(?|(a)|(b)(c)|(d)(e)(f))/"),
+        "list{0: string, 1: string, 2?: string, 3?: string}"
+    );
+    assert_eq!(shape("/(?|(a)|(b))(c)/"), "array{0: string, 1: string, 2: 'c'}");
+}
+
+#[test]
+fn extended_mode_skips_whitespace_and_comments() {
+    assert_eq!(shape("/( a ) # (comment)/x"), "array{0: string, 1: 'a'}");
+    assert_eq!(shape("/(?x) ( a ) # (comment)/"), "array{0: string, 1: 'a'}");
+    assert_eq!(shape("/^ ([\\#.]) $/x"), "array{0: string, 1: '#'|'.'}");
+    // An escaped `#` is a literal, not a comment.
+    assert_eq!(shape("/(\\#) (b)/x"), "array{0: string, 1: '#', 2: 'b'}");
+}
+
+#[test]
+fn a_mark_verb_adds_its_key() {
+    assert_eq!(
+        shape("/a(*MARK:x)(b)/"),
+        "array{0: string, 1: 'b', MARK?: 'x'}"
+    );
+}
+
+#[test]
+fn refuses_constructs_it_cannot_model() {
+    for pattern in [
+        // Conditional groups, recursion and subroutine calls.
+        "/(a)(?(1)b|c)/",
+        "/(a(?R))/",
+        "/(a)(?1)/",
+        "/(a)(?&name)/",
+        // `(*ACCEPT)` ends the match with groups still open.
+        "/(a(*ACCEPT))/",
+        // Unbalanced parens.
+        "/(a/",
+        "/a)/",
+        // An unknown modifier means the pattern is not one PHP would accept.
+        "/(a)/z",
+        // Two groups sharing a name without `J`.
+        "/(?<n>a)|(?<n>b)/",
+    ] {
+        assert_eq!(shape(pattern), "<none>", "{pattern}");
+    }
+}
+
+#[test]
+fn a_shared_name_is_allowed_under_j() {
+    assert_eq!(
+        shape("/(?<n>a)|(?<n>b)/J"),
+        "array{0: string, n: 'a', 1: 'a'}|array{0: string, n: 'b', 1: '', 2: 'b'}"
+    );
+}
+
+#[test]
+fn no_auto_capture_leaves_only_named_groups() {
+    assert_eq!(
+        shape("/(a)(?<name>b)/n"),
+        "array{0: string, name: 'b', 1: 'b'}"
+    );
+    assert_eq!(shape("/(?n)(a)/"), "array{0: string}");
+}
+
+#[test]
+fn shapes_from_several_patterns_join() {
+    assert_eq!(
+        matches_type_of_any(&["/(a)/", "/(b)/"], 0, false)
+            .unwrap()
+            .to_string(),
+        "array{0: string, 1: 'a'|'b'}"
+    );
+}
+
+#[test]
+fn shapes_the_whole_match_and_every_group() {
+    assert_eq!(shape("/Price: /i"), "array{0: string}");
+    assert_eq!(shape("/(a)(b)/"), "array{0: string, 1: 'a', 2: 'b'}");
+    assert_eq!(
+        shape("/\\w-(?P<num>\\d+)-(\\w)/"),
+        "array{0: string, num: string, 1: string, 2: string}"
     );
 }
 
@@ -205,7 +256,7 @@ fn unmatched_as_null_reports_every_group() {
         matches_type("/(a)(b)?/", PREG_UNMATCHED_AS_NULL, false)
             .unwrap()
             .to_string(),
-        "array{0: string, 1: string, 2: ?string}"
+        "array{0: string, 1: 'a', 2: 'b'|null}"
     );
 }
 
@@ -215,7 +266,7 @@ fn offset_capture_pairs_each_entry_with_its_offset() {
         matches_type("/(a)/", PREG_OFFSET_CAPTURE, false)
             .unwrap()
             .to_string(),
-        "array{0: array{string, int<-1, max>}, 1: array{string, int<-1, max>}}"
+        "array{0: array{string, int<-1, max>}, 1: array{'a', int<-1, max>}}"
     );
 }
 
@@ -223,7 +274,7 @@ fn offset_capture_pairs_each_entry_with_its_offset() {
 fn match_all_collects_each_group_in_pattern_order() {
     assert_eq!(
         shape_all("/(a)(b)?/", 0),
-        "array{0: list<string>, 1: list<string>, 2: list<string>}"
+        "array{0: list<string>, 1: list<'a'>, 2: list<'b'|''>}"
     );
 }
 
@@ -231,7 +282,7 @@ fn match_all_collects_each_group_in_pattern_order() {
 fn match_all_in_set_order_is_a_list_of_match_shapes() {
     assert_eq!(
         shape_all("/(a)(b)?/", PREG_SET_ORDER),
-        "list<array{0: string, 1: string, 2?: string}>"
+        "list<array{0: string, 1: 'a', 2?: 'b'}>"
     );
 }
 

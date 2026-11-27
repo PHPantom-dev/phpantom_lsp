@@ -22,14 +22,14 @@ class HelloWorld
 			return;
 		}
 
-		assertType('array<list<string>>', $matches);
+		assertType("array{0: list<string>, test: list<''|'foo'|'test'>, 1: list<''|'test'>, 2: list<''|'foo'>}", $matches); // PHPantom: `(?J)` is read, close to the shape the comment below hopes for
 		// could be assertType("array{0: list<string>, test: list<'foo'|'test'>, 1: list<'test'|''>, 2: list<''|'foo'>}", $matches);
 
 		if (!preg_match($regex, $options[$key], $matches)) {
 			return;
 		}
 
-		assertType('array<string>', $matches);
+		assertType("array{0: string, test: 'test', 1: 'test'}|array{0: string, test: 'foo', 1: '', 2: 'foo'}", $matches); // PHPantom: `(?J)` is read, as the comment below hopes for
 		// could be assertType("array{0: list<string>, test: 'foo', 1: '', 2: 'foo'}|array{0: list<string>, test: 'test', 1: 'test', 2: ''}", $matches);
 	}
 }

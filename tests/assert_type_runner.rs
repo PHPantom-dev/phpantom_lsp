@@ -1214,7 +1214,9 @@ fn drop_sequential_shape_keys(ty: &str) -> String {
         .iter()
         .enumerate()
         .map(|(index, entry)| {
-            let (key, value) = entry.split_once(':')?;
+            // A shape nested in a generic argument keeps the space after
+            // each comma.
+            let (key, value) = entry.trim_start().split_once(':')?;
             (key == index.to_string()).then_some(value)
         })
         .collect();

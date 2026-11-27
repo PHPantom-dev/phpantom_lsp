@@ -353,28 +353,34 @@ fn an_unreadable_pattern_still_types_the_entries() {
 function probe(string $s, string $pattern): void {
     preg_match($pattern, $s, $dynamic);
     $fromDynamic = $dynamic['whatever'];
-    preg_match('/(?|(a)|(b))/', $s, $branchReset);
-    $fromBranchReset = $branchReset[1];
+    preg_match('/(a)?(?(1)b|c)/', $s, $conditional);
+    $fromConditional = $conditional[1];
 }
 "#;
     assert_assigned_types(
         content,
-        &[("$fromDynamic", "string"), ("$fromBranchReset", "string")],
+        &[("$fromDynamic", "string"), ("$fromConditional", "string")],
     );
 }
 
-/// A `$flags` argument that cannot be read falls back to the parameter's own
-/// declared type rather than assuming the default flags:
-/// `PREG_OFFSET_CAPTURE` would change every entry from a string to a pair.
+/// A `$flags` argument that cannot be read does not assume the default
+/// flags: `PREG_OFFSET_CAPTURE` would change every entry from a string to a
+/// pair, and `PREG_UNMATCHED_AS_NULL` would make it nullable.
 #[test]
-fn unreadable_flags_fall_back_to_the_declared_parameter_type() {
+fn unreadable_flags_allow_every_entry_form() {
     let content = r#"<?php
 function probe(string $s, int $flags): void {
     preg_match('/(\d+)/', $s, $matches, $flags);
     $shape = $matches;
 }
 "#;
-    assert_assigned_types(content, &[("$shape", "array<string>")]);
+    assert_assigned_types(
+        content,
+        &[(
+            "$shape",
+            "array<array-key, array{string|null, int<-1, max>}|string|null>",
+        )],
+    );
 }
 
 /// A flag the analysis does not model is the same case:

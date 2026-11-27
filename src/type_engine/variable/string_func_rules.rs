@@ -53,7 +53,9 @@ pub(in crate::type_engine) fn string_func_return_type(
     // separator in its identifier text; the tables below are keyed on the
     // bare name.
     let name = func_name.trim_start_matches('\\').to_ascii_lowercase();
-    literal_type(&name, args).or_else(|| refined_type(&name, args))
+    values::value_type(&name, args)
+        .or_else(|| literal_type(&name, args))
+        .or_else(|| refined_type(&name, args))
 }
 
 /// The literal value a call to a string builtin produces, or `None`
@@ -496,7 +498,24 @@ fn length_type(args: &dyn ArrayFuncArgs, multibyte: bool) -> Option<PhpType> {
         return None;
     }
     let ty = args.arg_raw_type(0)?;
-    let read_values = !names_a_constant(args, 0) && (!multibyte || is_utf8_encoding(args, 1));
+    let mut utf8 = !multibyte || is_utf8_encoding(args, 1);
+    if multibyte && args.has_arg(1) && !args.is_spread(1) && !args.is_named(1) {
+        // An encoding mbstring does not know is a `ValueError`, so only the
+        // known alternatives can return.
+        if let Some(names) = literal_alternatives_any(args, 1) {
+            let known: Vec<&String> = names
+                .iter()
+                .filter(|name| values::is_supported_encoding(name))
+                .collect();
+            if known.is_empty() {
+                return Some(PhpType::never());
+            }
+            utf8 = known.iter().all(|name| {
+                name.eq_ignore_ascii_case("UTF-8") || name.eq_ignore_ascii_case("UTF8")
+            });
+        }
+    }
+    let read_values = !names_a_constant(args, 0) && utf8;
     let mut lengths: Vec<i64> = Vec::new();
     let mut ranges: Vec<IntInterval> = Vec::new();
     for member in ty.union_members() {
@@ -1303,41 +1322,43 @@ pub(in crate::type_engine) fn calls_global_function(
 /// Callers use this to skip building an argument adapter for the calls
 /// that could never be refined.
 pub(in crate::type_engine) fn has_string_func_rule(func_name: &str) -> bool {
-    matches!(
-        func_name
-            .trim_start_matches('\\')
-            .to_ascii_lowercase()
-            .as_str(),
-        "strtolower"
-            | "dirname"
-            | "mb_strtolower"
-            | "strtoupper"
-            | "mb_strtoupper"
-            | "mb_convert_case"
-            | "mb_substr"
-            | "ucfirst"
-            | "lcfirst"
-            | "ucwords"
-            | "strrev"
-            | "trim"
-            | "ltrim"
-            | "rtrim"
-            | "chop"
-            | "str_repeat"
-            | "str_replace"
-            | "strlen"
-            | "mb_strlen"
-            | "str_increment"
-            | "str_decrement"
-            | "mb_lcfirst"
-            | "mb_ucfirst"
-            | "sprintf"
-            | "vsprintf"
-            | "number_format"
-            | "implode"
-            | "join"
-    )
+    let name = func_name.trim_start_matches('\\').to_ascii_lowercase();
+    values::VALUE_FUNCTIONS.contains(&name.as_str())
+        || matches!(
+            name.as_str(),
+            "strtolower"
+                | "dirname"
+                | "mb_strtolower"
+                | "strtoupper"
+                | "mb_strtoupper"
+                | "mb_convert_case"
+                | "mb_substr"
+                | "ucfirst"
+                | "lcfirst"
+                | "ucwords"
+                | "strrev"
+                | "trim"
+                | "ltrim"
+                | "rtrim"
+                | "chop"
+                | "str_repeat"
+                | "str_replace"
+                | "strlen"
+                | "mb_strlen"
+                | "str_increment"
+                | "str_decrement"
+                | "mb_lcfirst"
+                | "mb_ucfirst"
+                | "sprintf"
+                | "vsprintf"
+                | "number_format"
+                | "implode"
+                | "join"
+        )
 }
+
+#[path = "string_func_rules_values.rs"]
+mod values;
 
 #[cfg(test)]
 #[path = "string_func_rules_tests.rs"]

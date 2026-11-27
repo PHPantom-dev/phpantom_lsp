@@ -56,7 +56,19 @@ pub fn apply_function_stub_patches(func: &mut FunctionInfo) {
         "abs" => patch_abs(func),
         "clamp" => patch_clamp(func),
         "var_export" => patch_var_export(func),
-        "mb_internal_encoding" => patch_mb_internal_encoding(func),
+        "mb_internal_encoding" | "mb_http_output" | "mb_regex_encoding" => {
+            patch_mb_internal_encoding(func)
+        }
+        "gettimeofday" => patch_gettimeofday(func),
+        // PHP 8 throws on an unknown encoding instead of returning `false`,
+        // and every encoding has at least its own name as an alias.
+        "mb_encoding_aliases" => func.return_type = Some(PhpType::parse("list<non-falsy-string>")),
+        "stat" | "lstat" | "fstat" => {
+            func.return_type = Some(PhpType::union(vec![
+                PhpType::parse(STAT_SHAPE),
+                PhpType::false_(),
+            ]))
+        }
         "version_compare" => patch_version_compare(func),
         "apcu_store" | "apcu_add" => patch_apcu_key_family(func, "array<array-key, int>"),
         "apcu_delete" => patch_apcu_key_family(func, "list<string>"),
@@ -859,9 +871,31 @@ fn patch_microtime(func: &mut FunctionInfo) {
         "$as_float",
         PhpType::parse("true"),
         PhpType::float(),
-        PhpType::string(),
+        // `"0.12345600 1700000000"`: microseconds, a space and seconds.
+        PhpType::parse("non-falsy-string"),
     );
 }
+
+/// Patch `gettimeofday()` to have a conditional return type keyed on
+/// `$as_float`.
+///
+/// The stubs declare `array<int>|float` for both forms.
+fn patch_gettimeofday(func: &mut FunctionInfo) {
+    conditional_on(
+        func,
+        "$as_float",
+        PhpType::parse("true"),
+        PhpType::float(),
+        PhpType::parse("array{sec: int, usec: int, minuteswest: int, dsttime: int}"),
+    );
+}
+
+/// What `stat()`, `lstat()`, `fstat()` and `SplFileObject::fstat()` return:
+/// each field twice, by position and by name.
+pub(super) const STAT_SHAPE: &str = "array{0: int, 1: int, 2: int, 3: int, 4: int, 5: int, \
+     6: int, 7: int, 8: int, 9: int, 10: int, 11: int, 12: int, dev: int, ino: int, mode: int, \
+     nlink: int, uid: int, gid: int, rdev: int, size: int, atime: int, mtime: int, ctime: int, \
+     blksize: int, blocks: int}";
 
 /// Patch `getenv()` to have a conditional return type keyed on its name
 /// argument.
@@ -964,12 +998,13 @@ fn patch_var_export(func: &mut FunctionInfo) {
     );
 }
 
-/// Patch `mb_internal_encoding()` to have a conditional return type keyed on
+/// Patch `mb_internal_encoding()`, `mb_http_output()` and
+/// `mb_regex_encoding()` to have a conditional return type keyed on
 /// `$encoding`.
 ///
-/// The one function is both the getter and the setter: without an argument it
-/// reports the current internal encoding, and with one it reports whether the
-/// change took. The stubs declare `string|bool` for both.
+/// Each is both the getter and the setter: without an argument it reports
+/// the current encoding, and with one it reports whether the change took.
+/// The stubs declare `string|bool` for both.
 fn patch_mb_internal_encoding(func: &mut FunctionInfo) {
     let Some(encoding) = func.parameters.first().map(|p| p.name) else {
         return;
@@ -988,13 +1023,13 @@ fn patch_mb_internal_encoding(func: &mut FunctionInfo) {
 ///
 /// Naming an operator asks a yes/no question and gets a `bool`; leaving it out
 /// asks for the ordering and gets `-1`, `0` or `1`. The stubs declare the
-/// union of both.
+/// union of both. Literal arguments are folded at the call site.
 fn patch_version_compare(func: &mut FunctionInfo) {
     conditional_on(
         func,
         "$operator",
         PhpType::null(),
-        PhpType::int(),
+        PhpType::parse("-1|0|1"),
         PhpType::bool(),
     );
 }
