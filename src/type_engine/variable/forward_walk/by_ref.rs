@@ -652,6 +652,7 @@ pub(crate) fn process_pass_by_ref<'b>(
     if !super::array_assignment::process_array_push_call(expr, scope, ctx)
         && !super::array_assignment::process_array_cursor_call(expr, scope, ctx)
         && !super::array_assignment::process_array_sort_call(expr, scope)
+        && !super::array_assignment::process_array_splice_call(expr, scope, ctx)
         && !process_extract_call(expr, scope, ctx)
     {
         apply_by_ref_parameter_types(expr, scope, ctx);

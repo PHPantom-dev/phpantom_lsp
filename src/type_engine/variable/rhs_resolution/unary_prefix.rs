@@ -543,7 +543,7 @@ pub(crate) fn object_cast_type(operand: Option<PhpType>) -> PhpType {
 /// `(array) $expr`, applied member by member: an array stays as it is,
 /// `null` becomes `[]`, and a scalar becomes the one-entry list holding it.
 /// An object (its properties) or a value of unknown type is some array.
-fn array_cast_type(operand: Vec<ResolvedType>) -> PhpType {
+pub(crate) fn array_cast_type(operand: Vec<ResolvedType>) -> PhpType {
     fn cast_member(member: &PhpType, scalar: &PhpType, out: &mut Vec<PhpType>) {
         match member.kind() {
             TypeKind::Union(members) => {

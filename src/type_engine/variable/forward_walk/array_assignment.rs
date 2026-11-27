@@ -520,6 +520,89 @@ pub(crate) fn process_array_sort_call(expr: &Expression<'_>, scope: &mut ScopeSt
     true
 }
 
+/// Process `array_splice($var, $offset, $length, $replacement)`: the
+/// entries the offset and length name come out of `$var` and the
+/// replacement's values go in where they were, with the int keys
+/// renumbered.
+///
+/// Returns whether `expr` was handled, so the by-reference pass does not
+/// reset the variable to the parameter's bare `array` hint.
+pub(crate) fn process_array_splice_call<'b>(
+    expr: &'b Expression<'b>,
+    scope: &mut ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) -> bool {
+    use crate::php_type::LiteralValue;
+    use crate::type_engine::variable::array_func_rules::{SpliceLength, array_splice_leaves};
+
+    let Some((name, call)) = called_function(expr) else {
+        return false;
+    };
+    if !name.eq_ignore_ascii_case("array_splice") {
+        return false;
+    }
+    let mut args: Vec<&'b Expression<'b>> = Vec::with_capacity(4);
+    for arg in call.argument_list.arguments.iter() {
+        let Argument::Positional(arg) = arg else {
+            return false;
+        };
+        if arg.ellipsis.is_some() {
+            return false;
+        }
+        args.push(arg.value);
+    }
+    let (Some(Expression::Variable(Variable::Direct(dv))), Some(&offset_arg)) =
+        (args.first(), args.get(1))
+    else {
+        return false;
+    };
+    let base_name = bytes_to_str(dv.name);
+    let base_types = scope.get(base_name);
+    // A variable of unknown type can only have been an array for the call
+    // to succeed.
+    let base_type = if base_types.is_empty() {
+        PhpType::array()
+    } else {
+        let joined = ResolvedType::types_joined(base_types);
+        if joined.is_mixed() {
+            PhpType::array()
+        } else {
+            joined
+        }
+    };
+    let resolve = |value: &'b Expression<'b>| {
+        let types = resolve_rhs_with_scope(value, scope, ctx);
+        (!types.is_empty()).then(|| ResolvedType::types_joined(&types))
+    };
+    let offset =
+        resolve(offset_arg).and_then(|ty| ty.as_literal().and_then(LiteralValue::parse_i64));
+    let length = match args.get(2) {
+        None => SpliceLength::ToEnd,
+        Some(&length) => match resolve(length) {
+            Some(ty) if ty.is_null() => SpliceLength::ToEnd,
+            Some(ty) => ty
+                .as_literal()
+                .and_then(LiteralValue::parse_i64)
+                .map_or(SpliceLength::Unknown, SpliceLength::Literal),
+            None => SpliceLength::Unknown,
+        },
+    };
+    // PHP casts the replacement to an array.
+    let replacement = match args.get(3) {
+        None => PhpType::array_shape(Vec::new()),
+        Some(&replacement) => crate::type_engine::variable::rhs_resolution::array_cast_type(
+            resolve_rhs_with_scope(replacement, scope, ctx),
+        ),
+    };
+    let Some(result) = array_splice_leaves(&base_type, offset, length, &replacement, !ctx.in_loop)
+    else {
+        return false;
+    };
+    scope.set(base_name, vec![ResolvedType::from_type_string(result)]);
+    scope.invalidate_proofs(base_name);
+    true
+}
+
 /// Whether `expr` calls `reset()`, `end()`, `next()` or `prev()`, which
 /// take their array by reference only to move its internal pointer.
 pub(crate) fn is_array_pointer_call(expr: &Expression<'_>) -> bool {

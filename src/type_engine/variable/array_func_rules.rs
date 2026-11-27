@@ -25,6 +25,9 @@ use crate::php_type::{
 use super::{ARRAY_ELEMENT_FUNCS, ARRAY_PRESERVING_FUNCS};
 
 mod range;
+mod splice;
+
+pub(in crate::type_engine) use splice::{SpliceLength, array_splice_leaves};
 
 /// Argument access needed by the array-function return-type rules.
 pub(in crate::type_engine) trait ArrayFuncArgs {
@@ -243,7 +246,13 @@ pub(in crate::type_engine) fn array_func_raw_type(
     }
 
     if func_name.eq_ignore_ascii_case("array_slice") {
-        return array_slice_type(args);
+        return array_slice_type(args, true);
+    }
+
+    // `array_splice()` returns the entries it removes, which is the slice
+    // its offset and length name with the int keys renumbered.
+    if func_name.eq_ignore_ascii_case("array_splice") {
+        return array_slice_type(args, false);
     }
 
     if func_name.eq_ignore_ascii_case("array_count_values") {
@@ -1557,7 +1566,10 @@ fn array_column_shape(
 /// edges become optional. Anything else keeps the array's key and value
 /// types, its int keys renumbered unless `$preserve_keys` is `true`, and
 /// may come back empty.
-fn array_slice_type(args: &dyn ArrayFuncArgs) -> Option<PhpType> {
+///
+/// `has_preserve_keys` says whether the fourth argument is `$preserve_keys`;
+/// `array_splice()` takes its replacement there and always renumbers.
+fn array_slice_type(args: &dyn ArrayFuncArgs, has_preserve_keys: bool) -> Option<PhpType> {
     if (0..4).any(|i| args.is_spread(i) || args.is_named(i)) {
         return None;
     }
@@ -1575,7 +1587,7 @@ fn array_slice_type(args: &dyn ArrayFuncArgs) -> Option<PhpType> {
     } else {
         Some(None)
     };
-    let preserve = args.has_arg(3) && args.bool_literal(3) == Some(true);
+    let preserve = has_preserve_keys && args.has_arg(3) && args.bool_literal(3) == Some(true);
     // A length that is at least one, whatever it is.
     let length_positive = args.has_arg(2)
         && args

@@ -107,30 +107,6 @@ It also shows as:
 
 **Cases** (PHPStan `nsrt/`, 316 assertions): `array-functions.php` (23), `array-search.php` (20), `mb-convert-encoding-php8.php` (18), `sscanf.php` (18), `get-parent-class.php` (12), `pr-1244-php-84.php` (12), `DateTimeDynamicReturnTypes.php` (12), `DateTimeCreateDynamicReturnTypes.php` (10), `mb_substitute_character-php8.php` (10), `get-defined-vars.php` (10), `bug-3789.php` (8), 54 more.
 
-### B820. `array_splice()` neither returns the removed slice nor updates its array
-
-**Impact: Medium · Complexity: Low-Medium**
-
-```php
-/** @param array<int, int> $arr */
-function f(array $arr): void {
-    array_splice($arr, 0, 0, [1]);
-    $arr;   // array<int, int>, should be non-empty-list<int>
-    /** @var array{17: 'foo', b: 'bar', 19: 'baz'} $c */
-    array_splice($c, 0, 1, ['hello']);
-    $c;     // unchanged, should be array{0: 'hello', b: 'bar', 1: 'baz'}
-}
-```
-
-The by-reference array keeps its pre-call type: int keys are not renumbered (so it never becomes a list), the replacement values are not merged in and removed entries stay. Applies to shapes, generic arrays and properties alike.
-
-It also shows as:
-
-- `array_splice()` returns the input array's type instead of the removed slice
-- `array_splice()` leaves its by-reference array unchanged and returns a generic list
-
-**Cases** (PHPStan `nsrt/`, 100 assertions): `array_splice.php` (91), `bug-5017.php` (6), `bug-14037.php` (2), `bug-11917.php`.
-
 ### B821. `preg_match()` gives a generic array for a pattern that is not one plain literal
 
 **Impact: Medium · Complexity: Low-Medium**
@@ -1055,6 +1031,55 @@ It also shows as:
 **Cases** (PHPStan `nsrt/`, 6 assertions): `bug-10040.php` (3), `bug-12866.php` (2), `assert-intersected.php`.
 
 ## Array types
+
+### B918. `array_splice()` with a union of replacement shapes, or on an array with a proven key, gives a generic array
+
+**Impact: Low · Complexity: Low-Medium**
+
+```php
+/** @var array{17: 'foo', b: 'bar', 19: 'baz'} $arr */
+/** @var array{x: 'x', y?: 'y', 3: 66}|array{z: 'z', 5?: 77, 4: int} $rep */
+array_splice($arr, 0, 1, $rep);
+$arr;   // non-empty-array<int<0, max>|'b', …>, should be array{0: 'x'|'z', 1: 'y'|int, 2: 'baz'|int, b: 'bar', 3?: 'baz'}
+```
+
+A replacement shape with an optional entry leaves the renumbered keys after
+it open, so each alternative becomes a generic array; PHPStan merges the
+alternatives into one shape with optional entries. Separately, a key
+`array_key_exists()` proved on a generic array (PHPStan's `hasOffset()`) is
+not kept through the splice. `// SKIP` lines in
+`tests/phpstan_nsrt/array_splice.php`.
+
+### B919. Array functions that take a property by reference leave it unchanged
+
+**Impact: Low · Complexity: Low-Medium**
+
+```php
+/** @var array<int, int> */
+public array $items = [];
+
+array_splice($this->items, 0, 0, [1]);
+$this->items;   // array<int, int>, should be non-empty-list<int>
+```
+
+`array_splice()`, `array_push()`, `array_unshift()`, `array_shift()`,
+`array_pop()` and the sorts rewrite a variable passed to them, but a
+property passed the same way keeps its declared type.
+
+### B917. `(array)` of an object is a plain `array`
+
+**Impact: Low · Complexity: Low-Medium**
+
+```php
+final class Foo { public bool $abc = false; public string $def = 'def'; }
+(array) new Foo();   // array, should be array{abc: bool, def: string}
+```
+
+Casting an object gives its properties keyed by name, but the cast only
+reads arrays, scalars and `null`, so an object (one of a final class, or one
+built with `new`) becomes a plain `array`. The same cast types the
+replacement `array_splice()` inserts (`// SKIP` line in
+`tests/phpstan_nsrt/array_splice.php`).
 
 ### B766. Conditional appends forget which value sits at which offset
 
