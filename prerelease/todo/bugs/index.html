@@ -867,6 +867,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Crashes">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b916-long-operator-chains-overflow-the-stack-in-release-builds" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B916. Long operator chains overflow the stack in release builds
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -2226,17 +2243,6 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         B913. <code>method_exists()</code> does not narrow its subject to <code>hasMethod()</code>
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#b915-fooclass-is-typed-class-stringfoo-instead-of-the-literal-foo" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B915. <code>Foo::class</code> is typed <code>class-string&lt;Foo&gt;</code> instead of the literal <code>'Foo'</code>
       </span>
     </span>
   </a>
@@ -2726,6 +2732,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Crashes">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b916-long-operator-chains-overflow-the-stack-in-release-builds" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B916. Long operator chains overflow the stack in release builds
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -4091,17 +4114,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b915-fooclass-is-typed-class-stringfoo-instead-of-the-literal-foo" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B915. <code>Foo::class</code> is typed <code>class-string&lt;Foo&gt;</code> instead of the literal <code>'Foo'</code>
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -4150,7 +4162,16 @@ task, or sweeps of the sample projects under <code>projects/</code>. Entries are
 grouped by the mechanism that has to change, not by the symptom that
 surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <h2 id="crashes">Crashes<a class="headerlink" href="#crashes" title="Permanent link">&para;</a></h2>
-<p>No outstanding items.</p>
+<h3 id="b916-long-operator-chains-overflow-the-stack-in-release-builds">B916. Long operator chains overflow the stack in release builds<a class="headerlink" href="#b916-long-operator-chains-overflow-the-stack-in-release-builds" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Medium · Complexity: Medium</strong></p>
+<p><code>crash_sandbox::generated_length_operator_chains_do_not_overflow</code> and
+its <code>_framework_scanners</code> twin abort with a stack overflow under
+<code>cargo nextest run --release</code>, while both pass in the debug profile. The
+input is a function with 20,000-operand <code>+</code>, <code>&amp;&amp;</code>, <code>||</code> and <code>.</code> chains,
+analysed on a thread sized <code>PARSE_WORKER_STACK_SIZE</code>. Something that
+walks the chain still recurses once per operator, and the release
+build's frame sizes (inlining merges frames) run out of stack first.
+Find the walker that recurses on the left operand and make it iterate.</p>
 <h2 id="type-comparison">Type comparison<a class="headerlink" href="#type-comparison" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="conditional-return-types">Conditional return types<a class="headerlink" href="#conditional-return-types" title="Permanent link">&para;</a></h2>
@@ -5636,20 +5657,6 @@ nested callback once per enclosing level instead of sharing one answer.</p>
 leaves the object as it was and <code>$foo-&gt;doFoo()</code> reads as an unknown
 member.</p>
 <p><strong>Cases</strong> (PHPStan <code>nsrt/</code>, 1 assertion): <code>bug-4579.php</code>.</p>
-<h3 id="b915-fooclass-is-typed-class-stringfoo-instead-of-the-literal-foo">B915. <code>Foo::class</code> is typed <code>class-string&lt;Foo&gt;</code> instead of the literal <code>'Foo'</code><a class="headerlink" href="#b915-fooclass-is-typed-class-stringfoo-instead-of-the-literal-foo" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-106-1" name="__codelineno-106-1" href="#__codelineno-106-1"></a><span class="x">$c = \stdClass::class;</span>
-<a id="__codelineno-106-2" name="__codelineno-106-2" href="#__codelineno-106-2"></a><span class="x">$c;   // class-string&lt;stdClass&gt;, should be 'stdClass'</span>
-</code></pre></div>
-<p>PHPStan types a <code>::class</code> fetch on a named class as the string literal
-of that name (a literal that is also a class string), so it keeps
-comparing and printing as the exact name. PHPantom types it as
-<code>class-string&lt;Foo&gt;</code>, which loses the literal: <code>===</code> against another
-literal, array keys, and string functions see only a class string.
-Making the literal work everywhere a <code>class-string&lt;Foo&gt;</code> works today
-(<code>new $c</code>, <code>$c::method()</code>, <code>is_a()</code> checks, template inference) is what
-keeps this from being a one-line change.</p>
-<p><strong>Cases</strong> (PHPStan <code>nsrt/</code>, 1 assertion): <code>generic-class-string.php</code>.</p>
 
 
 
