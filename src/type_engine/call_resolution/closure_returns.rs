@@ -2,13 +2,16 @@
 //! its declared type, its `yield`s or a walk of its body, for binding the
 //! templates of the callable parameter it is passed to.
 
+use std::cell::RefCell;
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use mago_span::HasSpan;
-use mago_syntax::cst::{Expression, Statement};
+use mago_syntax::cst::{Expression, Program, Statement};
 
 use crate::Backend;
-use crate::atom::atom;
+use crate::atom::{Atom, atom};
+use crate::parser::ParsedFile;
 use crate::php_type::{PhpType, TypeKind};
 use crate::type_engine::resolver::{Loaders, ResolutionCtx, with_isolated_chain_cache};
 use crate::type_engine::variable::forward_walk::{
@@ -202,7 +205,8 @@ impl Backend {
     /// `scope_var_resolver` that answers parameter lookups and delegates
     /// everything else to the resolution the body would otherwise get
     /// (the outer scope resolver when present, assignment scanning
-    /// otherwise).
+    /// otherwise).  A full closure sees only what it captures of the scope
+    /// around it.
     ///
     /// `param_seeds` holds, per position, what the call site hands that
     /// parameter when it knows (`array_map($cb, $users)` hands `$cb` a
@@ -249,191 +253,317 @@ impl Backend {
                 .collect();
         let is_arrow = crate::completion::source::helpers::closure_literal_parts(closure_text)
             .is_some_and(|(is_arrow, _)| is_arrow);
-        let untyped_arrow = is_arrow && typed_params.is_empty();
+        if !is_arrow {
+            return resolve_full_closure_body_type(closure_text, typed_params, ctx);
+        }
+
+        let untyped_arrow = typed_params.is_empty();
         if untyped_arrow && let Some(ty) = Self::resolve_arg_text_to_type(first_body, ctx) {
             return Some(ty);
         }
 
-        // Pre-resolve each typed parameter to its classes so the
-        // injected resolver is a cheap map lookup.
-        let owning_class_fqn = ctx.current_class.map(ClassInfo::fqn);
-        let owning_class_name = owning_class_fqn.as_deref().unwrap_or("");
-        let seed_one = |ty: PhpType| -> Vec<ResolvedType> {
-            let classes = crate::type_engine::type_resolution::type_hint_to_classes_typed(
-                &ty,
-                owning_class_name,
-                ctx.file.all_classes,
-                ctx.file.class_loader,
-            );
-            if classes.is_empty() {
-                vec![ResolvedType::from_type_string(ty)]
-            } else {
-                ResolvedType::from_classes_with_hint(classes, ty)
-            }
-        };
-        let param_types: HashMap<String, Vec<ResolvedType>> = typed_params
-            .into_iter()
-            .map(|(name, ty)| {
-                // Each alternative of a union is seeded on its own so it
-                // keeps its own generic arguments. Two instantiations of the
-                // same class (`Builder<A>|Builder<B>`) resolve to one class,
-                // and a single entry could only carry the whole union as its
-                // type string — leaving a `@return T` on the class with no
-                // instantiation to substitute from.
-                let resolved = match ty.kind() {
-                    TypeKind::Union(members) => {
-                        members.iter().cloned().flat_map(&seed_one).collect()
-                    }
-                    _ => seed_one(ty),
-                };
-                (name, resolved)
-            })
-            .collect();
-
-        let (walked_locals, returns) = if is_arrow {
-            (None, vec![Some(first_body.to_owned())])
-        } else {
-            let (locals, returns) = walk_closure_body_locals(closure_text, &param_types, ctx)?;
-            if returns.is_empty() {
-                return None;
-            }
-            (Some(locals), returns)
-        };
-
-        let outer_resolver = ctx.scope_var_resolver;
+        let param_types = seed_param_types(typed_params, ctx);
         let param_aware_resolver = |name: &str| -> Vec<ResolvedType> {
-            // A full closure body may reassign a parameter before
-            // returning it (`$result['a'] = (string) $result['a']; return
-            // $result;`), so the walked locals — the forward walker's own
-            // scope after running the body — answer first when they have
-            // something to say.  They fall back to the raw seed for a
-            // parameter the body never touches, and for an arrow function
-            // (nothing to walk).
-            if let Some(locals) = &walked_locals
-                && let Some(types) = locals.get(&atom(name))
-                && !types.is_empty()
-            {
-                return types.clone();
-            }
             if let Some(types) = param_types.get(name) {
                 return types.clone();
             }
-            match outer_resolver {
-                Some(outer) => outer(name),
-                // No outer scope resolver: replicate the assignment-scan
-                // fallback the body resolution would otherwise take for
-                // this variable (see `resolve_variable_fallback`).
-                None => crate::type_engine::variable::resolution::resolve_variable_types(
-                    ctx.var_query(name),
-                ),
-            }
+            outer_types(name, ctx.scope_var_resolver, ctx)
         };
-
-        let param_ctx = ResolutionCtx {
-            laravel_macro_this_resolver: ctx.laravel_macro_this_resolver,
-            resolved_class_cache: ctx.resolved_class_cache,
-            function_loader: ctx.function_loader,
-            scope_var_resolver: Some(&param_aware_resolver),
-            is_in_static_method: ctx.is_in_static_method,
-            preserve_static: ctx.preserve_static,
-            ..ResolutionCtx::new(ctx.file, ctx.current_class, ctx.cursor_offset)
-        };
-        let returns: Vec<&str> = returns
-            .iter()
-            .map(Option::as_deref)
-            .collect::<Option<_>>()?;
         // The untyped arrow function's body was just tried with nothing
         // else to seed it, so asking again would get the same answer.
         if !untyped_arrow
-            && let Some(members) = returns
-                .iter()
-                .map(|ret| Self::resolve_arg_text_to_type(ret, &param_ctx))
-                .collect::<Option<Vec<_>>>()
+            && let Some(ty) =
+                Self::resolve_arg_text_to_type(first_body, &scoped_ctx(&param_aware_resolver, ctx))
         {
-            return Some(PhpType::union(members));
+            return Some(PhpType::union(vec![ty]));
         }
         // The text resolver only knows the expression shapes it has a rule
         // for, so a body like `$carry && $item > 0` leaves it empty-handed.
         // The shared expression pipeline answers for the rest.
-        resolve_closure_returns_in_ast(closure_text, &param_types, &param_aware_resolver, ctx)
+        with_walked_closure(closure_text, &param_types, ctx, |scope, returns, fw_ctx| {
+            let resolver = |name: &str| match scope.locals.get(&atom(name)) {
+                Some(types) if !types.is_empty() => types.clone(),
+                _ => param_aware_resolver(name),
+            };
+            resolve_returns_in_ast(returns, &resolver, &scope, fw_ctx)
+        })
+        .flatten()
     }
 }
 
-/// Resolve every `return` a closure literal reaches (its body expression,
-/// for an arrow function) through the shared expression pipeline, with
-/// the body walked as [`walk_closure_body_locals`] walks it.
-///
-/// A variable the body does not define is answered by `outer`. Returns
-/// `None` when a `return` is bare or resolves to nothing.
-fn resolve_closure_returns_in_ast(
-    closure_text: &str,
-    param_types: &HashMap<String, Vec<ResolvedType>>,
-    outer: &dyn Fn(&str) -> Vec<ResolvedType>,
+/// What the scope around a closure holds for `name`: the outer scope
+/// resolver's answer when there is one, assignment scanning otherwise
+/// (see `resolve_variable_fallback`).
+fn outer_types(
+    name: &str,
+    outer: crate::type_engine::resolver::ScopeVarResolverFn<'_>,
     ctx: &ResolutionCtx<'_>,
-) -> Option<PhpType> {
-    with_walked_closure(closure_text, param_types, ctx, |scope, returns, fw_ctx| {
-        let resolver = |name: &str| match scope.locals.get(&atom(name)) {
-            Some(types) if !types.is_empty() => types.clone(),
-            _ => outer(name),
-        };
-        let mut members = Vec::with_capacity(returns.len());
-        for ret in returns {
-            let expr = (*ret)?;
-            let var_ctx = fw_ctx.var_ctx_for_with_scope(
-                "$__return",
-                expr.span().start.offset,
-                &resolver,
-                Some(scope.proofs()),
-            );
-            members.push(
-                crate::type_engine::variable::iterable_elements::resolve_expression_type(
-                    expr, &var_ctx,
-                )?,
-            );
+) -> Vec<ResolvedType> {
+    match outer {
+        Some(outer) => outer(name),
+        None => {
+            crate::type_engine::variable::resolution::resolve_variable_types(ctx.var_query(name))
         }
-        Some(PhpType::union(members))
-    })
-    .flatten()
+    }
 }
 
-/// Walk a full closure literal's own body with the shared forward walker,
-/// seeded with the parameter types the call site hands it, and return the
-/// scope those statements leave behind together with the text of every
-/// `return` the body reaches (`None` for a bare `return;`).
-///
-/// Resolving a return expression's text on its own knows nothing about
-/// the body's locals, so `$p = make(); return $p;` could not see `$p`, and
-/// a body that reassigns a parameter before returning it (`$result['a'] =
-/// (string) $result['a']; return $result;`) would still report the
-/// parameter's original shape. Re-parsing the closure in isolation and
-/// running its body through [`walk_body_forward`] answers with what the
-/// body actually leaves behind, the same as any other consumer of the
-/// forward walker.
-///
-/// Only a full (`function`) closure is worth walking: an arrow function's
-/// body is a single expression with nothing to walk, so the caller's
-/// raw-seed resolver already answers for it.
-fn walk_closure_body_locals(
-    closure_text: &str,
-    param_types: &HashMap<String, Vec<ResolvedType>>,
+/// `ctx` with `resolver` answering its variables.
+fn scoped_ctx<'b>(
+    resolver: &'b dyn Fn(&str) -> Vec<ResolvedType>,
+    ctx: &ResolutionCtx<'b>,
+) -> ResolutionCtx<'b> {
+    ResolutionCtx {
+        laravel_macro_this_resolver: ctx.laravel_macro_this_resolver,
+        resolved_class_cache: ctx.resolved_class_cache,
+        function_loader: ctx.function_loader,
+        scope_var_resolver: Some(resolver),
+        is_in_static_method: ctx.is_in_static_method,
+        preserve_static: ctx.preserve_static,
+        ..ResolutionCtx::new(ctx.file, ctx.current_class, ctx.cursor_offset)
+    }
+}
+
+/// Pre-resolve each closure parameter's type to its classes, so a variable
+/// lookup in the body is a cheap map lookup.
+fn seed_param_types(
+    typed_params: Vec<(String, PhpType)>,
     ctx: &ResolutionCtx<'_>,
-) -> Option<(
-    crate::type_engine::variable::forward_walk::Locals,
-    Vec<Option<String>>,
-)> {
-    with_walked_closure(closure_text, param_types, ctx, |scope, returns, fw_ctx| {
-        let content = fw_ctx.file.content;
-        let returns = returns
+) -> HashMap<String, Vec<ResolvedType>> {
+    let owning_class_fqn = ctx.current_class.map(ClassInfo::fqn);
+    let owning_class_name = owning_class_fqn.as_deref().unwrap_or("");
+    let seed_one = |ty: PhpType| -> Vec<ResolvedType> {
+        let classes = crate::type_engine::type_resolution::type_hint_to_classes_typed(
+            &ty,
+            owning_class_name,
+            ctx.file.all_classes,
+            ctx.file.class_loader,
+        );
+        if classes.is_empty() {
+            vec![ResolvedType::from_type_string(ty)]
+        } else {
+            ResolvedType::from_classes_with_hint(classes, ty)
+        }
+    };
+    typed_params
+        .into_iter()
+        .map(|(name, ty)| {
+            // Each alternative of a union is seeded on its own so it
+            // keeps its own generic arguments. Two instantiations of the
+            // same class (`Builder<A>|Builder<B>`) resolve to one class,
+            // and a single entry could only carry the whole union as its
+            // type string — leaving a `@return T` on the class with no
+            // instantiation to substitute from.
+            let resolved = match ty.kind() {
+                TypeKind::Union(members) => members.iter().cloned().flat_map(&seed_one).collect(),
+                _ => seed_one(ty),
+            };
+            (name, resolved)
+        })
+        .collect()
+}
+
+/// [`Backend::resolve_closure_body_type`] for a full (`function`) closure,
+/// with its parameters typed as `typed_params`.
+///
+/// Read once per [`ClosureTextKey`] while [`CLOSURE_TEXT_MEMO`] is active.
+fn resolve_full_closure_body_type(
+    closure_text: &str,
+    typed_params: Vec<(String, PhpType)>,
+    ctx: &ResolutionCtx<'_>,
+) -> Option<PhpType> {
+    let captured = captured_variables(closure_text, ctx);
+    let key = ClosureTextKey {
+        text: closure_text.trim().into(),
+        file: (ctx.file.content.as_ptr() as usize, ctx.file.content.len()),
+        cursor_offset: ctx.cursor_offset,
+        imports: ctx
+            .file
+            .source_imports
+            .map_or(0, |imports| std::ptr::from_ref(imports) as usize),
+        class: ctx.current_class.map(ClassInfo::fqn),
+        inference_context: crate::type_engine::call_resolution::body_inference_context(),
+        static_context: (
+            ctx.is_in_static_method,
+            ctx.preserve_static,
+            ctx.laravel_macro_this_resolver.is_some(),
+        ),
+        params: typed_params.clone().into_boxed_slice(),
+        captured: captured
             .iter()
-            .map(|expr| {
-                expr.map(|e| {
-                    let span = e.span();
-                    content[span.start.offset as usize..span.end.offset as usize].to_owned()
+            .map(|(_, types)| (!types.is_empty()).then(|| ResolvedType::types_joined(types)))
+            .collect(),
+    };
+    if let Some(hit) = CLOSURE_TEXT_MEMO.with(|cell| {
+        cell.borrow()
+            .as_ref()
+            .and_then(|memo| memo.returns.get(&key).cloned())
+    }) {
+        return hit;
+    }
+
+    let param_types = seed_param_types(typed_params, ctx);
+    let inferred =
+        with_walked_closure(closure_text, &param_types, ctx, |scope, returns, fw_ctx| {
+            // The body was walked from the parameters alone; what a variable
+            // it does not assign holds is the parameter's seed, or what the
+            // closure captured.
+            let resolver = |name: &str| -> Vec<ResolvedType> {
+                if let Some(types) = scope.locals.get(&atom(name))
+                    && !types.is_empty()
+                {
+                    return types.clone();
+                }
+                if let Some(types) = param_types.get(name) {
+                    return types.clone();
+                }
+                captured
+                    .iter()
+                    .find(|(captured, _)| *captured == name)
+                    .map(|(_, types)| types.clone())
+                    .unwrap_or_default()
+            };
+            if returns.is_empty() {
+                return None;
+            }
+            let content = fw_ctx.file.content;
+            let param_ctx = scoped_ctx(&resolver, ctx);
+            if let Some(members) = returns
+                .iter()
+                .map(|ret| {
+                    let span = (*ret)?.span();
+                    Backend::resolve_arg_text_to_type(
+                        &content[span.start.offset as usize..span.end.offset as usize],
+                        &param_ctx,
+                    )
                 })
-            })
-            .collect();
-        (scope.locals, returns)
-    })
+                .collect::<Option<Vec<_>>>()
+            {
+                return Some(PhpType::union(members));
+            }
+            // The text resolver only knows the expression shapes it has a rule
+            // for, so a body like `$carry && $item > 0` leaves it empty-handed.
+            // The shared expression pipeline answers for the rest.
+            resolve_returns_in_ast(returns, &resolver, &scope, fw_ctx)
+        })
+        .flatten();
+
+    CLOSURE_TEXT_MEMO.with(|cell| {
+        if let Some(memo) = cell.borrow_mut().as_mut() {
+            memo.returns.insert(key, inferred.clone());
+        }
+    });
+    inferred
+}
+
+/// The variables of the scope around a full closure its body can read,
+/// with what that scope holds for each: what its `use` clause captures,
+/// `$this` unless it is `static`, and the superglobals.  Only those the
+/// body names are read.
+fn captured_variables<'t>(
+    closure_text: &'t str,
+    ctx: &ResolutionCtx<'_>,
+) -> Vec<(&'t str, Vec<ResolvedType>)> {
+    let is_static = closure_text
+        .trim_start()
+        .strip_prefix("static")
+        .is_some_and(|rest| rest.starts_with(char::is_whitespace));
+    let implicit = (!is_static)
+        .then_some("$this")
+        .into_iter()
+        .chain(crate::scope_collector::AUTO_GLOBALS)
+        .filter(|name| closure_text.contains(name));
+    crate::completion::source::helpers::extract_closure_use_vars_from_text(closure_text)
+        .unwrap_or_default()
+        .into_iter()
+        .chain(implicit)
+        .map(|name| (name, outer_types(name, ctx.scope_var_resolver, ctx)))
+        .collect()
+}
+
+thread_local! {
+    /// When `Some`, the closure literals parsed for
+    /// [`Backend::resolve_closure_body_type`] and what each was found to
+    /// return.  Activated with the rest of the request-scoped type-engine
+    /// memos.
+    ///
+    /// Binding a template from a closure argument reads the closure's body,
+    /// and reading that body binds the templates of the calls in it, so
+    /// without this a closure nested `n` deep in call arguments would be
+    /// read again for every enclosing closure read.
+    static CLOSURE_TEXT_MEMO: RefCell<Option<ClosureTextMemo>> = const { RefCell::new(None) };
+}
+
+#[cfg(test)]
+thread_local! {
+    static TEST_CLOSURE_WALKS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// See [`CLOSURE_TEXT_MEMO`].
+#[derive(Default)]
+pub(crate) struct ClosureTextMemo {
+    /// Each closure literal's parse, by its text.  Kept for the whole pass
+    /// so a closure nested in one is read from the same source at the
+    /// same address every time, which is how [`ClosureTextKey::file`]
+    /// tells one such source from another.
+    programs: HashMap<Box<str>, Option<Arc<ParsedFile>>>,
+    returns: HashMap<ClosureTextKey, Option<PhpType>>,
+}
+
+/// What identifies one reading of a full closure literal: its text, where
+/// it is read (the source text's address, the cursor, the `use` imports
+/// and the class, which decide how the names written in it resolve), the
+/// body-inference context it is read under, what its parameters are typed
+/// as, and what it captures.
+#[derive(PartialEq, Eq, Hash)]
+struct ClosureTextKey {
+    text: Box<str>,
+    file: (usize, usize),
+    cursor_offset: u32,
+    imports: usize,
+    class: Option<Atom>,
+    inference_context: u64,
+    /// Whether the cursor is in a static method, whether `static` is kept,
+    /// and whether a Laravel macro's `$this` can be resolved.
+    static_context: (bool, bool, bool),
+    params: Box<[(String, PhpType)]>,
+    captured: Box<[Option<PhpType>]>,
+}
+
+/// The guard [`with_closure_text_memo`] hands back.
+pub(crate) type ClosureTextMemoGuard = crate::type_engine::MemoGuard<ClosureTextMemo>;
+
+/// Activate [`CLOSURE_TEXT_MEMO`] for the current thread.  Nested
+/// activation is a no-op.
+pub(crate) fn with_closure_text_memo(scope: crate::type_engine::MemoScope) -> ClosureTextMemoGuard {
+    crate::type_engine::activate_memo(&CLOSURE_TEXT_MEMO, scope)
+}
+
+/// Resolve every `return` expression of a walked closure body through the
+/// shared expression pipeline, with `resolver` answering its variables.
+///
+/// Returns `None` when a `return` is bare or resolves to nothing.
+fn resolve_returns_in_ast(
+    returns: &[Option<&Expression<'_>>],
+    resolver: &dyn Fn(&str) -> Vec<ResolvedType>,
+    scope: &ScopeState,
+    fw_ctx: &ForwardWalkCtx<'_>,
+) -> Option<PhpType> {
+    let mut members = Vec::with_capacity(returns.len());
+    for ret in returns {
+        let expr = (*ret)?;
+        let var_ctx = fw_ctx.var_ctx_for_with_scope(
+            "$__return",
+            expr.span().start.offset,
+            resolver,
+            Some(scope.proofs()),
+        );
+        members.push(
+            crate::type_engine::variable::iterable_elements::resolve_expression_type(
+                expr, &var_ctx,
+            )?,
+        );
+    }
+    Some(PhpType::union(members))
 }
 
 /// Parse a closure or arrow function literal in isolation, walk a closure's
@@ -441,6 +571,14 @@ fn walk_closure_body_locals(
 /// resulting scope together with every `return` expression the body
 /// reaches (`None` for a bare `return;`). An arrow function has nothing to
 /// walk and returns its body expression.
+///
+/// Resolving a return expression's text on its own knows nothing about
+/// the body's locals, so `$p = make(); return $p;` could not see `$p`, and
+/// a body that reassigns a parameter before returning it (`$result['a'] =
+/// (string) $result['a']; return $result;`) would still report the
+/// parameter's original shape. Running the body through
+/// [`walk_body_forward`] answers with what the body actually leaves
+/// behind, the same as any other consumer of the forward walker.
 ///
 /// Returns `None` when `closure_text` is neither.
 fn with_walked_closure<R>(
@@ -450,7 +588,6 @@ fn with_walked_closure<R>(
     f: impl FnOnce(ScopeState, &[Option<&Expression<'_>>], &ForwardWalkCtx<'_>) -> R,
 ) -> Option<R> {
     let trimmed = closure_text.trim().trim_end_matches(';');
-    let wrapped = format!("<?php $__closure = {trimmed};");
 
     // The closure body is parsed and walked in complete isolation from
     // the file the call site sits in: its own offsets are unrelated to
@@ -461,64 +598,101 @@ fn with_walked_closure<R>(
     // same reason.
     let _isolated = (suspend_diagnostic_scope(), with_isolated_chain_cache());
 
-    crate::parser::with_parsed_program(
-        &wrapped,
-        "closure_body_return_narrowing",
-        |program, content| {
-            let function = program.statements.iter().find_map(|stmt| {
-                let Statement::Expression(expr_stmt) = stmt else {
-                    return None;
-                };
-                let Expression::Assignment(assignment) = expr_stmt.expression else {
-                    return None;
-                };
-                match assignment.rhs {
-                    Expression::Closure(_) | Expression::ArrowFunction(_) => Some(assignment.rhs),
-                    _ => None,
-                }
-            })?;
-
-            let dummy_class;
-            let current_class = match ctx.current_class {
-                Some(cc) => cc,
-                None => {
-                    dummy_class = crate::class_lookup::class_context_placeholder(content, 0);
-                    &dummy_class
-                }
+    with_closure_program(trimmed, |program, content| {
+        let function = program.statements.iter().find_map(|stmt| {
+            let Statement::Expression(expr_stmt) = stmt else {
+                return None;
             };
-
-            let flow = WalkFlow::default();
-            let fw_ctx = ForwardWalkCtx {
-                loaders: Loaders::with_function(ctx.function_loader),
-                resolved_class_cache: ctx.resolved_class_cache,
-                ..ForwardWalkCtx::new(
-                    ctx.file.with_source(content, ctx.file.all_classes),
-                    current_class,
-                    u32::MAX,
-                    &flow,
-                )
+            let Expression::Assignment(assignment) = expr_stmt.expression else {
+                return None;
             };
-
-            let mut scope = ScopeState::new();
-            for (name, types) in param_types {
-                scope.seed(name, types.clone());
+            match assignment.rhs {
+                Expression::Closure(_) | Expression::ArrowFunction(_) => Some(assignment.rhs),
+                _ => None,
             }
+        })?;
 
-            let returns: Vec<Option<&Expression<'_>>> = match function {
-                Expression::Closure(closure) => {
-                    walk_body_forward(closure.body.statements.iter(), &mut scope, &fw_ctx);
-                    let mut found = Vec::new();
-                    crate::return_collection::collect_returns(
-                        closure.body.statements.iter(),
-                        &mut found,
-                    );
-                    found.into_iter().map(|(expr, ..)| expr).collect()
-                }
-                Expression::ArrowFunction(arrow) => vec![Some(arrow.expression)],
-                _ => return None,
-            };
+        let dummy_class;
+        let current_class = match ctx.current_class {
+            Some(cc) => cc,
+            None => {
+                dummy_class = crate::class_lookup::class_context_placeholder(content, 0);
+                &dummy_class
+            }
+        };
 
-            Some(f(scope, &returns, &fw_ctx))
-        },
-    )
+        let flow = WalkFlow::default();
+        let fw_ctx = ForwardWalkCtx {
+            loaders: Loaders::with_function(ctx.function_loader),
+            resolved_class_cache: ctx.resolved_class_cache,
+            ..ForwardWalkCtx::new(
+                ctx.file.with_source(content, ctx.file.all_classes),
+                current_class,
+                u32::MAX,
+                &flow,
+            )
+        };
+
+        let mut scope = ScopeState::new();
+        for (name, types) in param_types {
+            scope.seed(name, types.clone());
+        }
+
+        let returns: Vec<Option<&Expression<'_>>> = match function {
+            Expression::Closure(closure) => {
+                #[cfg(test)]
+                TEST_CLOSURE_WALKS.with(|count| count.set(count.get() + 1));
+                walk_body_forward(closure.body.statements.iter(), &mut scope, &fw_ctx);
+                let mut found = Vec::new();
+                crate::return_collection::collect_returns(
+                    closure.body.statements.iter(),
+                    &mut found,
+                );
+                found.into_iter().map(|(expr, ..)| expr).collect()
+            }
+            Expression::ArrowFunction(arrow) => vec![Some(arrow.expression)],
+            _ => return None,
+        };
+
+        Some(f(scope, &returns, &fw_ctx))
+    })
 }
+
+/// Run `f` on `closure_text` parsed as the value assigned in a program of
+/// its own, `<?php $__closure = …;`.
+///
+/// While [`CLOSURE_TEXT_MEMO`] is active each text is parsed once and kept
+/// for the pass.  A parser panic, or one in `f`, is logged and answered
+/// with `R::default()`.
+fn with_closure_program<R: Default>(
+    closure_text: &str,
+    f: impl FnOnce(&Program<'_>, &str) -> R,
+) -> R {
+    const METHOD: &str = "closure_body_return_narrowing";
+    let wrap = || format!("<?php $__closure = {closure_text};");
+    let kept = CLOSURE_TEXT_MEMO.with(|cell| {
+        let mut memo = cell.borrow_mut();
+        let memo = memo.as_mut()?;
+        if let Some(parsed) = memo.programs.get(closure_text) {
+            return Some(parsed.clone());
+        }
+        let parsed = crate::parser::parse_to_owned(Arc::new(wrap()), METHOD).map(Arc::new);
+        memo.programs.insert(closure_text.into(), parsed.clone());
+        Some(parsed)
+    });
+    match kept {
+        None => crate::parser::with_parsed_program(&wrap(), METHOD, f),
+        Some(None) => R::default(),
+        Some(Some(parsed)) => std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            f(parsed.program(), parsed.content())
+        }))
+        .unwrap_or_else(|_| {
+            tracing::error!("PHPantom: parser panicked in {}", METHOD);
+            R::default()
+        }),
+    }
+}
+
+#[cfg(test)]
+#[path = "closure_returns_tests.rs"]
+mod tests;

@@ -2102,28 +2102,38 @@ It also shows as:
 
 **Cases** (PHPStan `nsrt/`, 12 assertions): `bug-9384.php` (9), `int-mask.php` (3).
 
-### B912. Analysis time doubles with each level of nested callback arguments
+### B912. A closure argument is walked once per closure around it
 
 **Impact: Low · Complexity: Medium**
 
 ```php
-function t($x) {
-    $r = array_map(function ($q) use ($x) {
+/**
+ * @template T
+ * @template R
+ * @param callable(T): R $f
+ * @param array<T> $a
+ * @return array<R>
+ */
+function my_map(callable $f, array $a): array { return array_map($f, $a); }
+
+function t(int $x) {
+    $y = my_map(function ($q) use ($x) {
         $y = $q;
         if ($y) {
-            // … the same `array_map(function …)` again, one level deeper …
+            // … the same `my_map(function …)` again, one level deeper …
         }
-        return array_filter([$y], function ($z) use ($x) { return $z; });
+        return my_map(function ($z) use ($x) { return $z; }, [$y]);
     }, [$x]);
-    return $r;
+    return $y;
 }
 ```
 
-Each level of closures passed as call arguments doubles the time
-`analyze` spends on the file: 0.8 s of CPU at 14 levels, 3.1 s at 16,
-12.6 s at 18 and 49 s at 20 (release build). The same nesting written
-as closures assigned to variables stays flat, because a closure
-literal's own body reading is memoized per request. The callback
-argument paths (template binding from a closure argument, and the
-callback return inference behind `array_map`/`array_filter`) re-read a
-nested callback once per enclosing level instead of sharing one answer.
+Binding a template from a closure argument reads the closure's body
+from its text (`resolve_closure_body_type` in
+`type_engine/call_resolution/closure_returns.rs`), parsed as a program
+of its own. Those readings are memoized per request, but each enclosing
+closure is a different source, so a closure `n` levels deep is still
+walked once for every closure around it and the walks grow with the
+square of the nesting (about 0.3 s at 30 levels, release build).
+Reading closure arguments from the file's own AST, as the forward
+walker's `closure_body_type` does, would walk each one once.

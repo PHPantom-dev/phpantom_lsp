@@ -392,6 +392,19 @@ pub(crate) fn with_parsed_program<T: Default>(
     }
 }
 
+/// Parse `content` into a [`ParsedFile`] the caller keeps, for text it
+/// reads more than once outside the active cache.
+///
+/// A parser panic is logged (with `method_name`) and answered with `None`,
+/// as [`with_parsed_program`] answers it with `T::default()`.
+pub(crate) fn parse_to_owned(content: Arc<String>, method_name: &str) -> Option<ParsedFile> {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        ParsedFile::new(content, super::recovery::parse_program)
+    }))
+    .inspect_err(|_| tracing::error!("PHPantom: parser panicked in {}", method_name))
+    .ok()
+}
+
 /// Run `f` on a file of the active cache.
 ///
 /// `f` may parse the file lazily and then read the program, and either can

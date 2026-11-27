@@ -34,6 +34,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **Very long operator chains no longer crash the server.** A generated file holding an expression of tens of thousands of `.`, `+`, `&&` or `||` operators is indexed and analysed instead of overflowing the stack.
+- **Closures nested in generic call arguments no longer slow analysis down sharply.** A file that passes closures to a templated function, each inside the body of the one before, is analysed in a fraction of the time it used to take as the nesting deepens.
 - **A plain `class-string` argument makes a `class-string<T>` template an `object`.** Passing a value typed `class-string` to a function declared `@param class-string<T>` / `@return T` now gives `object` instead of `mixed`. Contributed by @AJenbo.
 - **`static` through a narrowed `$this` keeps the other types.** After `if ($this instanceof Bar)`, a call such as `$this->returnStatic()` is typed `static(Ipsum)&Bar` instead of dropping `Bar`. Contributed by @AJenbo.
 - **Symfony, Yii and Tempest applications in a monorepo subdirectory.** When the workspace opens at a monorepo's top with the application in a folder such as `backend/`, its templates, bundle resources, aliases, params, migrations, view paths and discovery are read from that folder rather than the workspace root, as Laravel applications already were.

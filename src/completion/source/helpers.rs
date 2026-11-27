@@ -492,6 +492,34 @@ pub(crate) fn extract_closure_param_type_from_text(text: &str, position: usize) 
         .1
 }
 
+/// The variables a full closure literal's `use (…)` clause captures, with
+/// the leading `$`: `function ($x) use ($a, &$b) { … }` captures `$a` and
+/// `$b`.  Empty for a closure without the clause.
+///
+/// Returns `None` when the text is not a full closure literal.
+pub(crate) fn extract_closure_use_vars_from_text(text: &str) -> Option<Vec<&str>> {
+    let (is_arrow, trimmed) = closure_literal_parts(text)?;
+    if is_arrow {
+        return None;
+    }
+    let (_, paren_close) = parameter_list_parens(trimmed)?;
+    let after_paren = trimmed.get(paren_close + 1..)?.trim_start();
+    let Some(after_use) = after_paren
+        .strip_prefix("use")
+        .filter(|rest| rest.trim_start().starts_with('('))
+    else {
+        return Some(Vec::new());
+    };
+    let (open, close) = parameter_list_parens(after_use)?;
+    Some(
+        after_use[open + 1..close]
+            .split(',')
+            .map(|var| var.trim().trim_start_matches('&').trim_start())
+            .filter(|name| name.len() > 1 && name.starts_with('$'))
+            .collect(),
+    )
+}
+
 /// Extract the parameter list of a closure or arrow-function literal as
 /// `(name, type)` pairs, in declaration order.
 ///
