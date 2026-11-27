@@ -161,7 +161,7 @@ function doFoo(int $intA, int $intB, string $s, bool $bool, $numericS, float $fl
 	assertType('*ERROR*', 1.1 ** $arr);
 	assertType('*ERROR*', 1.1 ** []);
 
-	assertType('NAN', pow(-1,5.5)); // SKIP: a NAN result is a plain `float`
+	assertType('NAN', pow(-1,5.5));
 
 	assertType('1', pow($s, 0));
 	assertType('1', $s ** '0');

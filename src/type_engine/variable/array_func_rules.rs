@@ -1963,6 +1963,12 @@ fn renumber_slice(entries: Vec<ShapeEntry>, preserve: bool) -> Option<PhpType> {
     if preserve {
         return Some(shape_with_implicit_keys(entries));
     }
+    if entries
+        .iter()
+        .all(|e| e.key.as_deref().and_then(canonical_int_key).is_some())
+    {
+        return Some(renumbered_list(&entries));
+    }
     let mut next = 0;
     let mut renumbered = Vec::with_capacity(entries.len());
     let mut uncertain = false;
@@ -1978,6 +1984,46 @@ fn renumber_slice(entries: Vec<ShapeEntry>, preserve: bool) -> Option<PhpType> {
         renumbered.push(entry);
     }
     Some(shape_with_implicit_keys(renumbered))
+}
+
+/// `entries`, all int-keyed, renumbered from zero in order.
+///
+/// With every entry there this is the same shape keyed `0, 1, 2, …`. An
+/// optional entry leaves which value lands at each later position open:
+/// position `k` holds any entry that has at most `k` required entries
+/// before it, and is there for certain only when more than `k` entries are
+/// required.
+fn renumbered_list(entries: &[ShapeEntry]) -> PhpType {
+    if entries.iter().all(|e| !e.optional) {
+        return PhpType::array_shape(
+            entries
+                .iter()
+                .map(|e| ShapeEntry {
+                    key: None,
+                    value_type: e.value_type.clone(),
+                    optional: false,
+                })
+                .collect(),
+        );
+    }
+    let mut required_before = Vec::with_capacity(entries.len());
+    let mut required = 0;
+    for entry in entries {
+        required_before.push(required);
+        required += usize::from(!entry.optional);
+    }
+    let positions = (0..entries.len()).map(|k| {
+        let candidates: Vec<PhpType> = (k..entries.len())
+            .filter(|&j| required_before[j] <= k)
+            .map(|j| entries[j].value_type.clone())
+            .collect();
+        ShapeEntry {
+            key: Some(k.to_string()),
+            value_type: PhpType::union(candidates),
+            optional: required <= k,
+        }
+    });
+    PhpType::list_shape(positions.collect())
 }
 
 /// How many pieces a literal `str_split()` folds into a shape.

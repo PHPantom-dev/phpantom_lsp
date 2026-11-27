@@ -33,6 +33,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`pow()` and `**` with no real result are `NAN`.** A power such as `pow(-1, 5.5)` is typed `NAN` instead of a plain `float`.
+- **Reversing a list with optional entries keeps its shape.** `array_reverse()` over a shape such as `array{0: 'A', 1?: 'B', 2?: 'C'}` gives a `list{…}` of the values each position can hold, instead of a generic list. `array_slice()` renumbers such shapes the same way.
 - **Very long operator chains no longer crash the server.** A generated file holding an expression of tens of thousands of `.`, `+`, `&&` or `||` operators is indexed and analysed instead of overflowing the stack.
 - **Closures nested in generic call arguments no longer slow analysis down sharply.** A file that passes closures to a templated function, each inside the body of the one before, is analysed in a fraction of the time it used to take as the nesting deepens.
 - **A plain `class-string` argument makes a `class-string<T>` template an `object`.** Passing a value typed `class-string` to a function declared `@param class-string<T>` / `@return T` now gives `object` instead of `mixed`. Contributed by @AJenbo.

@@ -157,7 +157,7 @@ fn raise(base: &PhpType, exponent: &PhpType) -> Option<Raised> {
 }
 
 /// Two known numbers raised the way PHP does, or `None` when the result is
-/// not one finite number.
+/// infinite.
 fn fold(base: &Scalar, exponent: &Scalar) -> Option<Raised> {
     if let (Scalar::Int(base), Scalar::Int(exponent)) = (base, exponent)
         && let Ok(exponent) = u32::try_from(*exponent)
@@ -174,8 +174,5 @@ fn fold(base: &Scalar, exponent: &Scalar) -> Option<Raised> {
         Scalar::Float(v) => Some(*v),
         _ => None,
     };
-    let value = as_f64(base)?.powf(as_f64(exponent)?);
-    value
-        .is_finite()
-        .then(|| Raised::Other(PhpType::literal_float(format!("{value:?}"))))
+    super::arithmetic::literal_float(as_f64(base)?.powf(as_f64(exponent)?)).map(Raised::Other)
 }

@@ -986,9 +986,12 @@ fn literal_int(value: i64) -> PhpType {
     PhpType::literal_int(value.to_string())
 }
 
-/// A finite `f64` as a literal float type, or `None` for the non-finite
-/// results PHP itself cannot represent as a `float` literal (`NAN`, `INF`).
-fn literal_float(value: f64) -> Option<PhpType> {
+/// An `f64` result as a literal float type: `NAN` for a result that is not a
+/// number, or `None` for an infinite one.
+pub(super) fn literal_float(value: f64) -> Option<PhpType> {
+    if value.is_nan() {
+        return Some(PhpType::literal_float("NAN"));
+    }
     value
         .is_finite()
         .then(|| PhpType::literal_float(format!("{value:?}")))

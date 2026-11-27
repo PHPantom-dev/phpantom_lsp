@@ -54,17 +54,6 @@ upstream fixture is the spec for its function.
 
 **Upstream cases** (PHPStan `nsrt/`): `constantTypes.php` (8), 19 more.
 
-### B910. `pow()` and `**` with no real-number result are a plain `float`
-
-**Impact: Low · Complexity: Low**
-
-```php
-pow(-1, 5.5);       // float, should be NAN
-```
-
-A result that is not a number (`NAN`) is a plain `float`, since there is no
-`NAN` literal type. `// SKIP` line in `tests/phpstan_nsrt/pow.php`.
-
 ### B819. Built-ins whose result their arguments decide return the declared type
 
 **Impact: Medium · Complexity: Medium**
@@ -242,9 +231,8 @@ array_keys($arr);   // non-empty-list<int<0, max>>, should be non-empty-list<0|1
 `shuffle()` and `sort()` turn a shape into a list of its values, losing its
 size, so the keys read back afterwards are any non-negative int. The same
 gap shows when `array_chunk()` is handed a length range (`int<2, 3>`) rather
-than a literal, and when `array_reverse()` renumbers a list shape with
-optional entries. `// SKIP` lines in `tests/phpstan_nsrt/shuffle.php`,
-`bug-6138.php`, `bug-10721.php`, `array-chunk.php` and `array-reverse.php`.
+than a literal. `// SKIP` lines in `tests/phpstan_nsrt/shuffle.php`,
+`bug-6138.php`, `bug-10721.php` and `array-chunk.php`.
 
 ### B834. `array_filter()` with a callback neither filters a shape entry by entry nor narrows by the callback
 
