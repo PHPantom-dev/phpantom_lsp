@@ -336,6 +336,11 @@ pub async fn run(options: FixOptions) -> i32 {
     else {
         return 0;
     };
+    // Files outside the project stay parsed, since the files being fixed
+    // can depend on their declarations, but are never rewritten.
+    let writable =
+        crate::analyse::writable_files_mask(&files, root, options.path_filter.as_slice());
+    crate::analyse::note_skipped_outside_files(writable.iter().filter(|w| !**w).count());
 
     let file_count = files.len();
     let use_colour = options.use_colour;
@@ -368,6 +373,9 @@ pub async fn run(options: FixOptions) -> i32 {
                 eprint!("\r\x1b[2K {}", progress_bar(i + 1, file_count, "Fixing"));
             }
 
+            if !writable[i] {
+                return None;
+            }
             let (uri, content) = file_data[i].as_ref()?;
 
             let _project_guard = backend.enter_project_scope(uri);

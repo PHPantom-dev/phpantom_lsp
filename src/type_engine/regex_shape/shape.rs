@@ -318,7 +318,14 @@ impl Analysis {
             .take_while(|&&g| self.is_optional(g, &[]))
             .count();
         let build = |list: &[usize], forced: &[usize], overrides: &[(usize, PhpType)]| {
-            self.build(list, forced, overrides, trailing_optionals, flags, matches_all)
+            self.build(
+                list,
+                forced,
+                overrides,
+                trailing_optionals,
+                flags,
+                matches_all,
+            )
         };
         // A match that took none of the optional parts: the whole match only.
         let subject_only = || {
@@ -428,7 +435,11 @@ impl Analysis {
                     base
                 };
                 let value = with_flags(base.clone(), flags);
-                if !is_trailing && unmatched_as_null && !optional && flags & PREG_OFFSET_CAPTURE == 0 {
+                if !is_trailing
+                    && unmatched_as_null
+                    && !optional
+                    && flags & PREG_OFFSET_CAPTURE == 0
+                {
                     base
                 } else {
                     value
@@ -449,7 +460,13 @@ impl Analysis {
                     matches_all,
                 );
             }
-            set_entry(&mut entries, (i + 1).to_string(), value, key_optional, false);
+            set_entry(
+                &mut entries,
+                (i + 1).to_string(),
+                value,
+                key_optional,
+                false,
+            );
         }
         if !self.marks.is_empty() {
             let marks = self
@@ -669,7 +686,10 @@ fn set_entry(
     optional: bool,
     merge: bool,
 ) {
-    match entries.iter_mut().find(|e| e.key.as_deref() == Some(key.as_str())) {
+    match entries
+        .iter_mut()
+        .find(|e| e.key.as_deref() == Some(key.as_str()))
+    {
         Some(entry) if optional || merge => {
             entry.value_type = merge_values(&entry.value_type, &value);
         }
@@ -706,11 +726,7 @@ fn match_all_group_value(base: PhpType, flags: i64, optional: bool, is_trailing:
     let set_order = flags & PREG_SET_ORDER != 0;
     let mut value = if !unmatched_as_null && optional && (!set_order || !is_trailing) {
         with_flags(or_unmatched(base), flags)
-    } else if !is_trailing
-        && unmatched_as_null
-        && !optional
-        && flags & PREG_OFFSET_CAPTURE == 0
-    {
+    } else if !is_trailing && unmatched_as_null && !optional && flags & PREG_OFFSET_CAPTURE == 0 {
         base
     } else {
         with_flags(base, flags)

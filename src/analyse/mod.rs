@@ -64,8 +64,8 @@ pub(crate) use project::{
     discover_laravel_resources, load_config_or_default, open_headless_project,
     open_headless_project_unindexed, parse_user_files,
 };
-pub(crate) use run::discover_user_files;
 pub use run::run;
+pub(crate) use run::{discover_user_files, note_skipped_outside_files, writable_files_mask};
 pub(crate) use stages::{
     OpenedProject, note_plain_php_project, note_workspace_layout, open_project,
 };

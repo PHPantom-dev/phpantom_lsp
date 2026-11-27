@@ -291,3 +291,60 @@ fn json_of_a_clean_run_has_empty_lists() {
     assert_eq!(parsed["files"], serde_json::json!([]));
     assert_eq!(parsed["errors"], serde_json::json!([]));
 }
+
+/// A project, and a sibling directory holding a badly formatted file that
+/// is not part of it.
+fn project_beside_outside_file(unformatted_php: &str) -> (tempfile::TempDir, PathBuf, PathBuf) {
+    let base = tempfile::tempdir().expect("failed to create temp dir");
+    let root = base.path().join("ws");
+    let outside = base.path().join("outside");
+    write_file(
+        &root,
+        "composer.json",
+        r#"{"autoload": {"psr-4": {"App\\": "src/"}}}"#,
+    );
+    write_file(&root, "src/Foo.php", unformatted_php);
+    write_file(&outside, "Out.php", unformatted_php);
+    (base, root, outside)
+}
+
+#[cfg(unix)]
+#[test]
+fn formatting_leaves_files_behind_a_symlink_out_of_the_project_alone() {
+    let unformatted_php = "<?php\nnamespace App;\nclass Foo    {}\n";
+    let (_base, root, outside) = project_beside_outside_file(unformatted_php);
+    std::os::unix::fs::symlink(&outside, root.join("src/leak")).unwrap();
+
+    assert_eq!(run(options(&root, false)), 0);
+    assert_ne!(read_file(&root, "src/Foo.php"), unformatted_php);
+    assert_eq!(read_file(&outside, "Out.php"), unformatted_php);
+}
+
+#[test]
+fn formatting_leaves_an_include_path_outside_the_project_alone() {
+    let unformatted_php = "<?php\nnamespace App;\nclass Foo    {}\n";
+    let (_base, root, outside) = project_beside_outside_file(unformatted_php);
+    write_file(
+        &root,
+        ".phpantom.toml",
+        "[indexing]\ninclude = [\"../outside\"]\n",
+    );
+
+    assert_eq!(run(options(&root, false)), 0);
+    assert_ne!(read_file(&root, "src/Foo.php"), unformatted_php);
+    assert_eq!(read_file(&outside, "Out.php"), unformatted_php);
+}
+
+/// Naming a path on the command line is asking for it, wherever it is.
+#[cfg(unix)]
+#[test]
+fn formatting_follows_a_symlink_the_user_named() {
+    let unformatted_php = "<?php\nnamespace App;\nclass Foo    {}\n";
+    let (_base, root, outside) = project_beside_outside_file(unformatted_php);
+    std::os::unix::fs::symlink(&outside, root.join("src/leak")).unwrap();
+
+    let mut options = options(&root, false);
+    options.path_filters = vec![PathBuf::from("src/leak")];
+    assert_eq!(run(options), 0);
+    assert_ne!(read_file(&outside, "Out.php"), unformatted_php);
+}

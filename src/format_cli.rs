@@ -187,7 +187,11 @@ fn collect(options: &FormatOptions) -> Option<Outcomes> {
     }
 
     // ── 3. Discover files ───────────────────────────────────────────
-    let files = crate::analyse::discover_user_files(&backend, root, &options.path_filters);
+    let mut files = crate::analyse::discover_user_files(&backend, root, &options.path_filters);
+    let writable = crate::analyse::writable_files_mask(&files, root, &options.path_filters);
+    let before = files.len();
+    crate::util::retain_by_mask(&mut files, &writable);
+    crate::analyse::note_skipped_outside_files(before - files.len());
     if files.is_empty() {
         eprintln!("No PHP files found.");
         return None;

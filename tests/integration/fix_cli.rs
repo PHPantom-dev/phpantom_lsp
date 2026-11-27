@@ -975,3 +975,46 @@ fn replaces_deprecated_calls_in_a_tempest_view() {
         "<div :title=\"sum(1, 2)\" :if=\"true\">{{ sum(3, 4) }}</div>\n"
     );
 }
+
+// ── Files outside the project ───────────────────────────────────────────────
+
+/// A symlink out of the project lets the walk index the linked code, but
+/// `fix` only rewrites the project's own files.
+#[cfg(unix)]
+#[tokio::test]
+async fn fix_leaves_files_behind_a_symlink_out_of_the_project_alone() {
+    let with_unused_import = "<?php\n\nnamespace App;\n\nuse Foo\\Bar;\n\nclass Sym {}\n";
+    let base = tempfile::tempdir().unwrap();
+    let root = base.path().join("ws");
+    let outside = base.path().join("outside");
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::create_dir_all(&outside).unwrap();
+    std::fs::write(
+        root.join("composer.json"),
+        r#"{"autoload": {"psr-4": {"App\\": "src/"}}}"#,
+    )
+    .unwrap();
+    std::fs::write(root.join("src/Sym.php"), with_unused_import).unwrap();
+    std::fs::write(outside.join("Out.php"), with_unused_import).unwrap();
+    std::os::unix::fs::symlink(&outside, root.join("src/leak")).unwrap();
+
+    let code = phpantom_lsp::fix::run(phpantom_lsp::fix::FixOptions {
+        workspace_root: root.clone(),
+        path_filter: None,
+        rules: Vec::new(),
+        dry_run: false,
+        use_colour: false,
+        with_phpstan: false,
+        output_format: phpantom_lsp::analyse::OutputFormat::Json,
+        global_config: None,
+    })
+    .await;
+
+    assert_eq!(code, 0);
+    let fixed = std::fs::read_to_string(root.join("src/Sym.php")).unwrap();
+    assert!(!fixed.contains("use Foo\\Bar;"), "got:\n{fixed}");
+    assert_eq!(
+        std::fs::read_to_string(outside.join("Out.php")).unwrap(),
+        with_unused_import
+    );
+}

@@ -671,6 +671,25 @@ fn include_paths_accept_absolute_entries() {
     assert_eq!(config.include_paths(other_root.path()), [stub]);
 }
 
+/// A relative entry that climbs out of the workspace names a path outside
+/// it, which callers must see spelled that way to treat it as a library.
+#[test]
+fn include_paths_resolve_parent_segments() {
+    let base = tempfile::tempdir().unwrap();
+    let root = base.path().join("ws");
+    let outside = base.path().join("outside");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::create_dir_all(&outside).unwrap();
+
+    let config = IndexingConfig {
+        include: Some(vec!["../outside".to_string()]),
+        ..Default::default()
+    };
+    let paths = config.include_paths(&root);
+    assert_eq!(paths, [outside]);
+    assert!(!paths[0].starts_with(&root));
+}
+
 /// A stale entry must not become a phantom path handed to the
 /// scanner — dropping it keeps the walk honest.
 #[test]

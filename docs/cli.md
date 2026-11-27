@@ -128,6 +128,10 @@ PHPantom LSP listening on tcp://127.0.0.1:9257
 This is especially handy with port `0`: the OS assigns an available
 port and the server tells you which one it picked.
 
+The socket has no authentication. Whoever connects first drives the
+server with your permissions, so keep it on `127.0.0.1` unless every
+machine that can reach the port is one you trust.
+
 ### Connecting
 
 Any LSP client that supports TCP can connect. For quick manual testing:
@@ -272,6 +276,11 @@ phpantom_lsp fix src/                             # restrict to a subdirectory
 phpantom_lsp fix src/Foo.php                      # fix a single file
 phpantom_lsp fix --project-root /path/to/app      # explicit project root
 ```
+
+Only files inside the project root are rewritten. Code reached through a
+symlink out of the project, or through a PSR-4 or `[indexing] include`
+path outside it, is read for its declarations but left alone, unless you
+name it as the `PATH`. `format` follows the same rule.
 
 ### Options
 

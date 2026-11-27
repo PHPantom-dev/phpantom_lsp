@@ -47,7 +47,9 @@ pub(super) struct Group {
 
 #[derive(Debug)]
 pub(super) enum GroupKind {
-    Capture { name: Option<String> },
+    Capture {
+        name: Option<String>,
+    },
     /// `(?:…)`, `(?>…)` and `(?i:…)`: transparent to group numbering and
     /// participation.
     NonCapture,
@@ -260,7 +262,9 @@ impl Parser {
         } else {
             None
         };
-        if self.chars.get(i) != Some(&'}') || (min.is_empty() && max.as_deref().is_none_or(str::is_empty)) {
+        if self.chars.get(i) != Some(&'}')
+            || (min.is_empty() && max.as_deref().is_none_or(str::is_empty))
+        {
             return None;
         }
         let min_value = if min.is_empty() { 0 } else { min.parse().ok()? };

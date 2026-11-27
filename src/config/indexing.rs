@@ -70,18 +70,21 @@ impl IndexingConfig {
     /// dropping entries that do not exist.
     ///
     /// Relative entries are joined to `workspace_root`; absolute ones
-    /// are taken as-is.
+    /// are taken as-is. `.` and `..` segments are resolved, since callers
+    /// tell project code from libraries with `Path::starts_with`, which
+    /// would count `root/../outside` as inside the workspace.
     pub fn include_paths(&self, workspace_root: &Path) -> Vec<PathBuf> {
         self.include
             .iter()
             .flatten()
             .map(|entry| {
                 let path = Path::new(entry);
-                if path.is_absolute() {
+                let joined = if path.is_absolute() {
                     path.to_path_buf()
                 } else {
                     workspace_root.join(path)
-                }
+                };
+                crate::document_links::normalize_path(&joined)
             })
             .filter(|path| path.exists())
             .collect()

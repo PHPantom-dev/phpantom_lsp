@@ -252,6 +252,51 @@ pub(crate) fn discover_user_files(
     files
 }
 
+/// Which of the discovered `files` a write pass (`fix`, `format`) may
+/// rewrite: those whose real path lies inside the project root, or inside
+/// a path the user named on the command line.
+///
+/// Discovery follows directory symlinks, and a PSR-4 or `[indexing]
+/// include` entry can point anywhere, so the discovered set can reach
+/// files that belong to another project. Reading them is how a linked
+/// package gets resolved; rewriting them is not what "fix this project"
+/// asked for.
+pub(crate) fn writable_files_mask(
+    files: &[PathBuf],
+    workspace_root: &Path,
+    path_filters: &[PathBuf],
+) -> Vec<bool> {
+    let real = |path: &Path| dunce::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    let mut allowed: Vec<PathBuf> = vec![real(workspace_root)];
+    allowed.extend(path_filters.iter().map(|filter| {
+        if filter.is_relative() {
+            real(&workspace_root.join(filter))
+        } else {
+            real(filter)
+        }
+    }));
+    files
+        .iter()
+        .map(|file| {
+            let Ok(file) = dunce::canonicalize(file) else {
+                return false;
+            };
+            allowed.iter().any(|dir| file.starts_with(dir))
+        })
+        .collect()
+}
+
+/// Tell the user that a write pass left `skipped` files alone because they
+/// lie outside the project.
+pub(crate) fn note_skipped_outside_files(skipped: usize) {
+    if skipped > 0 {
+        eprintln!(
+            "Note: skipped {skipped} file{} outside the project root (reached through a symlink or a configured path).",
+            if skipped == 1 { "" } else { "s" }
+        );
+    }
+}
+
 /// Walk `dir` for PHP files through the shared workspace walker, skipping
 /// the `skip_vendor` trees and keeping only files under one of the `crop`
 /// paths (all of them when `crop` is empty).

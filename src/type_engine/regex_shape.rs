@@ -290,7 +290,9 @@ pub(crate) fn pattern_texts(
         Expression::Literal(Literal::String(_)) if let Some(text) = literal_string(pattern) => {
             Some(vec![text.into_owned()])
         }
-        Expression::Binary(binary) if matches!(binary.operator, BinaryOperator::StringConcat(_)) => {
+        Expression::Binary(binary)
+            if matches!(binary.operator, BinaryOperator::StringConcat(_)) =>
+        {
             let heads = pattern_texts(binary.lhs, resolve)?;
             let tails = pattern_texts(binary.rhs, resolve)?;
             if heads.len() * tails.len() > MAX_PATTERNS {

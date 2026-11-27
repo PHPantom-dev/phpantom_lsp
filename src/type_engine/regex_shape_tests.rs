@@ -83,10 +83,7 @@ fn reads_named_groups() {
 
 #[test]
 fn a_group_of_fixed_text_holds_its_literals() {
-    assert_eq!(
-        shape("/Price: (£|€)\\d+/"),
-        "array{0: string, 1: '£'|'€'}"
-    );
+    assert_eq!(shape("/Price: (£|€)\\d+/"), "array{0: string, 1: '£'|'€'}");
     assert_eq!(shape("/([157])/"), "array{0: string, 1: '1'|'5'|'7'}");
     assert_eq!(shape("/(ba[rz])/"), "array{0: string, 1: 'bar'|'baz'}");
     assert_eq!(shape(r"/(\.)/"), "array{0: string, 1: '.'}");
@@ -130,10 +127,7 @@ fn only_trailing_optional_groups_get_optional_keys() {
         "array{0: string, 1: 'a', 2: string, 3: 'c', name?: string, 4?: string}"
     );
     // An optional group before a required one may be `''`.
-    assert_eq!(
-        shape("/(a)?(b)/"),
-        "array{0: string, 1: 'a'|'', 2: 'b'}"
-    );
+    assert_eq!(shape("/(a)?(b)/"), "array{0: string, 1: 'a'|'', 2: 'b'}");
 }
 
 /// A shape with and without the group, which fold into one with the group's
@@ -171,13 +165,19 @@ fn branch_reset_numbers_each_branch_from_the_same_group() {
         shape("/(?|(a)|(b)(c)|(d)(e)(f))/"),
         "list{0: string, 1: string, 2?: string, 3?: string}"
     );
-    assert_eq!(shape("/(?|(a)|(b))(c)/"), "array{0: string, 1: string, 2: 'c'}");
+    assert_eq!(
+        shape("/(?|(a)|(b))(c)/"),
+        "array{0: string, 1: string, 2: 'c'}"
+    );
 }
 
 #[test]
 fn extended_mode_skips_whitespace_and_comments() {
     assert_eq!(shape("/( a ) # (comment)/x"), "array{0: string, 1: 'a'}");
-    assert_eq!(shape("/(?x) ( a ) # (comment)/"), "array{0: string, 1: 'a'}");
+    assert_eq!(
+        shape("/(?x) ( a ) # (comment)/"),
+        "array{0: string, 1: 'a'}"
+    );
     assert_eq!(shape("/^ ([\\#.]) $/x"), "array{0: string, 1: '#'|'.'}");
     // An escaped `#` is a literal, not a comment.
     assert_eq!(shape("/(\\#) (b)/x"), "array{0: string, 1: '#', 2: 'b'}");
