@@ -62,11 +62,11 @@ class HelloWorld
 		assertType('non-falsy-string&uppercase-string', $i.'-10E3'); // SKIP: a concatenation is not typed `lowercase-string`/`uppercase-string`
 		assertType('non-falsy-string', $i.'10eE3');
 
-		assertType('lowercase-string&non-empty-string&numeric-string&uppercase-string', $i.$bool); // SKIP: a concatenation with a `bool` or `float` operand is not seen to stay numeric, nor typed `lowercase-string`/`uppercase-string`
+		assertType('lowercase-string&non-empty-string&numeric-string&uppercase-string', $i.$bool); // SKIP: a concatenation is not typed `lowercase-string`/`uppercase-string`
 		assertType('lowercase-string&non-empty-string&uppercase-string', $bool.$i); // SKIP: a concatenation is not typed `lowercase-string`/`uppercase-string`
-		assertType('lowercase-string&non-falsy-string&numeric-string&uppercase-string', $positiveInt.$bool); // SKIP: a concatenation with a `bool` or `float` operand is not seen to stay numeric, nor typed `lowercase-string`/`uppercase-string`
-		assertType('lowercase-string&non-falsy-string&numeric-string&uppercase-string', $bool.$positiveInt); // SKIP: a concatenation with a `bool` or `float` operand is not seen to stay numeric, nor typed `lowercase-string`/`uppercase-string`
-		assertType('lowercase-string&non-falsy-string&numeric-string&uppercase-string', $negativeInt.$bool); // SKIP: a concatenation with a `bool` or `float` operand is not seen to stay numeric, nor typed `lowercase-string`/`uppercase-string`
+		assertType('lowercase-string&non-falsy-string&numeric-string&uppercase-string', $positiveInt.$bool); // SKIP: a concatenation is not typed `lowercase-string`/`uppercase-string`
+		assertType('lowercase-string&non-falsy-string&numeric-string&uppercase-string', $bool.$positiveInt); // SKIP: a concatenation is not typed `lowercase-string`/`uppercase-string`
+		assertType('lowercase-string&non-falsy-string&numeric-string&uppercase-string', $negativeInt.$bool); // SKIP: a concatenation is not typed `lowercase-string`/`uppercase-string`
 		assertType('lowercase-string&non-falsy-string&uppercase-string', $bool.$negativeInt); // SKIP: a concatenation is not typed `lowercase-string`/`uppercase-string`
 
 		assertType('lowercase-string&non-falsy-string&uppercase-string', $i.$i); // SKIP: a concatenation is not typed `lowercase-string`/`uppercase-string`
@@ -76,7 +76,7 @@ class HelloWorld
 
 		// https://3v4l.org/BCS2K
 		assertType('non-falsy-string&uppercase-string', $float.$float); // SKIP: a concatenation is not typed `lowercase-string`/`uppercase-string`
-		assertType('non-falsy-string&numeric-string&uppercase-string', $float.$positiveInt); // SKIP: a concatenation with a `bool` or `float` operand is not seen to stay numeric, nor typed `lowercase-string`/`uppercase-string`
+		assertType('non-falsy-string&numeric-string&uppercase-string', $float.$positiveInt); // SKIP: a concatenation is not typed `lowercase-string`/`uppercase-string`
 		assertType('non-falsy-string&uppercase-string', $float.$negativeInt); // SKIP: a concatenation is not typed `lowercase-string`/`uppercase-string`
 		assertType('non-falsy-string&uppercase-string', $float.$i); // SKIP: a concatenation is not typed `lowercase-string`/`uppercase-string`
 		assertType('non-falsy-string&uppercase-string', $i.$float); // SKIP: a concatenation is not typed `lowercase-string`/`uppercase-string`

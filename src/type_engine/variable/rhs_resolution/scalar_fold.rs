@@ -628,21 +628,25 @@ pub(super) enum NumericConcat {
 
 impl NumericConcat {
     /// The rule for a left operand, or `None` when it is not always a
-    /// number. A `''` alternative is ignored: appending to it leaves the
-    /// right operand as it was.
+    /// number. A `''` alternative (`false`, `null`) is ignored: appending
+    /// to it leaves the right operand as it was. A `bool` or a `float`
+    /// converts to a numeric string that may already hold a `.` or an
+    /// exponent, the way PHPStan reads them.
     pub(super) fn of_lhs(types: &[ResolvedType]) -> Option<Self> {
         let mut rule = None;
         for member in types.iter().flat_map(|rt| rt.type_string.union_members()) {
             let member_rule = if IntInterval::of_int(member).is_some() {
                 Self::AfterInt
-            } else if is_numeric_string_type(member)
-                || Scalar::from_type(member).is_some_and(|s| s.is_numeric_string())
-            {
+            } else if is_numeric_string_type(member) || is_bool_or_float_type(member) {
                 Self::AfterNumericString
-            } else if matches!(Scalar::from_type(member), Some(Scalar::String(s)) if s.is_empty()) {
-                continue;
             } else {
-                return None;
+                match Scalar::from_type(member).and_then(|s| s.to_php_string()) {
+                    Some(text) if text.is_empty() => continue,
+                    Some(text) if LiteralValue::string_value(&text).is_numeric_string() => {
+                        Self::AfterNumericString
+                    }
+                    _ => return None,
+                }
             };
             rule = Some(match rule {
                 Some(Self::AfterNumericString) => Self::AfterNumericString,
@@ -653,8 +657,8 @@ impl NumericConcat {
     }
 
     /// Whether appending any value of the right operand keeps the left one
-    /// a number: a non-negative integer, or written-out strings that
-    /// continue the number.
+    /// a number: a non-negative integer, or written-out strings (a `bool`
+    /// reads as `''` or `'1'`) that continue the number.
     pub(super) fn admits(self, rhs: &[ResolvedType]) -> bool {
         let members: Vec<&PhpType> = rhs
             .iter()
@@ -671,7 +675,11 @@ impl NumericConcat {
         }
         let mut appended = false;
         for member in members {
-            let Some(text) = Scalar::from_type(member).and_then(|s| s.to_php_string()) else {
+            let text = if is_bool_type(member) {
+                "1".to_string()
+            } else if let Some(text) = Scalar::from_type(member).and_then(|s| s.to_php_string()) {
+                text
+            } else {
                 return false;
             };
             if text.is_empty() {
@@ -693,6 +701,19 @@ impl NumericConcat {
         }
         appended
     }
+}
+
+/// Whether `ty` is the `bool` type, whose `false` converts to `''` and
+/// `true` to `'1'`.
+fn is_bool_type(ty: &PhpType) -> bool {
+    matches!(ty.kind(), TypeKind::Named(name) if name.eq_ignore_ascii_case("bool") || name.eq_ignore_ascii_case("boolean"))
+}
+
+/// Whether converting any non-empty value of `ty` to a string gives a
+/// number: `bool` (`'1'`) and `float`.
+fn is_bool_or_float_type(ty: &PhpType) -> bool {
+    is_bool_type(ty)
+        || matches!(ty.kind(), TypeKind::Named(name) if name.eq_ignore_ascii_case("float") || name.eq_ignore_ascii_case("double"))
 }
 
 /// The type of an interpolated string (`"$a-$b"`, a heredoc): every string

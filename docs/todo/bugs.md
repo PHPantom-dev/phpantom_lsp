@@ -2059,25 +2059,3 @@ literal-ness and numeric-ness.
 
 **Cases** (PHPStan `nsrt/`): the `// SKIP` lines in `bug-11129.php` and
 `constant-string-unions.php`.
-
-### B921. Concatenating a `bool` or a `float` is not seen to stay numeric
-
-**Impact: Low · Complexity: Low**
-
-```php
-$i . $bool;             // non-empty-string, should be non-empty-string&numeric-string
-$positiveInt . $bool;   // non-falsy-string, should be non-falsy-string&numeric-string
-$bool . $positiveInt;   // non-falsy-string, should be non-falsy-string&numeric-string
-$float . $positiveInt;  // non-falsy-string, should be non-falsy-string&numeric-string
-```
-
-A `bool` converts to `''` or `'1'`, so it continues an integer (or starts
-one), and a float followed by more digits is still a number. The numeric
-rule for `.` (`NumericConcat`) only knows integers, numeric strings and
-written-out literals on either side.
-
-**Fix:** teach `NumericConcat::of_lhs()` and `admits()` about `bool` and
-`float` operands the way PHPStan's `resolveConcatType()` does.
-
-**Cases** (PHPStan `nsrt/`): the `bool`/`float` `// SKIP` lines in
-`bug-11129.php`.

@@ -1,0 +1,31 @@
+// test: concatenating a bool or a float can stay a number
+// feature: hover
+// A bool converts to '' or '1', so it continues an integer or starts one,
+// and a float followed by more digits is still a number.
+// expect_hover: $intBool => numeric-string
+// expect_hover: $positiveBool => numeric-string&non-falsy-string
+// expect_hover: $boolPositive => numeric-string&non-falsy-string
+// expect_hover: $floatPositive => numeric-string&non-falsy-string
+// expect_hover: $boolInt => = non-empty-string
+// expect_hover: $floatNegative => = non-falsy-string
+// expect_hover: $intFloat => = non-falsy-string
+// expect_hover: $numericFloat => = non-falsy-string
+---
+<?php
+
+/**
+ * @param positive-int $positive
+ * @param negative-int $negative
+ * @param numeric-string $numeric
+ */
+function test(int $i, int $positive, int $negative, string $numeric, bool $bool, float $float): void {
+    $intBool = $i . $bool;
+    $positiveBool = $positive . $bool;
+    $boolPositive = $bool . $positive;
+    $floatPositive = $float . $positive;
+    $boolInt = $bool . $i;
+    $floatNegative = $float . $negative;
+    $intFloat = $i . $float;
+    $numericFloat = $numeric . $float;
+    $<>numericFloat;
+}
