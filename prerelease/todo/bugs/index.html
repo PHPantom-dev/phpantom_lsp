@@ -2161,10 +2161,32 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#b891-concatenating-a-union-of-literal-strings-gives-literal-string-instead-of-a-union-of-the-results" class="md-nav__link">
+  <a href="#b920-a-concatenation-is-never-typed-lowercase-string-or-uppercase-string" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B891. Concatenating a union of literal strings gives <code>literal-string</code> instead of a union of the results
+        B920. A concatenation is never typed <code>lowercase-string</code> or <code>uppercase-string</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b921-concatenating-a-bool-or-a-float-is-not-seen-to-stay-numeric" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B921. Concatenating a <code>bool</code> or a <code>float</code> is not seen to stay numeric
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b922-merging-branches-keeps-literals-a-wider-refined-string-already-covers" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B922. Merging branches keeps literals a wider refined string already covers
       </span>
     </span>
   </a>
@@ -3948,10 +3970,32 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#b891-concatenating-a-union-of-literal-strings-gives-literal-string-instead-of-a-union-of-the-results" class="md-nav__link">
+  <a href="#b920-a-concatenation-is-never-typed-lowercase-string-or-uppercase-string" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B891. Concatenating a union of literal strings gives <code>literal-string</code> instead of a union of the results
+        B920. A concatenation is never typed <code>lowercase-string</code> or <code>uppercase-string</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b921-concatenating-a-bool-or-a-float-is-not-seen-to-stay-numeric" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B921. Concatenating a <code>bool</code> or a <code>float</code> is not seen to stay numeric
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b922-merging-branches-keeps-literals-a-wider-refined-string-already-covers" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B922. Merging branches keeps literals a wider refined string already covers
       </span>
     </span>
   </a>
@@ -5408,20 +5452,53 @@ completion goes through the same path. <code>// SKIP</code> lines in
 <p>Every pow() line in pow.php passes while the matching <code>**</code> line fails, so the operator is resolved by a separate, cruder path (always int|float for ints, no literal folding, no object operand handling). Route <code>**</code> through the pow() rule.</p>
 <p><strong>Fix:</strong> route <code>**</code> through the same rule <code>pow()</code> uses.</p>
 <p><strong>Cases</strong> (PHPStan <code>nsrt/</code>, 31 assertions): <code>pow.php</code> (31).</p>
-<h3 id="b891-concatenating-a-union-of-literal-strings-gives-literal-string-instead-of-a-union-of-the-results">B891. Concatenating a union of literal strings gives <code>literal-string</code> instead of a union of the results<a class="headerlink" href="#b891-concatenating-a-union-of-literal-strings-gives-literal-string-instead-of-a-union-of-the-results" title="Permanent link">&para;</a></h3>
+<h3 id="b920-a-concatenation-is-never-typed-lowercase-string-or-uppercase-string">B920. A concatenation is never typed <code>lowercase-string</code> or <code>uppercase-string</code><a class="headerlink" href="#b920-a-concatenation-is-never-typed-lowercase-string-or-uppercase-string" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-101-1" name="__codelineno-101-1" href="#__codelineno-101-1"></a><span class="x">$left = rand() ? 'a' : 'b';</span>
-<a id="__codelineno-101-2" name="__codelineno-101-2" href="#__codelineno-101-2"></a><span class="x">$right = rand() ? 'x' : 'y';</span>
-<a id="__codelineno-101-3" name="__codelineno-101-3" href="#__codelineno-101-3"></a><span class="x">$left . $right;  // got literal-string&amp;non-falsy-string, should be 'ax'|'ay'|'bx'|'by'</span>
-<a id="__codelineno-101-4" name="__codelineno-101-4" href="#__codelineno-101-4"></a><span class="x">".$left.";       // got string, should be '.a.'|'.b.'</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-101-1" name="__codelineno-101-1" href="#__codelineno-101-1"></a><span class="x">'0' . $i;         // non-falsy-string, should be lowercase-string&amp;non-falsy-string&amp;uppercase-string</span>
+<a id="__codelineno-101-2" name="__codelineno-101-2" href="#__codelineno-101-2"></a><span class="x">$i . $string;     // non-falsy-string, should be lowercase-string&amp;non-falsy-string when $string is lowercase</span>
 </code></pre></div>
-<p>A single literal on each side is folded, but a union on either side is not distributed. This covers <code>.</code>, <code>.=</code> and interpolation (where the result even drops to <code>string</code>). PHPStan distributes up to a limit of 128 combinations and generalizes past it.</p>
-<p>It also shows as:</p>
-<ul>
-<li>Concatenating a union of literals is not folded into a union of literals</li>
-</ul>
-<p><strong>Fix:</strong> fold concatenation over the cross product of literal operands, up to the same union size cap the other folds use.</p>
-<p><strong>Cases</strong> (PHPStan <code>nsrt/</code>, 23 assertions): <code>constant-string-unions.php</code> (17), <code>bug-11129.php</code> (6).</p>
+<p>PHPStan carries the case accessories through <code>.</code> and interpolation: a side
+that is all digits (an int, a float, a numeric literal) has no letters, so it
+is both lowercase and uppercase, and the result keeps whichever case both
+sides share. PHPantom's concatenation result only tracks emptiness,
+literal-ness and numeric-ness.</p>
+<p><strong>Fix:</strong> track the case of each side next to its emptiness in
+<code>scalar_fold::concat_result</code> and add the accessories both sides promise.</p>
+<p><strong>Cases</strong> (PHPStan <code>nsrt/</code>): the <code>// SKIP</code> lines in <code>bug-11129.php</code> and
+<code>constant-string-unions.php</code>.</p>
+<h3 id="b921-concatenating-a-bool-or-a-float-is-not-seen-to-stay-numeric">B921. Concatenating a <code>bool</code> or a <code>float</code> is not seen to stay numeric<a class="headerlink" href="#b921-concatenating-a-bool-or-a-float-is-not-seen-to-stay-numeric" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Complexity: Low</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-102-1" name="__codelineno-102-1" href="#__codelineno-102-1"></a><span class="x">$i . $bool;             // non-empty-string, should be non-empty-string&amp;numeric-string</span>
+<a id="__codelineno-102-2" name="__codelineno-102-2" href="#__codelineno-102-2"></a><span class="x">$positiveInt . $bool;   // non-falsy-string, should be non-falsy-string&amp;numeric-string</span>
+<a id="__codelineno-102-3" name="__codelineno-102-3" href="#__codelineno-102-3"></a><span class="x">$bool . $positiveInt;   // non-falsy-string, should be non-falsy-string&amp;numeric-string</span>
+<a id="__codelineno-102-4" name="__codelineno-102-4" href="#__codelineno-102-4"></a><span class="x">$float . $positiveInt;  // non-falsy-string, should be non-falsy-string&amp;numeric-string</span>
+</code></pre></div>
+<p>A <code>bool</code> converts to <code>''</code> or <code>'1'</code>, so it continues an integer (or starts
+one), and a float followed by more digits is still a number. The numeric
+rule for <code>.</code> (<code>NumericConcat</code>) only knows integers, numeric strings and
+written-out literals on either side.</p>
+<p><strong>Fix:</strong> teach <code>NumericConcat::of_lhs()</code> and <code>admits()</code> about <code>bool</code> and
+<code>float</code> operands the way PHPStan's <code>resolveConcatType()</code> does.</p>
+<p><strong>Cases</strong> (PHPStan <code>nsrt/</code>): the <code>bool</code>/<code>float</code> <code>// SKIP</code> lines in
+<code>bug-11129.php</code>.</p>
+<h3 id="b922-merging-branches-keeps-literals-a-wider-refined-string-already-covers">B922. Merging branches keeps literals a wider refined string already covers<a class="headerlink" href="#b922-merging-branches-keeps-literals-a-wider-refined-string-already-covers" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Complexity: Low</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-103-1" name="__codelineno-103-1" href="#__codelineno-103-1"></a><span class="x">/** @param '1'|'2'|…|'17' $s @param 'a'|'b' $t @param non-empty-string $n */</span>
+<a id="__codelineno-103-2" name="__codelineno-103-2" href="#__codelineno-103-2"></a><span class="x">if (rand(0, 1)) { $s .= $suffix; }  // too many strings, generalized</span>
+<a id="__codelineno-103-3" name="__codelineno-103-3" href="#__codelineno-103-3"></a><span class="x">$s;  // '1'|'2'|…|'17'|(literal-string&amp;non-falsy-string), should be literal-string&amp;non-falsy-string</span>
+<a id="__codelineno-103-4" name="__codelineno-103-4" href="#__codelineno-103-4"></a>
+<a id="__codelineno-103-5" name="__codelineno-103-5" href="#__codelineno-103-5"></a><span class="x">$x = $t;</span>
+<a id="__codelineno-103-6" name="__codelineno-103-6" href="#__codelineno-103-6"></a><span class="x">if (rand(0, 1)) { $x = $n; }</span>
+<a id="__codelineno-103-7" name="__codelineno-103-7" href="#__codelineno-103-7"></a><span class="x">$x;  // string, should be non-empty-string</span>
+</code></pre></div>
+<p>When the two sides of a branch merge, a literal that is a value of a refined
+string type on the other side (<code>literal-string&amp;non-falsy-string</code>,
+<code>non-empty-string</code>) is kept next to it, or the whole union is widened to
+plain <code>string</code>. PHPStan's union normalization absorbs the literal into the
+wider type.</p>
+<p><strong>Fix:</strong> absorb a literal string into a refined string member of the same
+union whose every accessory it satisfies, when the union is built.</p>
+<p><strong>Cases</strong> (PHPStan <code>nsrt/</code>): <code>constant-string-unions.php</code> line 77.</p>
 
 
 
