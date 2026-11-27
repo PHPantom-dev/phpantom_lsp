@@ -202,6 +202,10 @@ pub(super) fn expr_accepts_null(
 /// $b; // 2, not just positive-int
 /// ```
 ///
+/// Where the two were proven to differ, the comparand's value is dropped
+/// from the subject instead: `$c !== Foo::class` leaves the other class
+/// names `$c` could hold.
+///
 /// A comparand written as a literal is left to
 /// [`apply_literal_identity_narrowing`], which already handles it and
 /// does not need a full type resolution to do so.
@@ -237,6 +241,39 @@ pub(super) fn apply_identity_comparison_literal_narrowing<'b>(
         });
         if admits {
             scope.set(&key, vec![ResolvedType::from_type_string(literal)]);
+            write_offset_key_into_shapes(&key, scope);
+        }
+    }
+
+    // The branch where the two differed drops the comparand's one value
+    // from the subject, as `$x !== 2` written inline does.
+    let mut differed: Vec<(&Expression<'_>, &Expression<'_>)> = Vec::new();
+    collect_comparisons(condition, truthy, false, &mut differed);
+    for (subject, comparand) in differed {
+        if literal_comparand_type(comparand).is_some() {
+            continue;
+        }
+        let Some(key) = expr_to_subject(subject) else {
+            continue;
+        };
+        let Some(literal) = single_literal_type(comparand, scope, ctx) else {
+            continue;
+        };
+        let types = scope.get(&key).to_vec();
+        if types.is_empty() {
+            continue;
+        }
+        let kept: Vec<ResolvedType> = types
+            .into_iter()
+            .filter_map(|mut rt| {
+                rt.type_string = strip_literal_from_type(&rt.type_string, &literal)?;
+                Some(rt)
+            })
+            .collect();
+        if kept.is_empty() {
+            mark_exhausted(&key, scope);
+        } else {
+            scope.set(&key, kept);
             write_offset_key_into_shapes(&key, scope);
         }
     }
@@ -277,12 +314,24 @@ pub(super) fn collect_identity_comparisons<'b>(
     truthy: bool,
     out: &mut Vec<(&'b Expression<'b>, &'b Expression<'b>)>,
 ) {
+    collect_comparisons(condition, truthy, true, out);
+}
+
+/// [`collect_identity_comparisons`] for the pairs the condition proves
+/// identical when `identical` is set, and for the pairs it proves differed
+/// otherwise.
+fn collect_comparisons<'b>(
+    condition: &'b Expression<'b>,
+    truthy: bool,
+    identical: bool,
+    out: &mut Vec<(&'b Expression<'b>, &'b Expression<'b>)>,
+) {
     match condition {
         Expression::Parenthesized(inner) => {
-            collect_identity_comparisons(inner.expression, truthy, out);
+            collect_comparisons(inner.expression, truthy, identical, out);
         }
         Expression::UnaryPrefix(prefix) if prefix.operator.is_not() => {
-            collect_identity_comparisons(prefix.operand, !truthy, out);
+            collect_comparisons(prefix.operand, !truthy, identical, out);
         }
         Expression::Binary(bin) => {
             // `A && B` proves both when true; `A || B` proves neither
@@ -293,15 +342,15 @@ pub(super) fn collect_identity_comparisons<'b>(
                 _ => false,
             };
             if decomposes {
-                collect_identity_comparisons(bin.lhs, truthy, out);
-                collect_identity_comparisons(bin.rhs, truthy, out);
+                collect_comparisons(bin.lhs, truthy, identical, out);
+                collect_comparisons(bin.rhs, truthy, identical, out);
                 return;
             }
             // Only identity qualifies: `null == false` and `null == 0` are
             // both true, so a loose comparison proves nothing.
             let holds = match bin.operator {
-                BinaryOperator::Identical(_) => truthy,
-                BinaryOperator::NotIdentical(_) => !truthy,
+                BinaryOperator::Identical(_) => truthy == identical,
+                BinaryOperator::NotIdentical(_) => truthy != identical,
                 _ => false,
             };
             if holds {

@@ -12,8 +12,8 @@ impl fmt::Display for PhpType {
             // The leniency marker is a note about where the type came from,
             // not something a developer reading `string|false` should see.
             TypeKind::Benevolent(inner) => write!(f, "{inner}"),
-            // The name is a `class-string<T>` wherever it is shown.
-            TypeKind::ClassNameLiteral(inner) => write!(f, "{inner}"),
+            // The name is the string it spells, as PHPStan shows it.
+            TypeKind::ClassNameLiteral(_, literal) => write!(f, "{literal}"),
             TypeKind::EnumCase(enum_type, case) => write!(f, "{enum_type}::{case}"),
             // The DQL a builder has built is not part of its type's name.
             TypeKind::DqlBuilder(class, _) => write!(f, "{class}"),

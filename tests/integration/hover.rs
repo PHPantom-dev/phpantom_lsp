@@ -10037,7 +10037,7 @@ function test() {
     for (var, expected) in [
         ("$b", "1"),
         ("$y", "1"),
-        ("$n", "class-string<P>"),
+        ("$n", "'P'"),
         ("$t", "1"),
         ("$i", "1"),
     ] {
@@ -11531,8 +11531,8 @@ class Service {
     let hover = hover_at(&backend, uri, content, 7, 9).expect("expected hover on $cls");
     let text = hover_text(&hover);
     assert!(
-        text.contains("class-string"),
-        "should show class-string<Pen> type for Pen::class assignment, got: {}",
+        text.contains("$cls = 'Pen'"),
+        "should show the class name for Pen::class assignment, got: {}",
         text
     );
 }
@@ -13011,13 +13011,13 @@ function test(): void {
 "#;
 
     for (line, var, expected) in [
-        (14, "$source", "class-string<Defaults>"),
+        (14, "$source", "'Defaults'"),
         // An enum's `::class` is its name, not one of its cases.
-        (16, "$kind", "class-string<Suit>"),
-        (18, "$mine", "class-string<Settings>"),
-        (20, "$base", "class-string<Base>"),
+        (16, "$kind", "'Suit'"),
+        (18, "$mine", "'Settings'"),
+        (20, "$base", "'Base'"),
         // PHP names a class without loading it.
-        (22, "$gone", "class-string<Missing>"),
+        (22, "$gone", "'Missing'"),
     ] {
         let hover = hover_at(&backend, uri, content, line, 6)
             .unwrap_or_else(|| panic!("expected hover on {var}"));
@@ -13056,7 +13056,7 @@ function test(): void {
 "#;
 
     for (line, var, expected) in [
-        (12, "$w", "class-string<Widget>"),
+        (12, "$w", r"'Lib\\Widget'"),
         (14, "$s", "Suit::Hearts"),
         (16, "$g", "Suit::Hearts"),
     ] {
@@ -16055,11 +16055,11 @@ fn hover_virtual_method_template_from_unannotated_closure_body() {
     );
 }
 
-/// `Foo::class` resolves to `class-string<Foo>`, not a plain `string`,
-/// so the class identity survives assignments, array elements, and
+/// `Foo::class` resolves to the class's name, not a plain `string`, so the
+/// class identity survives assignments, array elements, and
 /// `class-string<object>` parameters.
 #[test]
-fn hover_class_constant_resolves_to_class_string() {
+fn hover_class_constant_resolves_to_class_name() {
     let backend = create_test_backend();
     let uri = "file:///classconst.php";
     let content = concat!(
@@ -16073,8 +16073,8 @@ fn hover_class_constant_resolves_to_class_string() {
     let hover = hover_at(&backend, uri, content, 4, 6).expect("hover $cls");
     let text = hover_text(&hover);
     assert!(
-        text.contains("class-string<Widget>"),
-        "Widget::class should resolve to class-string<Widget>, got: {text}"
+        text.contains("$cls = 'Widget'"),
+        "Widget::class should resolve to 'Widget', got: {text}"
     );
 }
 
@@ -16106,9 +16106,8 @@ fn hover_class_constant_array_keyed_by_class_constant() {
 
 /// A heterogeneous array literal used as a fixed tuple resolves its
 /// foreach element to a union of positional shapes. Indexing a position
-/// that only exists on one arm, combined with a `??` class-string
-/// fallback, keeps the value a `class-string` rather than widening to
-/// `string`.
+/// that only exists on one arm, combined with a `??` class-name
+/// fallback, keeps both class names rather than widening to `string`.
 #[test]
 fn hover_foreach_heterogeneous_tuple_index_with_null_coalesce() {
     let backend = create_test_backend();
@@ -16128,8 +16127,8 @@ fn hover_foreach_heterogeneous_tuple_index_with_null_coalesce() {
     let hover = hover_at(&backend, uri, content, 7, 10).expect("hover $cls");
     let text = hover_text(&hover);
     assert!(
-        text.contains("class-string<ArrayType>") && text.contains("class-string<ScalarType>"),
-        "index + ?? fallback should keep both class-strings, got: {text}"
+        text.contains("$cls = 'ArrayType'|'ScalarType'"),
+        "index + ?? fallback should keep both class names, got: {text}"
     );
     assert!(
         !text.contains("= string") && !text.contains("|string"),

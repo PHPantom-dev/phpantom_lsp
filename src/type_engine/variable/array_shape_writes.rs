@@ -762,7 +762,10 @@ fn write_literal_keys_into_shape(
         .union_members()
         .iter()
         .map(|member| match member.as_literal() {
-            None => member.as_class_name_literal().map(class_name_shape_key),
+            _ if let Some(class) = member.as_class_name_literal() => {
+                Some(class_name_shape_key(class))
+            }
+            None => None,
             Some(LiteralValue::Int(raw)) => is_decimal_int_array_key(raw).then(|| raw.to_string()),
             // A decimal-integer string names the same entry as the integer,
             // and shapes record both under the same spelling.

@@ -399,6 +399,9 @@ impl PhpType {
 
     /// The literal payload, if this is a [`TypeKind::Literal`].
     pub fn as_literal(&self) -> Option<&LiteralValue> {
+        if let TypeKind::ClassNameLiteral(_, literal) = &*self.0 {
+            return literal.as_literal();
+        }
         match self.kind() {
             TypeKind::Literal(value) => Some(value),
             _ => None,
@@ -964,7 +967,7 @@ impl PhpType {
             TypeKind::Benevolent(inner)
             | TypeKind::ListShape(inner)
             | TypeKind::TemplateParam(_, inner)
-            | TypeKind::ClassNameLiteral(inner)
+            | TypeKind::ClassNameLiteral(inner, _)
             | TypeKind::EnumCase(inner, _)
             | TypeKind::DqlBuilder(inner, _) => inner.to_native_hint_typed(),
             TypeKind::Named(s) | TypeKind::StaticType(s) | TypeKind::ThisType(s) => {
@@ -1180,7 +1183,7 @@ impl PhpType {
         match self.raw_kind() {
             TypeKind::Benevolent(inner)
             | TypeKind::ListShape(inner)
-            | TypeKind::ClassNameLiteral(inner)
+            | TypeKind::ClassNameLiteral(inner, _)
             | TypeKind::EnumCase(inner, _)
             | TypeKind::DqlBuilder(inner, _) => inner.is_informative(),
             TypeKind::Generic(..) | TypeKind::UnsealedShape(..) => true,
@@ -1244,7 +1247,7 @@ impl PhpType {
         match self.raw_kind() {
             TypeKind::Benevolent(inner)
             | TypeKind::ListShape(inner)
-            | TypeKind::ClassNameLiteral(inner)
+            | TypeKind::ClassNameLiteral(inner, _)
             | TypeKind::EnumCase(inner, _)
             | TypeKind::DqlBuilder(inner, _) => {
                 inner.references_any_template_param(template_params)

@@ -42,15 +42,30 @@ pub(in crate::type_engine) fn infer_array_literal_raw_type<'b>(
                     Some(key_text) => {
                         builder.set_key(key_text, constant_key_type(kv.key), value_type);
                     }
-                    // A key that is not a literal has no name to record, and
-                    // naming the entry after the key's *type* would invent a
-                    // shape field nobody wrote. The whole literal falls back
-                    // to `array<K, V>` instead.
                     None => {
-                        builder.loosen();
-                        builder.is_list = false;
-                        push_unique(&mut builder.key_types, dynamic_key_type(kv.key, ctx));
-                        push_unique(&mut builder.types, value_type);
+                        let key_type = dynamic_key_type(kv.key, ctx);
+                        // A key that resolves to one literal (`Foo::class`,
+                        // a constant) names its entry as surely as one
+                        // written out.
+                        match super::array_shape_writes::literal_write_key(&key_type) {
+                            Some(Ok(key_text)) => {
+                                builder.set_key(key_text, PhpType::string(), value_type);
+                            }
+                            Some(Err(index)) => {
+                                builder.set_key(index.to_string(), PhpType::int(), value_type);
+                            }
+                            // A key that is not a literal has no name to
+                            // record, and naming the entry after the key's
+                            // *type* would invent a shape field nobody wrote.
+                            // The whole literal falls back to `array<K, V>`
+                            // instead.
+                            None => {
+                                builder.loosen();
+                                builder.is_list = false;
+                                push_unique(&mut builder.key_types, key_type);
+                                push_unique(&mut builder.types, value_type);
+                            }
+                        }
                     }
                 }
             }

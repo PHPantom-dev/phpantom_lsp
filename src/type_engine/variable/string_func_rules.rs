@@ -866,7 +866,7 @@ fn literal_int(args: &dyn ArrayFuncArgs, index: usize) -> Option<i64> {
 /// alternative is something else.
 fn collect_literals(ty: &PhpType, out: &mut Vec<String>, ascii_only: bool) -> Option<()> {
     match ty.kind() {
-        TypeKind::Literal(value) => {
+        _ if let Some(value) = ty.as_literal() => {
             let content = value.exact_string_content()?;
             // PHP's string functions are byte-oriented and the case
             // transforms map ASCII only; a multibyte subject would need
@@ -1190,9 +1190,7 @@ fn sprintf_fold(args: &dyn ArrayFuncArgs) -> Option<String> {
         i += 1;
         text_start = i;
         let value = sprintf_value_type(args, position)?;
-        let TypeKind::Literal(literal) = value.kind() else {
-            return None;
-        };
+        let literal = value.as_literal()?;
         match specifier {
             b's' => match literal.exact_string_content() {
                 Some(content) => out.push_str(&content),

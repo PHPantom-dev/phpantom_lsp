@@ -107,7 +107,7 @@ impl PhpType {
             TypeKind::Benevolent(inner) | TypeKind::ListShape(inner) => &inner.0,
             TypeKind::TemplateParam(_, bound) => bound.kind(),
             TypeKind::UnsealedShape(unsealed) => &unsealed.widened.0,
-            TypeKind::ClassNameLiteral(class_string) => &class_string.0,
+            TypeKind::ClassNameLiteral(class_string, _) => &class_string.0,
             TypeKind::EnumCase(enum_type, _) => &enum_type.0,
             TypeKind::DqlBuilder(class, _) => &class.0,
             kind => kind,
@@ -118,7 +118,7 @@ impl PhpType {
     /// [`ClassNameLiteral`](TypeKind::ClassNameLiteral).
     #[inline]
     pub fn as_class_name_literal(&self) -> Option<&str> {
-        let TypeKind::ClassNameLiteral(class_string) = &*self.0 else {
+        let TypeKind::ClassNameLiteral(class_string, _) = &*self.0 else {
             return None;
         };
         match class_string.kind() {
@@ -178,7 +178,7 @@ impl PhpType {
     pub(crate) fn is_exact_value_marker(&self) -> bool {
         matches!(
             &*self.0,
-            TypeKind::ClassNameLiteral(_) | TypeKind::EnumCase(..) | TypeKind::DqlBuilder(..)
+            TypeKind::ClassNameLiteral(..) | TypeKind::EnumCase(..) | TypeKind::DqlBuilder(..)
         )
     }
 
@@ -472,15 +472,18 @@ pub enum TypeKind {
     /// display.
     UnsealedShape(Box<UnsealedShape>),
 
-    /// `Foo::class`: the name of the class `Foo` itself, which the inner
-    /// `class-string<Foo>` also admits the name of any subclass beside.
+    /// `Foo::class`: the name of the class `Foo` itself, which the
+    /// `class-string<Foo>` it holds also admits the name of any subclass
+    /// beside, and the string literal `'Foo'` that name spells.
     ///
-    /// Invisible to [`PhpType::kind`] and the display, which both see the
-    /// `class-string<Foo>`, so the value goes wherever a class-string does.
-    /// Only a write through it asks, via
-    /// [`PhpType::as_class_name_literal`], since knowing the one name it
-    /// holds is what lets the write name the entry it lands on.
-    ClassNameLiteral(PhpType),
+    /// Invisible to [`PhpType::kind`], which sees the `class-string<Foo>`,
+    /// so the value goes wherever a class-string does. Where a string
+    /// literal is asked for, through [`PhpType::as_literal`], it is the
+    /// literal, so comparisons, concatenation and string functions read
+    /// the exact name; the display spells it the same way. A write through
+    /// it asks via [`PhpType::as_class_name_literal`], since knowing the
+    /// one name it holds is what lets the write name the entry it lands on.
+    ClassNameLiteral(PhpType, PhpType),
 
     /// `Suit::Hearts`: the one case of the enum `Suit` it names, a subtype
     /// of the enum that no other case is.

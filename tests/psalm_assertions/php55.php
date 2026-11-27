@@ -19,7 +19,7 @@ namespace PsalmTest_php55_2 {
 
     $a = ClassName::class;
 
-    // PHPantom keeps the class a `::class` literal names, where Psalm's assertion widens it to `class-string`.
-    assertType('class-string<ClassName>', $a);
+    // PHPantom types `::class` as the literal name, as PHPStan does, where Psalm widens it to `class-string<ClassName>`.
+    assertType("'PsalmTest_php55_2\\\\ClassName'", $a);
 }
 

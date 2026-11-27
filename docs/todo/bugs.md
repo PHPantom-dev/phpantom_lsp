@@ -21,7 +21,18 @@ surfaced: one entry is one root cause, however many shapes it shows up in.
 
 ## Crashes
 
-No outstanding items.
+### B916. Long operator chains overflow the stack in release builds
+
+**Impact: Medium · Complexity: Medium**
+
+`crash_sandbox::generated_length_operator_chains_do_not_overflow` and
+its `_framework_scanners` twin abort with a stack overflow under
+`cargo nextest run --release`, while both pass in the debug profile. The
+input is a function with 20,000-operand `+`, `&&`, `||` and `.` chains,
+analysed on a thread sized `PARSE_WORKER_STACK_SIZE`. Something that
+walks the chain still recurses once per operator, and the release
+build's frame sizes (inlining merges frames) run out of stack first.
+Find the walker that recurses on the left operand and make it iterate.
 
 ## Type comparison
 
@@ -2180,23 +2191,3 @@ leaves the object as it was and `$foo->doFoo()` reads as an unknown
 member.
 
 **Cases** (PHPStan `nsrt/`, 1 assertion): `bug-4579.php`.
-
-### B915. `Foo::class` is typed `class-string<Foo>` instead of the literal `'Foo'`
-
-**Impact: Low · Complexity: Medium**
-
-```php
-$c = \stdClass::class;
-$c;   // class-string<stdClass>, should be 'stdClass'
-```
-
-PHPStan types a `::class` fetch on a named class as the string literal
-of that name (a literal that is also a class string), so it keeps
-comparing and printing as the exact name. PHPantom types it as
-`class-string<Foo>`, which loses the literal: `===` against another
-literal, array keys, and string functions see only a class string.
-Making the literal work everywhere a `class-string<Foo>` works today
-(`new $c`, `$c::method()`, `is_a()` checks, template inference) is what
-keeps this from being a one-line change.
-
-**Cases** (PHPStan `nsrt/`, 1 assertion): `generic-class-string.php`.

@@ -71,7 +71,8 @@ namespace PsalmTest_const_values_6 {
     class D {};
     /** @psalm-param C::class|D::class|E::class $s */
     function foo(string $s) : void {
-        assertType('class-string<PsalmTest_const_values_6\\C>|class-string<PsalmTest_const_values_6\\D>|class-string<PsalmTest_const_values_6_other\\C>', $s);
+        // PHPantom types `::class` as the literal name, as PHPStan does, where Psalm widens it to a `class-string`.
+        assertType("'PsalmTest_const_values_6\\\\C'|'PsalmTest_const_values_6\\\\D'|'PsalmTest_const_values_6_other\\\\C'", $s);
     }
 }
 

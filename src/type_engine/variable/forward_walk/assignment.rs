@@ -1065,48 +1065,6 @@ fn resolve_rhs_in_scope<'b>(
         // handles some special patterns.
     }
 
-    // ── Foo::class → class-string<Foo> ──────────────────────────
-    // `Foo::class` is parsed as `Access::ClassConstant` with the
-    // identifier `class`.  resolve_rhs_expression doesn't return a
-    // useful type for this (it looks for a constant named "class"
-    // on the class and finds nothing).  Handle it here so that
-    // subsequent `new $var` can resolve the class-string.
-    if let Some(class) = crate::parser::class_fetch_target(rhs) {
-        let class_name = crate::class_lookup::class_expression_name(
-            class,
-            ctx.current_class,
-            ctx.file.all_classes,
-            ctx.file.source_class_loader,
-            ctx.file.source_imports,
-        )
-        .filter(|name| !name.is_empty());
-        if let Some(name) = class_name {
-            let resolved_name = name.strip_prefix('\\').unwrap_or(&name);
-            // Resolve the class so we can store a proper ResolvedType
-            // with class_info.  This allows `new $var` to work.
-            let classes = crate::type_engine::type_resolution::type_hint_to_classes_typed(
-                &PhpType::named(atom(resolved_name)),
-                &ctx.current_class.fqn(),
-                ctx.file.all_classes,
-                ctx.file.class_loader,
-            );
-            // The identifier is spelled as the source writes it, which for a
-            // name reached through a namespace import (`Support\Pen` behind
-            // `use App\Support;`) is neither the FQCN nor resolvable once the
-            // class-string is read somewhere else.  Prefer the resolved class.
-            let class_string_type = PhpType::class_string(Some(match classes.first() {
-                Some(cls) => PhpType::named(cls.fqn()),
-                None => PhpType::named(atom(resolved_name)),
-            }));
-            if !classes.is_empty() {
-                return ResolvedType::from_classes_with_hint(classes, class_string_type);
-            }
-            // Even if we can't resolve the class, return a type-string-only result
-            // so the variable is non-empty in scope.
-            return vec![ResolvedType::from_type_string(class_string_type)];
-        }
-    }
-
     // ── Fast paths for expressions whose type is known structurally ──
     // These avoid the full resolve_rhs_expression round-trip for
     // common patterns where the result type depends only on the

@@ -106,17 +106,9 @@ impl Backend {
             return Some(ty);
         }
 
-        // ClassName::class → class-string<ClassName>
-        //
-        // The magic `::class` constant yields the fully-qualified class
-        // name as a `class-string<T>`, mirroring the general expression
-        // resolver (`resolve_rhs_property_access`).  Keeping the wrapper
-        // here means a template param bound directly from a `::class`
-        // argument (`@param T $x`) infers `class-string<T>` rather than
-        // the bare class, matching the argument's actual type.  The
-        // `class-string<T>` unwrapping paths (ClassStringInner and the
-        // class-string generic wrapper) strip the wrapper back off when
-        // they need the bare class.
+        // `ClassName::class` is exactly the class's name, as the expression
+        // resolver types it. A template bound from such an argument still
+        // sees the `class-string<T>` the literal reads as.
         if let Some(name) = trimmed.strip_suffix("::class")
             && !name.is_empty()
             && name
@@ -125,18 +117,31 @@ impl Backend {
         {
             // self::class / static::class / parent::class resolve relative
             // to the class at the call site.
-            let class_named = if is_self_or_static(name) {
-                ctx.current_class.map(|c| PhpType::named(c.fqn()))
+            let relative = is_self_or_static(name) || name.eq_ignore_ascii_case("parent");
+            let class_name = if is_self_or_static(name) {
+                ctx.current_class.map(|c| c.fqn())
             } else if name.eq_ignore_ascii_case("parent") {
                 ctx.current_class
                     .and_then(|c| c.parent_class.as_ref())
-                    .map(|p| PhpType::named(atom(p.as_ref())))
+                    .map(|p| atom(p.as_ref()))
             } else {
-                Some(PhpType::named(atom(
-                    &ctx.written_names().resolve_class(name),
-                )))
+                let resolved = ctx.written_names().resolve_class(name);
+                Some(atom(resolved.strip_prefix('\\').unwrap_or(&resolved)))
             };
-            return class_named.map(|n| PhpType::class_string(Some(n)));
+            // `static` is whichever subclass the call was made on, and a
+            // trait's `self` whichever class uses the trait.
+            let names_one_class = !name.eq_ignore_ascii_case("static")
+                && !(relative
+                    && ctx
+                        .current_class
+                        .is_some_and(|c| c.kind == crate::types::ClassLikeKind::Trait));
+            return class_name.map(|class| {
+                if names_one_class {
+                    PhpType::class_name_literal(class)
+                } else {
+                    PhpType::class_string(Some(PhpType::named(class)))
+                }
+            });
         }
 
         // Global constant access: `PHP_VERSION`, `PHP_EOL`, etc.

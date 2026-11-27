@@ -963,9 +963,9 @@ fn type_names(
 /// `class-string<Foo>`, an `interface-string`, …).
 fn is_class_name_string(ty: &PhpType) -> bool {
     match ty.kind() {
-        TypeKind::ClassString(_) | TypeKind::InterfaceString(_) | TypeKind::ClassNameLiteral(_) => {
-            true
-        }
+        TypeKind::ClassString(_)
+        | TypeKind::InterfaceString(_)
+        | TypeKind::ClassNameLiteral(..) => true,
         TypeKind::Named(name) => [
             "class-string",
             "interface-string",

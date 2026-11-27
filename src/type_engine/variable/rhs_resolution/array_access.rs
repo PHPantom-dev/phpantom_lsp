@@ -190,23 +190,33 @@ fn has_shape_member(ty: &PhpType) -> bool {
     }
 }
 
-/// The literal key a variable index holds, as the segment a literal
-/// written in its place would classify to.
+/// The literal key a variable or class constant index holds, as the
+/// segment a literal written in its place would classify to.
 ///
 /// `$k = 'classmap'; $data[$k]` reads the same entry `$data['classmap']`
 /// does, so a variable whose type is a single string or int literal
-/// addresses that one shape entry rather than any of them.
+/// addresses that one shape entry rather than any of them. So does
+/// `$data[Foo::class]` or `$data[Foo::KEY]`.
 fn literal_variable_index(
     index: &Expression<'_>,
     ctx: &VarResolutionCtx<'_>,
 ) -> Option<ArrayBracketSegment> {
-    let Expression::Variable(Variable::Direct(_)) = index else {
+    if !matches!(
+        index,
+        Expression::Variable(Variable::Direct(_)) | Expression::Access(Access::ClassConstant(_))
+    ) {
         return None;
-    };
+    }
     let resolved = resolve_rhs_expression(index, ctx);
     let [only] = resolved.as_slice() else {
         return None;
     };
+    // A shape records an entry written under `Foo::class` by that spelling.
+    if let Some(class) = only.type_string.as_class_name_literal() {
+        return Some(ArrayBracketSegment::StringKey(
+            crate::php_type::class_name_shape_key(class),
+        ));
+    }
     let literal = only.type_string.as_literal()?;
     match literal {
         LiteralValue::String(_) => Some(ArrayBracketSegment::StringKey(

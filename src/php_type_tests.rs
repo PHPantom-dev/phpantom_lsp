@@ -872,12 +872,21 @@ fn class_name_literal_reads_as_its_class_string() {
     let exact = PhpType::class_name_literal(atom("Foo"));
     let class_string = PhpType::class_string(Some(PhpType::named(atom("Foo"))));
     assert_eq!(exact.as_class_name_literal(), Some("Foo"));
-    assert_eq!(exact.to_string(), "class-string<Foo>");
+    assert_eq!(exact.to_string(), "'Foo'");
+    assert_eq!(exact.as_literal(), Some(&LiteralValue::string_value("Foo")));
     assert!(matches!(exact.kind(), TypeKind::ClassString(_)));
     // Beside the wider class-string it is one of, it adds nothing.
     let union = PhpType::union(vec![exact.clone(), class_string.clone()]);
     assert_eq!(union, class_string);
     assert!(!exact.equivalent(&class_string));
+    // It is the one string its name spells, and no other class's name.
+    let spelled = PhpType::literal_string_value("Foo");
+    assert!(exact.is_subtype_of(&spelled));
+    assert!(spelled.is_subtype_of(&exact));
+    assert!(exact.is_subtype_of(&PhpType::string()));
+    assert!(exact.is_subtype_of(&class_string));
+    assert!(!PhpType::class_name_literal(atom("Bar")).is_subtype_of(&exact));
+    assert!(!class_string.is_subtype_of(&exact));
 }
 
 #[test]

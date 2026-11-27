@@ -230,7 +230,7 @@ fn variant_name(t: &PhpType) -> &'static str {
         TypeKind::ListShape(_) => "ListShape",
         TypeKind::TemplateParam(..) => "TemplateParam",
         TypeKind::UnsealedShape(_) => "UnsealedShape",
-        TypeKind::ClassNameLiteral(_) => "ClassNameLiteral",
+        TypeKind::ClassNameLiteral(..) => "ClassNameLiteral",
         TypeKind::EnumCase(..) => "EnumCase",
         TypeKind::DqlBuilder(..) => "DqlBuilder",
     }
@@ -271,11 +271,15 @@ fn ty(t: &PhpType) -> Sz {
         | TypeKind::Benevolent(b)
         | TypeKind::ListShape(b)
         | TypeKind::TemplateParam(_, b)
-        | TypeKind::ClassNameLiteral(b)
         | TypeKind::EnumCase(b, _)
         | TypeKind::DqlBuilder(b, _) => {
             z.slot(1);
             z += ty(b);
+        }
+        TypeKind::ClassNameLiteral(class_string, literal) => {
+            z.slot(2);
+            z += ty(class_string);
+            z += ty(literal);
         }
         TypeKind::UnsealedShape(u) => {
             z.add(size_of::<crate::php_type::UnsealedShape>());

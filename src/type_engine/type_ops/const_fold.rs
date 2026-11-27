@@ -26,7 +26,7 @@
 
 use std::cell::{Cell, RefCell};
 
-use crate::php_type::{LiteralValue, PhpType, TypeKind, parse_php_int_literal};
+use crate::php_type::{LiteralValue, PhpType, parse_php_int_literal};
 use crate::text_scan::{ScanStep, find_matching_forward, scan_top_level};
 
 /// Resolver from an expression's source text to its type, as
@@ -362,7 +362,7 @@ fn fold_scalar_expression(text: &str, resolve: TextResolver<'_>) -> Option<PhpTy
     // one (`const NS = Base::NS;`) holds whatever that one holds, whether or
     // not it is an integer. Asking the resolver directly rather than through
     // the fold covers the non-integer values too, and asks only once.
-    resolve(text).filter(|ty| matches!(ty.kind(), TypeKind::Literal(_)))
+    resolve(text).filter(|ty| ty.as_literal().is_some())
 }
 
 /// Fold a concatenation without treating a quoted compound expression as
@@ -387,7 +387,7 @@ fn fold_concat_operands(operands: Vec<&str>, resolve: TextResolver<'_>) -> Optio
 /// else is folded the way a whole initialiser would be.
 fn fold_concat_operand(text: &str, resolve: TextResolver<'_>) -> Option<PhpType> {
     crate::type_engine::variable::rhs_resolution::infer_type_from_constant_value(text)
-        .filter(|ty| matches!(ty.kind(), TypeKind::Literal(_)))
+        .filter(|ty| ty.as_literal().is_some())
         .or_else(|| fold_scalar_expression(text, resolve))
 }
 

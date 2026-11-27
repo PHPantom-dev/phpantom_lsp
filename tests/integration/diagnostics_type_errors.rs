@@ -4039,7 +4039,7 @@ final class PetTest extends TestCase {{
 #[test]
 fn equality_assertion_on_a_class_constant_asserts_the_string() {
     // `@param ExpectedType $expected` takes the value, so `Dog::class`
-    // binds the class-string, and `$name` stays a string rather than
+    // binds the class name, and `$name` stays a string rather than
     // becoming a `Dog`.
     let php = format!(
         r#"<?php
@@ -4057,7 +4057,7 @@ final class NameTest extends TestCase {{
     let diags = collect_with_full_stubs(&php);
     let msgs = messages_with_code(&diags, "type_mismatch_argument");
     assert!(
-        msgs.iter().any(|m| m.ends_with("got class-string<Dog>")),
+        msgs.iter().any(|m| m.ends_with("got 'Dog'")),
         "a class name is a string, not an instance, got: {msgs:?}"
     );
 }
@@ -11271,7 +11271,7 @@ namespace Other {
 "#;
     let messages = messages_with_code(&collect(php), "type_mismatch_argument");
     assert_eq!(messages.len(), 1, "got {messages:?}");
-    assert!(messages[0].contains("Other\\C"), "{messages:?}");
+    assert!(messages[0].contains(r"'Other\\C'"), "{messages:?}");
 }
 
 /// A constant naming an array literal is a readable operand: `CONST[T]`

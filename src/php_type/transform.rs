@@ -98,7 +98,7 @@ impl PhpType {
             TypeKind::Benevolent(inner) => PhpType::benevolent(map(inner)),
             // Resolving the name leaves it the name of one class, and
             // anything else a map makes of it is no longer one.
-            TypeKind::ClassNameLiteral(inner) => {
+            TypeKind::ClassNameLiteral(inner, _) => {
                 let mapped = map(inner);
                 match mapped.kind() {
                     TypeKind::ClassString(Some(class)) => match class.kind() {
@@ -371,6 +371,9 @@ impl PhpType {
             }),
             TypeKind::StaticType(s) => PhpType::static_type(short(s)),
             TypeKind::ThisType(s) => PhpType::this_type(short(s)),
+            // `Foo::class` is the string the name spells, so it is shown in
+            // full, as any other string literal is.
+            TypeKind::ClassNameLiteral(..) => self.clone(),
             _ => self.map_children(&|t| t.shorten_except(ambiguous)),
         }
     }
@@ -592,7 +595,7 @@ impl PhpType {
             TypeKind::Benevolent(inner)
             | TypeKind::ListShape(inner)
             | TypeKind::TemplateParam(_, inner)
-            | TypeKind::ClassNameLiteral(inner)
+            | TypeKind::ClassNameLiteral(inner, _)
             | TypeKind::EnumCase(inner, _)
             | TypeKind::DqlBuilder(inner, _)
             | TypeKind::Nullable(inner)
@@ -711,7 +714,7 @@ impl PhpType {
         match self.raw_kind() {
             TypeKind::Benevolent(inner)
             | TypeKind::ListShape(inner)
-            | TypeKind::ClassNameLiteral(inner)
+            | TypeKind::ClassNameLiteral(inner, _)
             | TypeKind::EnumCase(inner, _)
             | TypeKind::DqlBuilder(inner, _) => inner.contains_name_matching(pred),
             TypeKind::Named(s) => pred(s),
@@ -1145,7 +1148,7 @@ impl PhpType {
             TypeKind::Benevolent(inner)
             | TypeKind::ListShape(inner)
             | TypeKind::TemplateParam(_, inner)
-            | TypeKind::ClassNameLiteral(inner)
+            | TypeKind::ClassNameLiteral(inner, _)
             | TypeKind::EnumCase(inner, _)
             | TypeKind::DqlBuilder(inner, _) => inner.for_each_class_name(f),
             TypeKind::UnsealedShape(unsealed) => {

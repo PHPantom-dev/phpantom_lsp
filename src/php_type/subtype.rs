@@ -167,6 +167,19 @@ impl PhpType {
             return Some(as_union.is_subtype_of(supertype));
         }
 
+        // `Foo::class` reads as `class-string<Foo>` through `kind()`, which
+        // would let the name of any subclass pass for it. Only the one
+        // string it spells does.
+        if let TypeKind::ClassNameLiteral(_, sup_literal) = supertype.raw_kind()
+            && !matches!(self.kind(), TypeKind::Union(_) | TypeKind::Intersection(_))
+        {
+            return Some(self.as_literal().is_some_and(|literal| {
+                sup_literal
+                    .as_literal()
+                    .is_some_and(|sup| literal.identical_to(sup) == Some(true))
+            }));
+        }
+
         // An enum case reads as its enum through `kind()`, which would let
         // the enum, or any other of its cases, pass for it. Only the case
         // itself does; a union or an intersection still goes member by
@@ -241,6 +254,10 @@ impl PhpType {
         }
 
         // ── Literal subtyping ───────────────────────────────────────
+        // `Foo::class` is both the class-string and the string literal.
+        if let TypeKind::ClassNameLiteral(class_string, literal) = self.raw_kind() {
+            return Some(class_string.is_subtype_of(supertype) || literal.is_subtype_of(supertype));
+        }
         if let TypeKind::Literal(lit) = self.kind() {
             return Some(literal_is_subtype_of(lit, supertype));
         }

@@ -168,7 +168,11 @@ impl PhpType {
 
     /// `Foo::class`: exactly the name of `class`.
     pub fn class_name_literal(class: Atom) -> PhpType {
-        TypeKind::ClassNameLiteral(PhpType::class_string(Some(PhpType::named(class)))).into()
+        TypeKind::ClassNameLiteral(
+            PhpType::class_string(Some(PhpType::named(class))),
+            PhpType::literal(LiteralValue::string_value(class.as_str())),
+        )
+        .into()
     }
 
     /// `Suit::Hearts`: the case `case` of the enum `enum_name`.
