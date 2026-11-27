@@ -2199,17 +2199,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b913-method_exists-does-not-narrow-its-subject-to-hasmethod" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B913. <code>method_exists()</code> does not narrow its subject to <code>hasMethod()</code>
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -4025,17 +4014,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b913-method_exists-does-not-narrow-its-subject-to-hasmethod" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B913. <code>method_exists()</code> does not narrow its subject to <code>hasMethod()</code>
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -5519,18 +5497,6 @@ literal's own body reading is memoized per request. The callback
 argument paths (template binding from a closure argument, and the
 callback return inference behind <code>array_map</code>/<code>array_filter</code>) re-read a
 nested callback once per enclosing level instead of sharing one answer.</p>
-<h3 id="b913-method_exists-does-not-narrow-its-subject-to-hasmethod">B913. <code>method_exists()</code> does not narrow its subject to <code>hasMethod()</code><a class="headerlink" href="#b913-method_exists-does-not-narrow-its-subject-to-hasmethod" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-103-1" name="__codelineno-103-1" href="#__codelineno-103-1"></a><span class="x">function f(object $foo) {</span>
-<a id="__codelineno-103-2" name="__codelineno-103-2" href="#__codelineno-103-2"></a><span class="x">    if (method_exists($foo, 'doFoo')) {</span>
-<a id="__codelineno-103-3" name="__codelineno-103-3" href="#__codelineno-103-3"></a><span class="x">        $foo;   // object, should be object&amp;hasMethod(doFoo)</span>
-<a id="__codelineno-103-4" name="__codelineno-103-4" href="#__codelineno-103-4"></a><span class="x">    }</span>
-<a id="__codelineno-103-5" name="__codelineno-103-5" href="#__codelineno-103-5"></a><span class="x">}</span>
-</code></pre></div>
-<p>There is no <code>hasMethod()</code> accessory type, so a <code>method_exists()</code> guard
-leaves the object as it was and <code>$foo-&gt;doFoo()</code> reads as an unknown
-member.</p>
-<p><strong>Cases</strong> (PHPStan <code>nsrt/</code>, 1 assertion): <code>bug-4579.php</code>.</p>
 
 
 
