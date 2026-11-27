@@ -6432,6 +6432,8 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong><code>pow()</code> and <code>**</code> with no real result are <code>NAN</code>.</strong> A power such as <code>pow(-1, 5.5)</code> is typed <code>NAN</code> instead of a plain <code>float</code>.</li>
+<li><strong>Reversing a list with optional entries keeps its shape.</strong> <code>array_reverse()</code> over a shape such as <code>array{0: 'A', 1?: 'B', 2?: 'C'}</code> gives a <code>list{…}</code> of the values each position can hold, instead of a generic list. <code>array_slice()</code> renumbers such shapes the same way.</li>
 <li><strong>Very long operator chains no longer crash the server.</strong> A generated file holding an expression of tens of thousands of <code>.</code>, <code>+</code>, <code>&amp;&amp;</code> or <code>||</code> operators is indexed and analysed instead of overflowing the stack.</li>
 <li><strong>Closures nested in generic call arguments no longer slow analysis down sharply.</strong> A file that passes closures to a templated function, each inside the body of the one before, is analysed in a fraction of the time it used to take as the nesting deepens.</li>
 <li><strong>A plain <code>class-string</code> argument makes a <code>class-string&lt;T&gt;</code> template an <code>object</code>.</strong> Passing a value typed <code>class-string</code> to a function declared <code>@param class-string&lt;T&gt;</code> / <code>@return T</code> now gives <code>object</code> instead of <code>mixed</code>. Contributed by @AJenbo.</li>
