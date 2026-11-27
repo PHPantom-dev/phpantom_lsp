@@ -2160,17 +2160,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b921-concatenating-a-bool-or-a-float-is-not-seen-to-stay-numeric" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B921. Concatenating a <code>bool</code> or a <code>float</code> is not seen to stay numeric
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -3947,17 +3936,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b921-concatenating-a-bool-or-a-float-is-not-seen-to-stay-numeric" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B921. Concatenating a <code>bool</code> or a <code>float</code> is not seen to stay numeric
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -5403,21 +5381,6 @@ literal-ness and numeric-ness.</p>
 <code>scalar_fold::concat_result</code> and add the accessories both sides promise.</p>
 <p><strong>Cases</strong> (PHPStan <code>nsrt/</code>): the <code>// SKIP</code> lines in <code>bug-11129.php</code> and
 <code>constant-string-unions.php</code>.</p>
-<h3 id="b921-concatenating-a-bool-or-a-float-is-not-seen-to-stay-numeric">B921. Concatenating a <code>bool</code> or a <code>float</code> is not seen to stay numeric<a class="headerlink" href="#b921-concatenating-a-bool-or-a-float-is-not-seen-to-stay-numeric" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-101-1" name="__codelineno-101-1" href="#__codelineno-101-1"></a><span class="x">$i . $bool;             // non-empty-string, should be non-empty-string&amp;numeric-string</span>
-<a id="__codelineno-101-2" name="__codelineno-101-2" href="#__codelineno-101-2"></a><span class="x">$positiveInt . $bool;   // non-falsy-string, should be non-falsy-string&amp;numeric-string</span>
-<a id="__codelineno-101-3" name="__codelineno-101-3" href="#__codelineno-101-3"></a><span class="x">$bool . $positiveInt;   // non-falsy-string, should be non-falsy-string&amp;numeric-string</span>
-<a id="__codelineno-101-4" name="__codelineno-101-4" href="#__codelineno-101-4"></a><span class="x">$float . $positiveInt;  // non-falsy-string, should be non-falsy-string&amp;numeric-string</span>
-</code></pre></div>
-<p>A <code>bool</code> converts to <code>''</code> or <code>'1'</code>, so it continues an integer (or starts
-one), and a float followed by more digits is still a number. The numeric
-rule for <code>.</code> (<code>NumericConcat</code>) only knows integers, numeric strings and
-written-out literals on either side.</p>
-<p><strong>Fix:</strong> teach <code>NumericConcat::of_lhs()</code> and <code>admits()</code> about <code>bool</code> and
-<code>float</code> operands the way PHPStan's <code>resolveConcatType()</code> does.</p>
-<p><strong>Cases</strong> (PHPStan <code>nsrt/</code>): the <code>bool</code>/<code>float</code> <code>// SKIP</code> lines in
-<code>bug-11129.php</code>.</p>
 
 
 
