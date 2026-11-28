@@ -499,6 +499,11 @@ pub(crate) fn infer_arithmetic_result_type(
         return PhpType::mixed();
     }
 
+    let lhs_numbers = numeric_strings_as_numbers(lhs_types);
+    let rhs_numbers = numeric_strings_as_numbers(rhs_types);
+    let lhs_types = lhs_numbers.as_deref().unwrap_or(lhs_types);
+    let rhs_types = rhs_numbers.as_deref().unwrap_or(rhs_types);
+
     // Two operands that are each pinned to one literal value fold to the
     // exact value PHP would compute, the same way a mask built from two
     // literal ints already folds through `apply_bitwise` above. Division by
@@ -576,6 +581,45 @@ pub(crate) fn infer_arithmetic_result_type(
             }
         }
     }
+}
+
+/// The operand with each numeric-string literal alternative replaced by the
+/// int or float literal arithmetic converts it to (`'3'` is `3`, `'1e3'` is
+/// `1000.0`), so `'1'|'2'` adds like `1|2` rather than as a `numeric-string`
+/// that may hold a float. `None` when the operand holds no such literal.
+fn numeric_strings_as_numbers(types: &[ResolvedType]) -> Option<Vec<ResolvedType>> {
+    let as_number = |member: &PhpType| {
+        member
+            .as_literal()
+            .and_then(|literal| literal.numeric_string_value())
+            .map(PhpType::literal)
+    };
+    let has_numeric_string = |rt: &ResolvedType| {
+        rt.type_string
+            .union_members()
+            .into_iter()
+            .any(|member| as_number(member).is_some())
+    };
+    if !types.iter().any(has_numeric_string) {
+        return None;
+    }
+    Some(
+        types
+            .iter()
+            .map(|rt| {
+                if !has_numeric_string(rt) {
+                    return rt.clone();
+                }
+                let members = rt
+                    .type_string
+                    .union_members()
+                    .into_iter()
+                    .map(|member| as_number(member).unwrap_or_else(|| member.clone()))
+                    .collect();
+                ResolvedType::from_type_string(PhpType::union(members))
+            })
+            .collect(),
+    )
 }
 
 /// Whether every alternative of an operand is a scalar arithmetic turns into

@@ -20,10 +20,10 @@ class HelloWorld
 
 			assertType("'1'|'2'|'3'|'4'|'5'|'6'|'7'", $from->format('N'));
 			assertType('int<1, 14>', $offset);
-			assertType('int<2, 21>', $value); // SKIP: arithmetic on a numeric-string literal and a non-literal int widens to `int|float`
-			assertType('int<2, 21>', $value2); // SKIP: arithmetic on a numeric-string literal and a non-literal int widens to `int|float`
-			assertType('float', $value3); // SKIP: arithmetic on a numeric-string literal and a non-literal int widens to `int|float`
-			assertType('float', $value4); // SKIP: arithmetic on a numeric-string literal and a non-literal int widens to `int|float`
+			assertType('int<2, 21>', $value);
+			assertType('int<2, 21>', $value2);
+			assertType('float', $value3);
+			assertType('float', $value4);
 		}
 	}
 

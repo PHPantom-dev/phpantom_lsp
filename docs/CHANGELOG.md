@@ -33,6 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Arithmetic on numeric-string literals keeps the number.** `$digit + $offset` with `$digit` typed `'1'|'2'|'3'` and `$offset` an `int<1, 14>` is `int<2, 17>`, and `'1e3' + $offset` is a `float`, instead of `int|float`.
 - **Concatenation keeps the letter case.** `'0' . $int` is typed `lowercase-string&uppercase-string` too, and joining two lowercase (or two uppercase) strings stays lowercase (or uppercase).
 - **Concatenating a `bool` or a `float` can stay a number.** `$int . $bool` and `$float . $positiveInt` are typed `numeric-string`, since a `bool` converts to `''` or `'1'` and a float followed by more digits is still a number.
 - **Merged branches drop strings a wider type covers.** After an `if` where one branch holds a few known strings and the other a general string type such as `literal-string&non-falsy-string`, the result is just the general type, not both side by side.
