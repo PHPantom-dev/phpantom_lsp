@@ -6432,6 +6432,7 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>Arithmetic on numeric-string literals keeps the number.</strong> <code>$digit + $offset</code> with <code>$digit</code> typed <code>'1'|'2'|'3'</code> and <code>$offset</code> an <code>int&lt;1, 14&gt;</code> is <code>int&lt;2, 17&gt;</code>, and <code>'1e3' + $offset</code> is a <code>float</code>, instead of <code>int|float</code>.</li>
 <li><strong>Concatenation keeps the letter case.</strong> <code>'0' . $int</code> is typed <code>lowercase-string&amp;uppercase-string</code> too, and joining two lowercase (or two uppercase) strings stays lowercase (or uppercase).</li>
 <li><strong>Concatenating a <code>bool</code> or a <code>float</code> can stay a number.</strong> <code>$int . $bool</code> and <code>$float . $positiveInt</code> are typed <code>numeric-string</code>, since a <code>bool</code> converts to <code>''</code> or <code>'1'</code> and a float followed by more digits is still a number.</li>
 <li><strong>Merged branches drop strings a wider type covers.</strong> After an <code>if</code> where one branch holds a few known strings and the other a general string type such as <code>literal-string&amp;non-falsy-string</code>, the result is just the general type, not both side by side.</li>
