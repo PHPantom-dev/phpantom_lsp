@@ -697,6 +697,7 @@ fn apply_by_ref_parameter_types<'b>(
     }
     if let Some(call) = by_ref_call(expr, scope, ctx) {
         seed_by_ref_parameters(expr, &call, scope, ctx);
+        super::by_ref_builtins::refine_proc_open_pipes(&call, scope, ctx);
     }
 }
 

@@ -232,6 +232,17 @@ pub(super) fn resolve_named_member_call<'b>(
         return callable_return_resolution(&ret_type, ctx);
     }
 
+    // `bindTo()` changes what `$this` and `static` mean inside a closure,
+    // not the signature it is called with.
+    if method_name.eq_ignore_ascii_case("bindTo")
+        && !receiver_resolved.is_empty()
+        && receiver_resolved
+            .iter()
+            .all(|rt| rt.type_string.closure_signature_return().is_some())
+    {
+        return receiver_resolved;
+    }
+
     // A property read through the Reflection API: the name handed to
     // `getProperty()` decides the type, so the stub's `ReflectionProperty`
     // / `mixed` return types are as specific as an annotation can be.

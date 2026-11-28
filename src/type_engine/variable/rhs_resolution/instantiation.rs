@@ -88,6 +88,19 @@ pub(super) fn resolve_rhs_instantiation(
             }
         }
 
+        if classes.len() == 1
+            && classes[0].fqn() == "DatePeriod"
+            && let Some(arg_list) = inst.argument_list.as_ref()
+            && let Some(ty) = date_period_type(arg_list, ctx)
+        {
+            return crate::type_engine::type_ops::resolution::resolved_types_for_hint(
+                ty,
+                "",
+                ctx.file.all_classes,
+                ctx.file.class_loader,
+            );
+        }
+
         // ── Constructor template inference ──────────────────────
         // When the class has `@template` params and the constructor
         // has `@param` bindings for them, infer concrete types from
@@ -156,6 +169,62 @@ pub(super) fn resolve_rhs_instantiation(
         ctx.file.all_classes,
         ctx.file.class_loader,
     )
+}
+
+/// `new DatePeriod(…)`: the start date's class, then an end date or a
+/// recurrence count, whichever form of the constructor was called. An ISO
+/// 8601 interval string makes `DateTime`s and carries its count.
+///
+/// `None` when the arguments do not say which form was called.
+fn date_period_type(arg_list: &ArgumentList<'_>, ctx: &VarResolutionCtx<'_>) -> Option<PhpType> {
+    let args: Vec<&Expression<'_>> = arg_list
+        .arguments
+        .iter()
+        .map(|arg| match arg {
+            Argument::Positional(positional) if positional.ellipsis.is_none() => {
+                Some(positional.value)
+            }
+            _ => None,
+        })
+        .collect::<Option<_>>()?;
+    let resolve = |expr: &Expression<'_>| {
+        crate::type_engine::variable::resolution::resolve_arg_raw_type(expr, ctx)
+    };
+    let date_period = |args: [PhpType; 3]| PhpType::generic_atom(atom("DatePeriod"), args.to_vec());
+    let first = resolve(args.first()?)?;
+    if first.is_string_type()
+        || first
+            .as_literal()
+            .is_some_and(|l| l.string_content().is_some())
+    {
+        return Some(date_period([
+            PhpType::named(atom("DateTime")),
+            PhpType::null(),
+            PhpType::int(),
+        ]));
+    }
+    let third = resolve(args.get(2)?)?;
+    let is_date = |ty: &PhpType| {
+        ty.class_name().is_some_and(|name| {
+            (ctx.file.class_loader)(crate::class_lookup::Fqn::new(name)).is_some_and(|class| {
+                crate::class_lookup::is_subtype_of(
+                    &class,
+                    "DateTimeInterface",
+                    ctx.file.class_loader,
+                )
+            })
+        })
+    };
+    if !is_date(&first) {
+        return None;
+    }
+    if is_date(&third) {
+        Some(date_period([first, third, PhpType::null()]))
+    } else if third.is_int() || third.is_int_literal() {
+        Some(date_period([first, PhpType::null(), third]))
+    } else {
+        None
+    }
 }
 
 /// Bind a template a `class-string<Wrapper<T>>` hint names, from the class

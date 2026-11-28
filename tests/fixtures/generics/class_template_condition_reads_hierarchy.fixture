@@ -1,0 +1,24 @@
+// test: a class-template condition holds for a class that implements the named interface
+// feature: hover
+// expect: 'counted'
+// expect_absent: 'not counted'
+---
+<?php
+
+class Basket implements Countable {
+    public function count(): int { return 0; }
+}
+
+/** @template T */
+class Box {
+    /** @param T $item */
+    public function __construct(public mixed $item) {}
+
+    /** @return (T is Countable ? 'counted' : 'not counted') */
+    public function describe(): string { return 'counted'; }
+}
+
+function demo(Basket $basket): void {
+    $label = (new Box($basket))->describe();
+    echo $la<>bel;
+}

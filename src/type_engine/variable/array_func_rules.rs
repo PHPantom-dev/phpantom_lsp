@@ -530,6 +530,18 @@ pub(in crate::type_engine) fn array_func_element_type(
         return Some(found);
     }
 
+    // `array_find_key()` over a shape finds one of its keys, or nothing.
+    if func_name.eq_ignore_ascii_case("array_find_key") {
+        let keys = shape_key_alternatives(&args.arg_raw_type(0)?)?
+            .into_iter()
+            .flatten()
+            .map(|(key, _)| key);
+        return Some(PhpType::union(vec![
+            literal_key_union(keys)?,
+            PhpType::null(),
+        ]));
+    }
+
     if ARRAY_ELEMENT_FUNCS
         .iter()
         .any(|f| f.eq_ignore_ascii_case(func_name))

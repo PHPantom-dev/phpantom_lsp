@@ -171,6 +171,25 @@ fn static_call_on_class(
         });
     let owner = bound_owner.as_deref().unwrap_or(owner);
 
+    // `Closure::getCurrent()` is the closure the call is written in, and
+    // throws anywhere else.
+    if method_name.eq_ignore_ascii_case("getCurrent")
+        && owner.fqn() == "Closure"
+        && static_call.argument_list.is_some()
+    {
+        let offset = mago_span::HasSpan::span(static_call.class).start.offset;
+        let current =
+            super::defined_vars::with_enclosing_function(ctx.file.content, offset, |found| {
+                match found.and_then(|function| function.closure) {
+                    Some(closure) => current_closure_type(closure, ctx),
+                    None => Some(PhpType::never()),
+                }
+            });
+        if let Some(current) = current {
+            return super::closure_value(current, ctx);
+        }
+    }
+
     if let Some(argument_list) = static_call.argument_list {
         // The stub can only say `Closure`; the closure it makes has the
         // signature of the callable it is handed, as `$callable(...)` does.
@@ -181,6 +200,25 @@ fn static_call_on_class(
             return super::closure_value(
                 super::calls::closure_from_callable(callable.value(), ctx),
                 ctx,
+            );
+        }
+        // `Closure::bind()` rebinds the closure it is handed, keeping its
+        // signature.
+        if method_name.eq_ignore_ascii_case("bind")
+            && owner.fqn() == "Closure"
+            && let Some(closure) = crate::call_args::first_param_arg(argument_list, "closure")
+            && let Some(ty) =
+                crate::type_engine::variable::resolution::resolve_arg_raw_type(closure.value(), ctx)
+            && ty.closure_signature_return().is_some()
+        {
+            return super::closure_value(ty, ctx);
+        }
+        if let Some(ty) = pdo_connect_type(owner, method_name, argument_list, ctx) {
+            return crate::type_engine::type_ops::resolution::resolved_types_for_hint(
+                ty,
+                "",
+                ctx.file.all_classes,
+                ctx.file.class_loader,
             );
         }
         if let Some(ty) = date_from_format_type(owner, method_name, argument_list, ctx) {
@@ -305,6 +343,71 @@ fn static_call_on_class(
         &rctx,
     );
     results
+}
+
+thread_local! {
+    /// The closures whose signature `Closure::getCurrent()` is being worked
+    /// out for, by the offset they start at.
+    static CURRENT_CLOSURES: std::cell::RefCell<Vec<u32>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// The signature of `closure`, for a `Closure::getCurrent()` inside it.
+///
+/// Working out its return type walks its body, which reaches the same call
+/// again; that inner call is left to the declared `Closure`.
+fn current_closure_type(closure: &Expression<'_>, ctx: &VarResolutionCtx<'_>) -> Option<PhpType> {
+    let start = mago_span::HasSpan::span(closure).start.offset;
+    if CURRENT_CLOSURES.with_borrow(|active| active.contains(&start)) {
+        return None;
+    }
+    /// Takes the closure off the active list however the walk ends.
+    struct Active(u32);
+    impl Drop for Active {
+        fn drop(&mut self) {
+            CURRENT_CLOSURES.with_borrow_mut(|active| active.retain(|&offset| offset != self.0));
+        }
+    }
+    CURRENT_CLOSURES.with_borrow_mut(|active| active.push(start));
+    let _active = Active(start);
+    Some(super::calls::closure_from_callable(closure, ctx))
+}
+
+/// `PDO::connect()` with a DSN of known literals: the driver subclass each
+/// DSN's prefix names. A DSN for any other driver leaves the declared
+/// `static`.
+fn pdo_connect_type(
+    owner: &ClassInfo,
+    method_name: &str,
+    argument_list: &ArgumentList<'_>,
+    ctx: &VarResolutionCtx<'_>,
+) -> Option<PhpType> {
+    const DRIVERS: &[(&str, &str)] = &[
+        ("mysql:", "Pdo\\Mysql"),
+        ("firebird:", "Pdo\\Firebird"),
+        ("dblib:", "Pdo\\Dblib"),
+        ("odbc:", "Pdo\\Odbc"),
+        ("pgsql:", "Pdo\\Pgsql"),
+        ("sqlite:", "Pdo\\Sqlite"),
+    ];
+    if !method_name.eq_ignore_ascii_case("connect") || owner.fqn() != "PDO" {
+        return None;
+    }
+    let arg = crate::call_args::first_param_arg(argument_list, "dsn")?;
+    let dsn = crate::type_engine::variable::resolution::resolve_arg_raw_type(arg.value(), ctx)?;
+    let mut classes: Vec<PhpType> = Vec::new();
+    for member in dsn.union_members() {
+        let text = member.as_literal()?.string_content()?;
+        let (_, class) = DRIVERS
+            .iter()
+            .find(|(prefix, _)| text.starts_with(prefix))?;
+        let class = (ctx.file.class_loader)(crate::class_lookup::Fqn::new(class))?;
+        let ty = PhpType::named(class.fqn());
+        if !classes.contains(&ty) {
+            classes.push(ty);
+        }
+    }
+    (!classes.is_empty()).then(|| PhpType::union(classes))
 }
 
 /// `DateTime::createFromFormat()` and `DateTimeImmutable::createFromFormat()`

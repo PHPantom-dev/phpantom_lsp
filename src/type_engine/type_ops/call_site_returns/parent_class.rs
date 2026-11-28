@@ -18,11 +18,11 @@ pub(super) fn return_type(
         // The class the call is written in. A trait is only known once it
         // is used, so it may have any parent; outside a class the call
         // returns `false`.
-        let class = args
-            .resolve("self::class")
-            .and_then(|scope| class_loader(Fqn::new(scope.as_class_name_literal()?)))
-            .filter(|class| class.kind != ClassLikeKind::Trait);
-        return Some(class.map_or_else(unknown, |class| parent_of(&class)));
+        return Some(match enclosing_class(args, class_loader) {
+            Enclosing::Nothing => PhpType::false_(),
+            Enclosing::Class(class) => parent_of(&class),
+            Enclosing::Unknown => unknown(),
+        });
     };
     let subject = args.resolve(&text)?;
     let mut results: Vec<PhpType> = Vec::new();
@@ -56,7 +56,7 @@ fn member_parent(member: &PhpType, class_loader: &ResolvedClassLoader<'_>) -> Ph
     if let Some(name) = member.class_name()
         && !member.is_self_ref()
         && let Some(class) = class_loader(Fqn::new(name))
-        && class.kind != ClassLikeKind::Trait
+        && !matches!(class.kind, ClassLikeKind::Trait | ClassLikeKind::Interface)
     {
         let exact = parent_of(&class);
         if class.is_final || class.kind == ClassLikeKind::Enum {
@@ -71,6 +71,51 @@ fn member_parent(member: &PhpType, class_loader: &ResolvedClassLoader<'_>) -> Ph
         return PhpType::never();
     }
     unknown()
+}
+
+/// `get_class()` without an argument: the name of the class it is written in,
+/// or `false` outside any class. An argument is left to the declared
+/// `class-string<T>`.
+pub(super) fn get_class_return_type(
+    args: &CallArgs<'_>,
+    class_loader: Option<&ResolvedClassLoader<'_>>,
+) -> Option<PhpType> {
+    if args.text("$object").is_some() {
+        return None;
+    }
+    Some(match enclosing_class(args, class_loader?) {
+        Enclosing::Nothing => PhpType::false_(),
+        Enclosing::Class(class) => PhpType::class_name_literal(class.fqn()),
+        Enclosing::Unknown => PhpType::class_string(None),
+    })
+}
+
+/// The class a call is written in, as far as a call without an argument
+/// can name it.
+enum Enclosing {
+    /// Code outside any class-like.
+    Nothing,
+    Class(std::sync::Arc<ClassInfo>),
+    /// A trait (whichever class uses it) or a class that cannot be loaded.
+    Unknown,
+}
+
+fn enclosing_class(args: &CallArgs<'_>, class_loader: &ResolvedClassLoader<'_>) -> Enclosing {
+    // `self::class` names the enclosing class, or nothing outside one; in a
+    // trait it is a `class-string<…>` of whichever class uses it.
+    let Some(name) = args
+        .resolve("self::class")
+        .and_then(|scope| scope.as_class_name_literal().map(str::to_owned))
+    else {
+        return Enclosing::Unknown;
+    };
+    if name.is_empty() {
+        return Enclosing::Nothing;
+    }
+    match class_loader(Fqn::new(&name)) {
+        Some(class) if class.kind != ClassLikeKind::Trait => Enclosing::Class(class),
+        _ => Enclosing::Unknown,
+    }
 }
 
 /// The exact answer for `class`: its parent's name, or `false` without one.

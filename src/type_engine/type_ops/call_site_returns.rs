@@ -160,6 +160,8 @@ enum CallSiteFunction {
     ParseUrl,
     Scanf { stream: bool },
     ParentClass,
+    GetClass,
+    GetCalledClass,
     ArraySearch,
     MbSubstituteCharacter,
     MbConvertEncoding,
@@ -219,6 +221,10 @@ fn classify(func_name: &str) -> Option<CallSiteFunction> {
         Some(CallSiteFunction::Scanf { stream: true })
     } else if name.eq_ignore_ascii_case("get_parent_class") {
         Some(CallSiteFunction::ParentClass)
+    } else if name.eq_ignore_ascii_case("get_class") {
+        Some(CallSiteFunction::GetClass)
+    } else if name.eq_ignore_ascii_case("get_called_class") {
+        Some(CallSiteFunction::GetCalledClass)
     } else if name.eq_ignore_ascii_case("array_search") {
         Some(CallSiteFunction::ArraySearch)
     } else if name.eq_ignore_ascii_case("array_rand") {
@@ -318,6 +324,16 @@ pub(crate) fn call_site_return_type(
         CallSiteFunction::ParseUrl => parse_url::return_type(&args),
         CallSiteFunction::Scanf { stream } => scanf::return_type(&args, stream),
         CallSiteFunction::ParentClass => parent_class::return_type(&args, class_loader),
+        CallSiteFunction::GetClass => parent_class::get_class_return_type(&args, class_loader),
+        // The class the static call was made on, as `static::class` names
+        // it. Outside any class `self::class` is empty and the declared
+        // type stands.
+        CallSiteFunction::GetCalledClass => {
+            if args.resolve("self::class")?.as_class_name_literal() == Some("") {
+                return None;
+            }
+            args.resolve("static::class")
+        }
         CallSiteFunction::ArraySearch => array_search::return_type(&args),
         CallSiteFunction::MbSubstituteCharacter => mb_substitute_character_return(&args),
         CallSiteFunction::MbConvertEncoding => mb_convert_encoding::return_type(&args),

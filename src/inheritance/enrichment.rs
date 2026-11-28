@@ -92,6 +92,24 @@ fn inherited_return_type(
     inherited.without_alternatives_the_native_type_forbids(native)
 }
 
+/// The conditional return type `existing` should take from `ancestor`, or
+/// `None` when it has its own or the override's native return hint rules
+/// out every branch.
+fn inherited_conditional_return(
+    existing: &MethodInfo,
+    ancestor: &MethodInfo,
+    class_loader: ClassLoader<'_>,
+) -> Option<PhpType> {
+    if existing.conditional_return().is_some() {
+        return None;
+    }
+    let conditional = in_override_param_names(ancestor.conditional_return()?, existing, ancestor);
+    if existing.native_return_type.is_none() {
+        return Some(conditional);
+    }
+    within_native_class(conditional, existing, ancestor, class_loader)
+}
+
 /// `inherited` without the classes the override's own native return hint
 /// rules out, or `None` when nothing but `null` is left.
 ///
@@ -120,8 +138,14 @@ fn within_native_class(
         return Some(inherited);
     };
     let own = own.non_null_type().unwrap_or_else(|| own.clone());
-    // `mixed` is not in the scalar keyword list, so `class_name` lets it by.
-    let Some(own_class) = own.class_name().filter(|_| !own.is_mixed()) else {
+    // The override may declare one class or a union of them. `mixed` is not
+    // in the scalar keyword list, so `class_name` lets it by.
+    let Some(own_classes) = own
+        .union_members()
+        .into_iter()
+        .map(|member| member.class_name().filter(|_| !member.is_mixed()))
+        .collect::<Option<Vec<&str>>>()
+    else {
         return Some(inherited);
     };
     let admits = |member: &PhpType| {
@@ -141,10 +165,23 @@ fn within_native_class(
             return true;
         }
         match class_loader(crate::class_lookup::Fqn::new(class)) {
-            Some(info) => crate::class_lookup::is_subtype_of(&info, own_class, class_loader),
+            Some(info) => own_classes.iter().any(|own_class| {
+                crate::class_lookup::is_subtype_of(&info, own_class, class_loader)
+            }),
             None => true,
         }
     };
+
+    // A conditional cannot lose single alternatives, so it is kept whole
+    // while any branch fits the override, and dropped when none does.
+    if inherited.contains_conditional() {
+        let branches = inherited.conditionals_as_branch_unions();
+        let fits = branches
+            .union_members()
+            .into_iter()
+            .any(|member| !member.is_null() && admits(member));
+        return fits.then_some(inherited);
+    }
 
     let members = inherited.union_members();
     if members.iter().all(|member| admits(member)) {
@@ -218,7 +255,7 @@ fn method_enrichment_would_change(
     }
 
     // Conditional return type.
-    if existing.conditional_return().is_none() && ancestor.conditional_return().is_some() {
+    if inherited_conditional_return(existing, ancestor, class_loader).is_some() {
         return true;
     }
 
@@ -365,10 +402,7 @@ pub(crate) fn enrich_method_from_ancestor(
     }
 
     // ── Conditional return type ─────────────────────────────────
-    if existing.conditional_return().is_none()
-        && let Some(conditional) = ancestor.conditional_return()
-    {
-        let conditional = in_override_param_names(conditional, existing, ancestor);
+    if let Some(conditional) = inherited_conditional_return(existing, ancestor, class_loader) {
         existing.extras_mut().conditional_return = Some(conditional);
     }
 

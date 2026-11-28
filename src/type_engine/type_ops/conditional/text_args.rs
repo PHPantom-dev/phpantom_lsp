@@ -200,6 +200,7 @@ impl TextArgs<'_> {
                 &cond.then_type,
                 &cond.else_type,
                 tpl.defaults,
+                class_loader,
             )
         {
             return Some(resolved);

@@ -73,6 +73,7 @@ mod branches;
 mod calls;
 mod constant_access;
 mod conversion_calls;
+mod defined_vars;
 mod doctrine_calls;
 mod drupal_calls;
 mod exponentiation;

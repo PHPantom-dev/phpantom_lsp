@@ -1038,3 +1038,37 @@ function probe(Widget $widget, string $name): void {
         ],
     );
 }
+
+/// `get_defined_vars()` lists the variables in scope in the order PHP does,
+/// first appearance in the source, and marks one some path never assigned
+/// as optional. The global scope may hold anything an included file set.
+#[test]
+fn get_defined_vars_lists_the_variables_in_scope() {
+    let content = r#"<?php
+$top = get_defined_vars();
+function probe(int $param, bool $flag): void {
+    $local = 'foo';
+    if ($flag) {
+        $first = 1;
+    } else {
+        $second = 2;
+    }
+    $vars = get_defined_vars();
+    $keys = array_keys(get_defined_vars());
+}
+"#;
+    assert_assigned_types(
+        content,
+        &[
+            ("$top", "array<string, mixed>"),
+            (
+                "$vars",
+                "array{param: int, flag: bool, local: 'foo', first?: 1, second?: 2}",
+            ),
+            (
+                "$keys",
+                "list<'param'|'flag'|'local'|'first'|'second'|'vars'>",
+            ),
+        ],
+    );
+}

@@ -65,7 +65,28 @@ pub fn apply_function_stub_patches(func: &mut FunctionInfo) {
         // PHP 8 throws on an unknown encoding instead of returning `false`,
         // and every encoding has at least its own name as an alias.
         "mb_encoding_aliases" => func.return_type = Some(PhpType::parse("list<non-falsy-string>")),
-        "stat" | "lstat" | "fstat" => {
+        "fpm_get_status" => {
+            func.return_type = Some(PhpType::union(vec![
+                PhpType::parse(FPM_STATUS_SHAPE),
+                PhpType::false_(),
+            ]))
+        }
+        "getopt" => patch_getopt(func),
+        "openssl_encrypt" => patch_openssl_encrypt(func),
+        "proc_open" => patch_param_out(func, "$pipes", PhpType::parse("array<int, resource>")),
+        "socket_select" => {
+            for name in ["$read", "$write", "$except"] {
+                let out = PhpType::conditional(
+                    name,
+                    false,
+                    PhpType::null(),
+                    PhpType::null(),
+                    PhpType::parse("array<Socket>"),
+                );
+                patch_param_out(func, name, out);
+            }
+        }
+        "stat" | "lstat" | "fstat" | "ssh2_sftp_stat" => {
             func.return_type = Some(PhpType::union(vec![
                 PhpType::parse(STAT_SHAPE),
                 PhpType::false_(),
@@ -909,7 +930,87 @@ fn patch_gettimeofday(func: &mut FunctionInfo) {
     );
 }
 
-/// What `stat()`, `lstat()`, `fstat()` and `SplFileObject::fstat()` return:
+/// Declare what `func` writes back through its by-reference `param_name`.
+fn patch_param_out(func: &mut FunctionInfo, param_name: &str, out: PhpType) {
+    for param in func.parameters.make_mut() {
+        if param.name == param_name {
+            param.param_out_type = Some(out.clone());
+        }
+    }
+}
+
+/// Patch `getopt()`: each option maps to its value, `false` for one that
+/// takes none, or a list of them when it is given more than once. The index
+/// where parsing stopped is past the script name, so at least `1`.
+fn patch_getopt(func: &mut FunctionInfo) {
+    func.return_type = Some(PhpType::parse(
+        "array<string, string|false|list<mixed>>|false",
+    ));
+    patch_param_out(func, "$rest_index", PhpType::parse("int<1, max>"));
+}
+
+/// The ciphers that write an authentication tag: OpenSSL's GCM and CCM
+/// modes. PHP matches a cipher name in any case.
+const AEAD_CIPHERS: &[&str] = &[
+    "aes-128-ccm",
+    "aes-128-gcm",
+    "aes-192-ccm",
+    "aes-192-gcm",
+    "aes-256-ccm",
+    "aes-256-gcm",
+    "aria-128-ccm",
+    "aria-128-gcm",
+    "aria-192-ccm",
+    "aria-192-gcm",
+    "aria-256-ccm",
+    "aria-256-gcm",
+    "id-aes128-ccm",
+    "id-aes128-gcm",
+    "id-aes192-ccm",
+    "id-aes192-gcm",
+    "id-aes256-ccm",
+    "id-aes256-gcm",
+    "sm4-ccm",
+    "sm4-gcm",
+];
+
+/// Patch `openssl_encrypt()`'s `$tag`: an AEAD cipher writes the tag it
+/// computed there, and any other cipher (or one OpenSSL does not know)
+/// sets it to `null`.
+fn patch_openssl_encrypt(func: &mut FunctionInfo) {
+    if !func.parameters.iter().any(|p| p.name == "$cipher_algo") {
+        return;
+    }
+    let names: Vec<PhpType> = AEAD_CIPHERS
+        .iter()
+        .flat_map(|name| [name.to_string(), name.to_ascii_uppercase()])
+        .map(|name| PhpType::literal_string_value(&name))
+        .collect();
+    let out = PhpType::conditional(
+        "$cipher_algo",
+        false,
+        PhpType::union(names),
+        PhpType::parse("non-empty-string"),
+        PhpType::null(),
+    );
+    patch_param_out(func, "$tag", out);
+}
+
+/// What `fpm_get_status()` reports for the pool, with one entry per worker
+/// process under `procs`.
+const FPM_STATUS_SHAPE: &str = "array{pool: string, process-manager: 'dynamic'|'ondemand'|'static', \
+     start-time: int<0, max>, start-since: int<0, max>, accepted-conn: int<0, max>, \
+     listen-queue: int<0, max>, max-listen-queue: int<0, max>, listen-queue-len: int<0, max>, \
+     idle-processes: int<0, max>, active-processes: int<1, max>, total-processes: int<1, max>, \
+     max-active-processes: int<1, max>, max-children-reached: 0|1, slow-requests: int<0, max>, \
+     procs: array<int, array{pid: int<2, max>, state: 'Idle'|'Running', start-time: int<0, max>, \
+     start-since: int<0, max>, requests: int<0, max>, request-duration: int<0, max>, \
+     request-method: string, request-uri: string, query-string: string, \
+     request-length: int<0, max>, user: string, script: string, last-request-cpu: float, \
+     last-request-memory: int<0, max>}>}";
+
+/// What `stat()`, `lstat()`, `fstat()`, `ssh2_sftp_stat()` and
+/// `SplFileObject::fstat()` return:
 /// each field twice, by position and by name.
 pub(super) const STAT_SHAPE: &str = "array{0: int, 1: int, 2: int, 3: int, 4: int, 5: int, \
      6: int, 7: int, 8: int, 9: int, 10: int, 11: int, 12: int, dev: int, ino: int, mode: int, \

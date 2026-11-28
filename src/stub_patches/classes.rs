@@ -26,6 +26,8 @@ pub fn apply_class_stub_patches(class: &mut ClassInfo) {
         "SimpleXMLElement" => patch_simple_xml_element(class),
         "ReflectionClass" => patch_reflection_class(class),
         "ReflectionObject" => patch_reflection_object(class),
+        "ReflectionEnum" => patch_reflection_enum(class),
+        "DatePeriod" => patch_date_period(class),
         "DOMNamedNodeMap" => patch_dom_named_node_map(class),
         "DOMNode" => patch_dom_node(class),
         "DOMElement" => patch_dom_element(class),
@@ -34,6 +36,7 @@ pub fn apply_class_stub_patches(class: &mut ClassInfo) {
         "mysqli_result" => patch_fetch_object(class, "fetch_object", "T|false|null"),
         "Throwable" | "Exception" => patch_exception_get_code(class),
         "Error" => patch_method_return_type(class, "getCode", PhpType::int()),
+        "ImagickPixel" => patch_method_return_type(class, "getColor", imagick_pixel_color()),
         "SplFileObject" => {
             patch_method_return_type(class, "fstat", PhpType::parse(super::functions::STAT_SHAPE))
         }
@@ -379,6 +382,12 @@ fn patch_caching_iterator(class: &mut ClassInfo) {
     patch_iterator_iterator_subclass(class, "IteratorIterator");
     patch_method_return_type(class, "current", PhpType::named(atom("TValue")));
     patch_method_return_type(class, "key", PhpType::named(atom("TKey")));
+    // Cached entries are stored under the key cast to an array key.
+    patch_method_return_type(
+        class,
+        "getCache",
+        PhpType::parse("array<array-key, TValue>"),
+    );
     patch_constructor_template_binding(class, "TIterator", "$iterator");
 }
 
@@ -650,6 +659,72 @@ fn patch_reflection_object(class: &mut ClassInfo) {
     patch_constructor_template_binding(class, "T", "$object");
 }
 
+/// Carry `ReflectionEnum`'s reflected enum, as [`patch_reflection_object`]
+/// does for an object, so its cases are typed as backed or not by the enum.
+/// PHPStan's stubs do the same.
+fn patch_reflection_enum(class: &mut ClassInfo) {
+    if !class.template_params.is_empty() {
+        return;
+    }
+    add_templates(class, &[("T", Some("UnitEnum"))]);
+    let parent = atom("ReflectionClass");
+    if !class.extends_generics.iter().any(|(n, _)| *n == parent) {
+        class
+            .extends_generics
+            .push((parent, vec![PhpType::named(atom("T"))]));
+    }
+    patch_constructor_template_binding(class, "T", "$objectOrClass");
+    // The constructor takes the enum's name as well as one of its cases.
+    with_method_mut(class, "__construct", |ctor| {
+        for param in ctor.parameters.make_mut() {
+            if param.name == "$objectOrClass" {
+                param.type_hint = Some(PhpType::parse("T|class-string<T>"));
+            }
+        }
+    });
+    patch_method_return_type(
+        class,
+        "getCases",
+        PhpType::parse(
+            "(T is BackedEnum ? list<ReflectionEnumBackedCase> : list<ReflectionEnumUnitCase>)",
+        ),
+    );
+    patch_method_return_type(
+        class,
+        "getCase",
+        PhpType::parse("(T is BackedEnum ? ReflectionEnumBackedCase : ReflectionEnumUnitCase)"),
+    );
+    // A backed enum always has a backing type to report.
+    with_method_mut(class, "isBacked", |method| {
+        method
+            .extras_mut()
+            .type_assertions
+            .push(crate::types::TypeAssertion {
+                kind: crate::types::AssertionKind::IfTrue,
+                param_name: "$this->getBackingType()".to_string(),
+                asserted_type: PhpType::null(),
+                negated: true,
+                is_equality: false,
+            });
+    });
+}
+
+/// Give `DatePeriod` a template for its recurrence count beside the start
+/// and end dates phpstorm-stubs already carry, as PHPStan's stubs do. A
+/// period has an end date or a count, never both; which one the
+/// constructor's arguments decide (see the instantiation rule for
+/// `DatePeriod`).
+fn patch_date_period(class: &mut ClassInfo) {
+    let recurrences = atom("TRecurrences");
+    if class.template_params.contains(&recurrences)
+        || !class.template_params.iter().any(|t| t.as_str() == "TEnd")
+    {
+        return;
+    }
+    add_templates(class, &[("TRecurrences", Some("?int"))]);
+    patch_method_return_type(class, "getRecurrences", PhpType::named(recurrences));
+}
+
 /// Drop the `stdClass` alternative from a `fetchObject()`-style method.
 ///
 /// The stubs return `T|stdClass`, where `stdClass` stands for the call that
@@ -813,6 +888,18 @@ fn patch_method_return_type(class: &mut ClassInfo, method_name: &str, return_typ
     with_method_mut(class, method_name, |method| {
         method.return_type = Some(return_type);
     });
+}
+
+/// `ImagickPixel::getColor()`: `0` gives 8-bit channels with a `0`/`1`
+/// alpha, `1` normalised floats, `2` 8-bit channels throughout, and any other
+/// value nothing at all.
+fn imagick_pixel_color() -> PhpType {
+    PhpType::parse(
+        "($normalized is 1 ? array{r: float, g: float, b: float, a: float} \
+         : ($normalized is 2 ? array{r: int<0, 255>, g: int<0, 255>, b: int<0, 255>, a: int<0, 255>} \
+         : ($normalized is 0 ? array{r: int<0, 255>, g: int<0, 255>, b: int<0, 255>, a: int<0, 1>} \
+         : array{})))",
+    )
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

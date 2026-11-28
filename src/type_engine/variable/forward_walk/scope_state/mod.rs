@@ -186,6 +186,9 @@ pub(crate) struct ScopeProofs<'a> {
     /// [`Locals::maybe_undefined`].  Not a proof a condition reads, so
     /// [`ScopeState::adopt_proofs`] leaves it behind.
     pub maybe_undefined: &'a AtomTrie<()>,
+    /// Every variable in scope, for the reads that list them
+    /// (`get_defined_vars()`) rather than look one up.
+    pub locals: &'a Locals,
 }
 
 impl ScopeProofs<'_> {
@@ -470,6 +473,7 @@ impl ScopeState {
             implied_narrowings: &self.implied_narrowings,
             preg_outcomes: &self.preg_outcomes,
             maybe_undefined: self.locals.maybe_undefined(),
+            locals: &self.locals,
         }
     }
 

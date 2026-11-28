@@ -1,0 +1,28 @@
+// test: an override's native union return type wins over a parent's conditional naming neither of its classes
+// feature: hover
+// expect: $part = SmallPart
+// expect: $part = LargePart
+// expect_absent: $part = Part
+---
+<?php
+
+namespace Acme;
+
+class Part {}
+class SmallPart {}
+class LargePart {}
+
+/** @template T */
+class Catalog {
+    /** @return (T is int ? Part : Part) */
+    public function find(string $name) { return new Part(); }
+}
+
+final class Shop extends Catalog {
+    public function find(string $name): SmallPart|LargePart { return new SmallPart(); }
+}
+
+function demo(Shop $shop): void {
+    $part = $shop->find('x');
+    echo $pa<>rt;
+}

@@ -51,6 +51,7 @@ pub(super) fn resolve_rhs_function_call<'b>(
             .or_else(|| constant_call(name, argument_list, ctx))
             .or_else(|| super::conversion_calls::conversion_call(name, argument_list, ctx))
             .or_else(|| compact_call(name, expr, argument_list, ctx))
+            .or_else(|| super::defined_vars::defined_vars_call(name, expr, argument_list, ctx))
             .or_else(|| builtin_function_call(name, argument_list, ctx))
             .or_else(|| named_function_call(name, name_offset, argument_list, ctx))
         {

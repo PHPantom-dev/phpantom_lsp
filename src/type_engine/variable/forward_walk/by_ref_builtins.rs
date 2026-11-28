@@ -10,7 +10,7 @@ use mago_syntax::cst::argument::Argument;
 use crate::atom::{atom, bytes_to_str};
 use crate::php_type::{PhpType, ShapeEntry, TypeKind};
 use crate::type_engine::call_resolution::{
-    OutParamCall, effective_out_type, resolve_out_type_for_call,
+    OutParamCall, OutParamCallee, effective_out_type, resolve_out_type_for_call,
 };
 use crate::types::ResolvedType;
 
@@ -591,6 +591,65 @@ pub(super) fn seed_by_ref_parameters<'b>(
             );
         }
     }
+}
+
+/// `proc_open()` opens a pipe for each descriptor it is handed, under the
+/// descriptor's own key, so a descriptor array of known keys gives `$pipes`
+/// exactly those keys. Runs after [`seed_by_ref_parameters`] has written
+/// the stub's `array<int, resource>`, which stands for any other argument.
+pub(super) fn refine_proc_open_pipes<'b>(
+    call: &ByRefCall<'b>,
+    scope: &mut ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) {
+    let OutParamCallee::Function(function) = &call.callee else {
+        return;
+    };
+    if function.namespace.is_some() || !function.name.eq_ignore_ascii_case("proc_open") {
+        return;
+    }
+    let bound = crate::call_args::bind_args_to_params(&call.parameters, call.arguments);
+    let position = |name: &str| call.parameters.iter().position(|p| p.name == name);
+    let (Some(spec_at), Some(pipes_at)) = (position("$descriptor_spec"), position("$pipes")) else {
+        return;
+    };
+    let (Some(Some(spec)), Some(Some(Expression::Variable(Variable::Direct(pipes))))) =
+        (bound.get(spec_at), bound.get(pipes_at))
+    else {
+        return;
+    };
+    let scope_resolver = scope.snapshot_resolver();
+    let var_ctx =
+        ctx.var_ctx_for_with_scope("", ctx.cursor_offset, &scope_resolver, Some(scope.proofs()));
+    let Some(spec_type) =
+        crate::type_engine::variable::iterable_elements::resolve_expression_type(spec, &var_ctx)
+    else {
+        return;
+    };
+    let Some(entries) = spec_type.shape_entries() else {
+        return;
+    };
+    let mut keys: Vec<PhpType> = Vec::new();
+    for (index, entry) in entries.iter().enumerate() {
+        let key = match entry.key.as_deref() {
+            None => PhpType::literal_int(index.to_string()),
+            Some(key) => match crate::php_type::shape_key_literal(key) {
+                Some(key) => key,
+                None => return,
+            },
+        };
+        if !keys.contains(&key) {
+            keys.push(key);
+        }
+    }
+    if keys.is_empty() {
+        return;
+    }
+    let pipes_type = PhpType::generic_array(PhpType::union(keys), PhpType::named(atom("resource")));
+    scope.set(
+        bytes_to_str(pipes.name),
+        vec![ResolvedType::from_type_string(pipes_type)],
+    );
 }
 
 /// `settype($var, 'int')` converts `$var` in place the way the matching

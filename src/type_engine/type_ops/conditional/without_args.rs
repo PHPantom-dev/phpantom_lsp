@@ -132,6 +132,7 @@ pub fn resolve_conditional_without_args_and_defaults(
                     then_type,
                     else_type,
                     template_defaults,
+                    this_ctx.map_or(&|_| None, |ctx| ctx.class_loader),
                 )
             {
                 return Some(resolved);
@@ -193,6 +194,7 @@ pub(super) fn try_resolve_with_template_default(
     then_type: &PhpType,
     else_type: &PhpType,
     template_defaults: Option<&HashMap<String, PhpType>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> Option<PhpType> {
     let defaults = template_defaults?;
     let default_value = defaults.get(template_name)?;
@@ -249,12 +251,19 @@ pub(super) fn try_resolve_with_template_default(
         }
     } else if let TypeKind::Named(s) = condition.kind() {
         // `\Exception` and `Exception` are the same class: a leading `\`
-        // only marks the name as already fully qualified.
+        // only marks the name as already fully qualified. A class bound to
+        // the template satisfies the condition through its parents and
+        // interfaces too.
         match default_value.kind() {
-            TypeKind::Named(dv) => dv
-                .trim_start_matches('\\')
-                .eq_ignore_ascii_case(s.trim_start_matches('\\')),
-            _ => false,
+            TypeKind::Named(dv)
+                if dv
+                    .trim_start_matches('\\')
+                    .eq_ignore_ascii_case(s.trim_start_matches('\\')) =>
+            {
+                true
+            }
+            _ => super::type_condition_result(default_value, condition, class_loader)
+                .unwrap_or(false),
         }
     } else {
         return None;
@@ -298,6 +307,7 @@ pub fn resolve_conditional_from_values(
             &cond.then_type,
             &cond.else_type,
             Some(values),
+            &|_| None,
         );
     }
     None

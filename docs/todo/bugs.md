@@ -35,34 +35,29 @@ No outstanding items.
 
 ### B819. Built-ins whose result their arguments decide return the declared type
 
-**Impact: Medium · Complexity: Medium**
+**Impact: Low · Complexity: Medium**
 
 ```php
-$px->getColor(1);                    // array{r: int|float, ...}, should be array{r: float, ...}
-get_defined_vars();                  // array, should be array{param: int, local: 'foo'}
 strtotime('4 qm');                   // int|false, should be false
+date_create('202/20');               // DateTime|false, should be false
 ```
 
-No argument-aware return rules for: ImagickPixel::getColor, fpm_get_status, proc_open's $pipes, getopt, CachingIterator::getCache, get_called_class and `get_class()` without an argument, array_find_key on literal keys, and get_defined_vars (which needs the walker's scope listed, not just queried). Each needs its own rule; grouped because the mechanism (a per-function return rule) is the same.
+`date_create()` and `strtotime()` only recognise ISO dates, relative day
+keywords and `+N unit` offsets, so a string PHP rejects is never folded to
+`false`. Saying `false` safely needs a reading of PHP's date grammar that
+knows every form it accepts.
 
 It also shows as:
 
-- `openssl_encrypt()`'s `$tag` out-parameter ignores the cipher
 - PECL extension calls whose return type PHPStan picks from the arguments use the stub's full union
-- `PDO::connect()` does not return the driver subclass named by the DSN
-- By-reference arrays of `socket_select()` and `proc_open()` are not typed from their inputs
-- `ssh2_sftp_stat()`'s return shape lacks the numeric keys
-- `ArrayObject` offset reads are not nullable
-- `Closure::bind()`, `bindTo()` and `Closure::getCurrent()` lose the closure's signature
-- `ReflectionEnum` methods are not specialized by the reflected enum
-- `DatePeriod`'s constructor arguments do not decide its end-date and recurrence types
-- `date_create()` and `strtotime()` only recognise ISO dates, relative day keywords and `+N unit` offsets, so a string PHP rejects (`'202/20'`, `'foo'`) is never folded to `false`
-- `get_parent_class()` written outside any class is `class-string|false`, should be `false`
+- `ArrayObject` offset reads give `TValue`, while the stub's `offsetGet()` says `TValue|null`: an offset read takes the class's generic value type ahead of `offsetGet()`, which collections rely on, so making it nullable is a policy decision
 - `array_search()` on a generic array whose offset was narrowed to the needle (`$arr[17] === 'foo'`) still includes `false`
+- A callback parameter bound to a shape's key type (`array_find_key($shape, fn ($v, $k) => …)`) gets `string` or `int`, not the shape's literal keys
+- `get_called_class()` in a trait names the trait (`class-string<MyTrait>`), as `static::class` there does, instead of the using class
 
 **Fix:** add per-function rules (`type_ops/call_site_returns/`, stub patches with conditional returns, or the array/function rule tables) one function at a time; each upstream fixture is the spec for its function.
 
-**Cases** (PHPStan `nsrt/`): `get-defined-vars.php` (10), the `array_search`, `array_find_key` and `array_rand` lines of `array-functions.php`, the `// SKIP` lines in `get-parent-class.php`, `array-search.php`, `DateTimeCreateDynamicReturnTypes.php` and `strtotime-return-type-extensions.php`, and the other one- and two-assertion files the gap triage grouped here.
+**Cases** (PHPStan `nsrt/`): the `// SKIP` lines in `array-search.php`, `array-find-key.php`, `DateTimeCreateDynamicReturnTypes.php` and `strtotime-return-type-extensions.php`; `bug-9341.php` and `bug-13144.php` (unported).
 
 ### B821. `preg_match()` gives a generic array for a pattern that is not one plain literal
 
