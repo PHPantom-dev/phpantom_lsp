@@ -2127,17 +2127,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b889-an-assignment-to-a-variable-variable-name-erases-the-type-of-every-variable-assigned-before-it" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B889. An assignment to a variable variable (<code>$$name = ...</code>) erases the type of every variable assigned before it
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -3881,17 +3870,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b889-an-assignment-to-a-variable-variable-name-erases-the-type-of-every-variable-assigned-before-it" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B889. An assignment to a variable variable (<code>$$name = ...</code>) erases the type of every variable assigned before it
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -5296,17 +5274,6 @@ completion goes through the same path. <code>// SKIP</code> lines in
 <p>References to locals are tracked; a reference to a property is not.</p>
 <p><strong>Fix:</strong> record <code>&amp;$obj-&gt;prop</code> as a reference the way <code>&amp;$local</code> is. See
 <code>tests/psalm_assertions/reference.php</code>.</p>
-<h3 id="b889-an-assignment-to-a-variable-variable-name-erases-the-type-of-every-variable-assigned-before-it">B889. An assignment to a variable variable (<code>$$name = ...</code>) erases the type of every variable assigned before it<a class="headerlink" href="#b889-an-assignment-to-a-variable-variable-name-erases-the-type-of-every-variable-assigned-before-it" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-98-1" name="__codelineno-98-1" href="#__codelineno-98-1"></a><span class="x">$lorem = 1;</span>
-<a id="__codelineno-98-2" name="__codelineno-98-2" href="#__codelineno-98-2"></a><span class="x">$arr = ['one'];</span>
-<a id="__codelineno-98-3" name="__codelineno-98-3" href="#__codelineno-98-3"></a><span class="x">$$lorem = 'ipsum';</span>
-<a id="__codelineno-98-4" name="__codelineno-98-4" href="#__codelineno-98-4"></a><span class="x">$lorem; // got mixed, should be 1</span>
-<a id="__codelineno-98-5" name="__codelineno-98-5" href="#__codelineno-98-5"></a><span class="x">$arr;   // got mixed, should be array{'one'}</span>
-</code></pre></div>
-<p>In if.php every variable assigned before line 283's <code>$$lorem = 'ipsum'</code> reads as mixed (or nothing) afterwards, and every variable assigned after it is right. A dynamic-name write seems to invalidate the whole scope. PHPStan only writes the one variable when the name is a known literal, and invalidates nothing otherwise.</p>
-<p><strong>Fix:</strong> write only the named variable when the name is a known literal, and leave the scope alone otherwise.</p>
-<p><strong>Cases</strong> (PHPStan <code>nsrt/</code>, 51 assertions): <code>if.php</code> (51).</p>
 
 
 

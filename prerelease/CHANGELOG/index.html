@@ -6432,6 +6432,7 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>A variable variable with a computed name keeps the other locals.</strong> After <code>$$name = 'x'</code>, the variables assigned before it keep their types instead of all becoming <code>mixed</code>. A literal name such as <code>${'total'} = 0</code> still replaces only that variable.</li>
 <li><strong>Arithmetic on numeric-string literals keeps the number.</strong> <code>$digit + $offset</code> with <code>$digit</code> typed <code>'1'|'2'|'3'</code> and <code>$offset</code> an <code>int&lt;1, 14&gt;</code> is <code>int&lt;2, 17&gt;</code>, and <code>'1e3' + $offset</code> is a <code>float</code>, instead of <code>int|float</code>.</li>
 <li><strong>Concatenation keeps the letter case.</strong> <code>'0' . $int</code> is typed <code>lowercase-string&amp;uppercase-string</code> too, and joining two lowercase (or two uppercase) strings stays lowercase (or uppercase).</li>
 <li><strong>Concatenating a <code>bool</code> or a <code>float</code> can stay a number.</strong> <code>$int . $bool</code> and <code>$float . $positiveInt</code> are typed <code>numeric-string</code>, since a <code>bool</code> converts to <code>''</code> or <code>'1'</code> and a float followed by more digits is still a number.</li>
