@@ -2149,17 +2149,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b920-a-concatenation-is-never-typed-lowercase-string-or-uppercase-string" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B920. A concatenation is never typed <code>lowercase-string</code> or <code>uppercase-string</code>
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -3925,17 +3914,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b920-a-concatenation-is-never-typed-lowercase-string-or-uppercase-string" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B920. A concatenation is never typed <code>lowercase-string</code> or <code>uppercase-string</code>
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -5367,20 +5345,6 @@ completion goes through the same path. <code>// SKIP</code> lines in
 <p>Every pow() line in pow.php passes while the matching <code>**</code> line fails, so the operator is resolved by a separate, cruder path (always int|float for ints, no literal folding, no object operand handling). Route <code>**</code> through the pow() rule.</p>
 <p><strong>Fix:</strong> route <code>**</code> through the same rule <code>pow()</code> uses.</p>
 <p><strong>Cases</strong> (PHPStan <code>nsrt/</code>, 31 assertions): <code>pow.php</code> (31).</p>
-<h3 id="b920-a-concatenation-is-never-typed-lowercase-string-or-uppercase-string">B920. A concatenation is never typed <code>lowercase-string</code> or <code>uppercase-string</code><a class="headerlink" href="#b920-a-concatenation-is-never-typed-lowercase-string-or-uppercase-string" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-100-1" name="__codelineno-100-1" href="#__codelineno-100-1"></a><span class="x">'0' . $i;         // non-falsy-string, should be lowercase-string&amp;non-falsy-string&amp;uppercase-string</span>
-<a id="__codelineno-100-2" name="__codelineno-100-2" href="#__codelineno-100-2"></a><span class="x">$i . $string;     // non-falsy-string, should be lowercase-string&amp;non-falsy-string when $string is lowercase</span>
-</code></pre></div>
-<p>PHPStan carries the case accessories through <code>.</code> and interpolation: a side
-that is all digits (an int, a float, a numeric literal) has no letters, so it
-is both lowercase and uppercase, and the result keeps whichever case both
-sides share. PHPantom's concatenation result only tracks emptiness,
-literal-ness and numeric-ness.</p>
-<p><strong>Fix:</strong> track the case of each side next to its emptiness in
-<code>scalar_fold::concat_result</code> and add the accessories both sides promise.</p>
-<p><strong>Cases</strong> (PHPStan <code>nsrt/</code>): the <code>// SKIP</code> lines in <code>bug-11129.php</code> and
-<code>constant-string-unions.php</code>.</p>
 
 
 
