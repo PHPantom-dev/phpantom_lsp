@@ -1,0 +1,15 @@
+// test: a compound or element write through a variable variable with a computed name keeps every local
+// feature: hover
+// expect_hover: $rx => $rx = 1
+// expect_hover: $ry => $ry = 'a'
+---
+<?php
+
+function test(string $a, string $b): void {
+    $x = 1;
+    $y = 'a';
+    $$a .= 'z';
+    $rx = $x;
+    ${$b}[] = 1;
+    $ry = $y;<>
+}

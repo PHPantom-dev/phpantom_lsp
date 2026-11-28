@@ -747,7 +747,7 @@ impl<'b> ExprWalk<'b> {
             }
             self.done(expr, ExprResult::default());
             self.flush(scope, ctx);
-            widen_variable_variable_write(None, scope);
+            widen_every_local(scope);
             record_scope_snapshot(expr.span().end.offset, scope);
             return ExprResult { wrote: true };
         };

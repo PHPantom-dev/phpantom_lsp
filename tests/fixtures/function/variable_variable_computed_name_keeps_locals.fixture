@@ -1,0 +1,16 @@
+// test: a write through a variable variable with a computed name keeps every local
+// feature: hover
+// `$$name` could name any local, but forgetting them all would erase what
+// the function knew for a write that rarely lands on one.  PHPStan keeps them too.
+// expect_hover: $rx => $rx = 1
+// expect_hover: $ry => $ry = 'a'
+---
+<?php
+
+function test(string $name): void {
+    $x = 1;
+    $y = 'a';
+    $$name = 1;
+    $rx = $x;
+    $ry = $y;<>
+}

@@ -1997,22 +1997,3 @@ References to locals are tracked; a reference to a property is not.
 
 **Fix:** record `&$obj->prop` as a reference the way `&$local` is. See
 `tests/psalm_assertions/reference.php`.
-
-### B889. An assignment to a variable variable (`$$name = ...`) erases the type of every variable assigned before it
-
-**Impact: Medium · Complexity: Low**
-
-```php
-$lorem = 1;
-$arr = ['one'];
-$$lorem = 'ipsum';
-$lorem; // got mixed, should be 1
-$arr;   // got mixed, should be array{'one'}
-```
-
-In if.php every variable assigned before line 283's `$$lorem = 'ipsum'` reads as mixed (or nothing) afterwards, and every variable assigned after it is right. A dynamic-name write seems to invalidate the whole scope. PHPStan only writes the one variable when the name is a known literal, and invalidates nothing otherwise.
-
-**Fix:** write only the named variable when the name is a known literal, and leave the scope alone otherwise.
-
-**Cases** (PHPStan `nsrt/`, 51 assertions): `if.php` (51).
-

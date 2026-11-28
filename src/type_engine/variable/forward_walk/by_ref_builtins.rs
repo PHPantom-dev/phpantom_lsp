@@ -300,14 +300,21 @@ fn destructuring_targets<'a, 'b>(
     })
 }
 
-/// Forget what is known about the locals a write through a variable
-/// variable may have replaced: the one it names, or every local when its
-/// name is computed.
+/// Forget what is known about the local a write through a variable
+/// variable names.  A computed name leaves the scope alone, as PHPStan
+/// does: widening every local to `mixed` on `$$name = …` would erase
+/// everything the function knew for a write that rarely lands on a typed
+/// local.
 pub(super) fn widen_variable_variable_write(name: Option<String>, scope: &mut ScopeState) {
-    match name {
-        Some(name) => widen_extractable_locals(scope, |local| local == name),
-        None => widen_extractable_locals(scope, |_| true),
+    if let Some(name) = name {
+        widen_extractable_locals(scope, |local| local == name);
     }
+}
+
+/// Forget what is known about every local, for code that may assign any
+/// of them (an include that cannot be followed).
+pub(super) fn widen_every_local(scope: &mut ScopeState) {
+    widen_extractable_locals(scope, |_| true);
 }
 
 /// Widen to `mixed` every local an `extract()` of unknown keys may have
