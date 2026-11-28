@@ -33,6 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Concatenation keeps the letter case.** `'0' . $int` is typed `lowercase-string&uppercase-string` too, and joining two lowercase (or two uppercase) strings stays lowercase (or uppercase).
 - **Concatenating a `bool` or a `float` can stay a number.** `$int . $bool` and `$float . $positiveInt` are typed `numeric-string`, since a `bool` converts to `''` or `'1'` and a float followed by more digits is still a number.
 - **Merged branches drop strings a wider type covers.** After an `if` where one branch holds a few known strings and the other a general string type such as `literal-string&non-falsy-string`, the result is just the general type, not both side by side.
 - **Concatenating a few known strings gives each result.** `.`, `.=` and interpolated strings over a value such as `'a'|'b'` give every string they can build, such as `'ax'|'bx'`, instead of `literal-string`. Past 128 results, or in a loop that keeps adding to a string, the type falls back to `literal-string`. An interpolated string that cannot be worked out is now typed like the matching concatenation instead of a plain `string`.

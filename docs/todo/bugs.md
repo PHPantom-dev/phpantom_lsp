@@ -2038,24 +2038,3 @@ Every pow() line in pow.php passes while the matching `**` line fails, so the op
 **Fix:** route `**` through the same rule `pow()` uses.
 
 **Cases** (PHPStan `nsrt/`, 31 assertions): `pow.php` (31).
-
-### B920. A concatenation is never typed `lowercase-string` or `uppercase-string`
-
-**Impact: Low · Complexity: Low**
-
-```php
-'0' . $i;         // non-falsy-string, should be lowercase-string&non-falsy-string&uppercase-string
-$i . $string;     // non-falsy-string, should be lowercase-string&non-falsy-string when $string is lowercase
-```
-
-PHPStan carries the case accessories through `.` and interpolation: a side
-that is all digits (an int, a float, a numeric literal) has no letters, so it
-is both lowercase and uppercase, and the result keeps whichever case both
-sides share. PHPantom's concatenation result only tracks emptiness,
-literal-ness and numeric-ness.
-
-**Fix:** track the case of each side next to its emptiness in
-`scalar_fold::concat_result` and add the accessories both sides promise.
-
-**Cases** (PHPStan `nsrt/`): the `// SKIP` lines in `bug-11129.php` and
-`constant-string-unions.php`.

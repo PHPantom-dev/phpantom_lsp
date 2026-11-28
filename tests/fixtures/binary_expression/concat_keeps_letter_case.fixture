@@ -1,0 +1,22 @@
+// test: concatenation keeps the letter case both sides share
+// feature: hover
+// An int has no letters, so it is both lowercase and uppercase, and the
+// result keeps whichever case both sides promise.
+// expect_hover: $digits => = lowercase-string&non-falsy-string&uppercase-string
+// expect_hover: $lower => = lowercase-string&non-empty-string
+// expect_hover: $upper => = non-falsy-string&uppercase-string
+// expect_hover: $mixed => = non-falsy-string
+---
+<?php
+
+/**
+ * @param lowercase-string $name
+ * @param uppercase-string $code
+ */
+function test(int $i, string $name, string $code): void {
+    $digits = '0' . $i;
+    $lower = $i . $name;
+    $upper = 'ID-' . $code;
+    $mixed = 'Id-' . $i;
+    $<>mixed;
+}

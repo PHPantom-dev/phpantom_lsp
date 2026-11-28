@@ -6,9 +6,9 @@
 // expect_hover: $sql => literal-string&non-falsy-string
 // expect_hover: $appended => literal-string&non-falsy-string
 // expect_hover: $mixedIn => non-falsy-string
-// expect_hover: $price => numeric-string&non-falsy-string
-// expect_hover: $digits => numeric-string&non-falsy-string
-// expect_hover: $signed => non-falsy-string
+// expect_hover: $price => = lowercase-string&non-falsy-string&numeric-string&uppercase-string
+// expect_hover: $digits => = lowercase-string&non-falsy-string&numeric-string&uppercase-string
+// expect_hover: $signed => = lowercase-string&non-falsy-string&uppercase-string
 ---
 <?php
 

@@ -2,13 +2,13 @@
 // feature: hover
 // A bool converts to '' or '1', so it continues an integer or starts one,
 // and a float followed by more digits is still a number.
-// expect_hover: $intBool => numeric-string
-// expect_hover: $positiveBool => numeric-string&non-falsy-string
-// expect_hover: $boolPositive => numeric-string&non-falsy-string
-// expect_hover: $floatPositive => numeric-string&non-falsy-string
-// expect_hover: $boolInt => = non-empty-string
-// expect_hover: $floatNegative => = non-falsy-string
-// expect_hover: $intFloat => = non-falsy-string
+// expect_hover: $intBool => = lowercase-string&non-empty-string&numeric-string&uppercase-string
+// expect_hover: $positiveBool => = lowercase-string&non-falsy-string&numeric-string&uppercase-string
+// expect_hover: $boolPositive => = lowercase-string&non-falsy-string&numeric-string&uppercase-string
+// expect_hover: $floatPositive => = non-falsy-string&numeric-string&uppercase-string
+// expect_hover: $boolInt => = lowercase-string&non-empty-string&uppercase-string
+// expect_hover: $floatNegative => = non-falsy-string&uppercase-string
+// expect_hover: $intFloat => = non-falsy-string&uppercase-string
 // expect_hover: $numericFloat => = non-falsy-string
 ---
 <?php

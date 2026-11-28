@@ -514,31 +514,38 @@ impl StringEmptiness {
     /// The string type `lhs . rhs` gives: two non-empty halves join into at
     /// least two characters, which cannot be `'0'`. `literal` says both
     /// halves are written in the source, so the result is a
-    /// `literal-string` too, and `numeric` that the halves join into a
-    /// number (see [`NumericConcat`]).
-    pub(super) fn concat_type(lhs: Self, rhs: Self, literal: bool, numeric: bool) -> PhpType {
+    /// `literal-string` too, `numeric` that the halves join into a number
+    /// (see [`NumericConcat`]), and `case` which letter case both halves
+    /// share.
+    pub(super) fn concat_type(
+        lhs: Self,
+        rhs: Self,
+        literal: bool,
+        numeric: bool,
+        case: StringCase,
+    ) -> PhpType {
         let joined = if lhs >= Self::NonEmpty && rhs >= Self::NonEmpty {
             Self::NonFalsy
         } else {
             lhs.max(rhs)
         };
-        let mut parts = Vec::with_capacity(3);
+        let mut parts = Vec::with_capacity(5);
         if literal {
-            parts.push(if joined == Self::NonEmpty && !numeric {
-                PhpType::non_empty_literal_string()
-            } else {
-                PhpType::literal_string()
-            });
+            parts.push(PhpType::literal_string());
+        }
+        if case.lower {
+            parts.push(PhpType::lowercase_string());
+        }
+        match joined {
+            Self::NonFalsy => parts.push(PhpType::non_falsy_string()),
+            Self::NonEmpty => parts.push(PhpType::non_empty_string()),
+            _ => {}
         }
         if numeric {
             parts.push(PhpType::numeric_string());
         }
-        match joined {
-            Self::NonFalsy => parts.push(PhpType::non_falsy_string()),
-            // A numeric string is never empty, and `non-empty-literal-string`
-            // already says it.
-            Self::NonEmpty if parts.is_empty() => parts.push(PhpType::non_empty_string()),
-            _ => {}
+        if case.upper {
+            parts.push(PhpType::uppercase_string());
         }
         match parts.len() {
             0 => PhpType::string(),
@@ -548,11 +555,98 @@ impl StringEmptiness {
     }
 }
 
+/// Which letter case the string an operand converts to is known to be in.
+/// A string without letters (every int, `''`, `'1'`) is both.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct StringCase {
+    lower: bool,
+    upper: bool,
+}
+
+impl StringCase {
+    const BOTH: Self = Self {
+        lower: true,
+        upper: true,
+    };
+    const LOWER: Self = Self {
+        lower: true,
+        upper: false,
+    };
+    const UPPER: Self = Self {
+        lower: false,
+        upper: true,
+    };
+    const NEITHER: Self = Self {
+        lower: false,
+        upper: false,
+    };
+
+    /// What converting any value of the resolved operand to a string is
+    /// guaranteed to give. An unresolved operand promises nothing.
+    pub(super) fn of_operand(types: &[ResolvedType]) -> Self {
+        if types.is_empty() {
+            return Self::NEITHER;
+        }
+        types.iter().fold(Self::BOTH, |acc, resolved| {
+            acc.and(Self::of_type(&resolved.type_string))
+        })
+    }
+
+    fn and(self, other: Self) -> Self {
+        Self {
+            lower: self.lower && other.lower,
+            upper: self.upper && other.upper,
+        }
+    }
+
+    fn or(self, other: Self) -> Self {
+        Self {
+            lower: self.lower || other.lower,
+            upper: self.upper || other.upper,
+        }
+    }
+
+    fn of_text(text: &str) -> Self {
+        Self {
+            lower: !text.bytes().any(|b| b.is_ascii_uppercase()),
+            upper: !text.bytes().any(|b| b.is_ascii_lowercase()),
+        }
+    }
+
+    fn of_type(ty: &PhpType) -> Self {
+        match ty.kind() {
+            TypeKind::Union(members) => members
+                .iter()
+                .fold(Self::BOTH, |acc, member| acc.and(Self::of_type(member))),
+            TypeKind::Intersection(members) => members
+                .iter()
+                .fold(Self::NEITHER, |acc, member| acc.or(Self::of_type(member))),
+            // `null` converts to `''`.
+            TypeKind::Nullable(inner) => Self::of_type(inner),
+            TypeKind::Literal(_) => Scalar::from_type(ty)
+                .and_then(|s| s.to_php_string())
+                .map_or(Self::NEITHER, |text| Self::of_text(&text)),
+            TypeKind::IntRange(..) => Self::BOTH,
+            TypeKind::Named(name) => with_keyword_lowercase(name, |lower| match lower {
+                "int" | "integer" | "positive-int" | "negative-int" | "non-zero-int"
+                | "non-negative-int" | "non-positive-int" | "bool" | "boolean" | "true"
+                | "false" | "null" => Self::BOTH,
+                // `1.0E+25`, `INF`, `NAN`.
+                "float" | "double" => Self::UPPER,
+                "lowercase-string" | "non-empty-lowercase-string" => Self::LOWER,
+                "uppercase-string" | "non-empty-uppercase-string" => Self::UPPER,
+                _ => Self::NEITHER,
+            }),
+            _ => Self::NEITHER,
+        }
+    }
+}
+
 /// The string type `lhs . rhs` gives: the strings it can be when both
 /// operands are unions of known scalars, else the general string type.
 /// `rhs` is only resolved when the left side leaves the answer open: a
 /// non-falsy left side that is neither written out nor a number decides it
-/// alone.
+/// alone, when it has no letter case to share with the right side either.
 pub(super) fn concat_result(
     lhs: &[ResolvedType],
     rhs: impl FnOnce() -> Vec<ResolvedType>,
@@ -560,6 +654,7 @@ pub(super) fn concat_result(
     if !is_literal_operand(lhs)
         && StringEmptiness::of_operand(lhs) == StringEmptiness::NonFalsy
         && NumericConcat::of_lhs(lhs).is_none()
+        && StringCase::of_operand(lhs) == StringCase::NEITHER
     {
         return PhpType::non_falsy_string();
     }
@@ -579,6 +674,7 @@ pub(super) fn unfolded_concat_result(lhs: &[ResolvedType], rhs: &[ResolvedType])
         StringEmptiness::of_operand(rhs),
         is_literal_operand(lhs) && is_literal_operand(rhs),
         lhs_numeric.is_some_and(|rule| rule.admits(rhs)),
+        StringCase::of_operand(lhs).and(StringCase::of_operand(rhs)),
     )
 }
 
