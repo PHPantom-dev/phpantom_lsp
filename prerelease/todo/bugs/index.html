@@ -2149,6 +2149,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#b923-arithmetic-on-a-numeric-string-literal-and-a-non-literal-number-widens-to-intfloat" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B923. Arithmetic on a numeric-string literal and a non-literal number widens to <code>int|float</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -3914,6 +3925,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#b923-arithmetic-on-a-numeric-string-literal-and-a-non-literal-number-widens-to-intfloat" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B923. Arithmetic on a numeric-string literal and a non-literal number widens to <code>int|float</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -3969,29 +3991,24 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <p>No outstanding items.</p>
 <h2 id="standard-library-return-types">Standard-library return types<a class="headerlink" href="#standard-library-return-types" title="Permanent link">&para;</a></h2>
 <h3 id="b819-built-ins-whose-result-their-arguments-decide-return-the-declared-type">B819. Built-ins whose result their arguments decide return the declared type<a class="headerlink" href="#b819-built-ins-whose-result-their-arguments-decide-return-the-declared-type" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">parse_url('http://abc.def');         // array{scheme?: lowercase-string, ...}|false, should be array{scheme: 'http', host: 'abc.def'}</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">$dt-&gt;format('');                     // string, should be ''</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">$px-&gt;getColor(1);                    // array{r: int|float, ...}, should be array{r: float, ...}</span>
+<p><strong>Impact: Low · Complexity: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">strtotime('4 qm');                   // int|false, should be false</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">date_create('202/20');               // DateTime|false, should be false</span>
 </code></pre></div>
-<p>No argument-aware return rules for: parse_url over a literal URL (<code>// SKIP</code> lines in <code>tests/phpstan_nsrt/functions.php</code>), DateTimeInterface::format literals, ImagickPixel::getColor, fpm_get_status, sscanf scansets, proc_open's $pipes, getopt, CachingIterator::getCache, get_called_class, array_find_key on literal keys. Each needs its own rule; grouped because the mechanism (a per-function return rule) is the same.</p>
+<p><code>date_create()</code> and <code>strtotime()</code> only recognise ISO dates, relative day
+keywords and <code>+N unit</code> offsets, so a string PHP rejects is never folded to
+<code>false</code>. Saying <code>false</code> safely needs a reading of PHP's date grammar that
+knows every form it accepts.</p>
 <p>It also shows as:</p>
 <ul>
-<li><code>openssl_encrypt()</code>'s <code>$tag</code> out-parameter ignores the cipher</li>
 <li>PECL extension calls whose return type PHPStan picks from the arguments use the stub's full union</li>
-<li><code>PDO::connect()</code> does not return the driver subclass named by the DSN</li>
-<li>By-reference arrays of <code>socket_select()</code> and <code>proc_open()</code> are not typed from their inputs</li>
-<li><code>ssh2_sftp_stat()</code>'s return shape lacks the numeric keys</li>
-<li><code>ArrayObject</code> offset reads are not nullable</li>
-<li><code>Closure::bind()</code>, <code>bindTo()</code> and <code>Closure::getCurrent()</code> lose the closure's signature</li>
-<li><code>ReflectionEnum</code> methods are not specialized by the reflected enum</li>
-<li><code>DatePeriod</code>'s constructor arguments do not decide its end-date and recurrence types</li>
-<li><code>strtotime()</code> of a literal string is not folded</li>
-<li><code>DateTimeInterface::format()</code> with a literal format is not typed by the format</li>
-<li><code>sscanf()</code> with a literal format and no output arguments is not typed as a shape</li>
+<li><code>ArrayObject</code> offset reads give <code>TValue</code>, while the stub's <code>offsetGet()</code> says <code>TValue|null</code>: an offset read takes the class's generic value type ahead of <code>offsetGet()</code>, which collections rely on, so making it nullable is a policy decision</li>
+<li><code>array_search()</code> on a generic array whose offset was narrowed to the needle (<code>$arr[17] === 'foo'</code>) still includes <code>false</code></li>
+<li>A callback parameter bound to a shape's key type (<code>array_find_key($shape, fn ($v, $k) =&gt; …)</code>) gets <code>string</code> or <code>int</code>, not the shape's literal keys</li>
+<li><code>get_called_class()</code> in a trait names the trait (<code>class-string&lt;MyTrait&gt;</code>), as <code>static::class</code> there does, instead of the using class</li>
 </ul>
-<p><strong>Fix:</strong> add per-function rules (stub patches with conditional returns, or the array/function rule tables) one function at a time; each upstream fixture is the spec for its function.</p>
-<p><strong>Cases</strong> (PHPStan <code>nsrt/</code>, 316 assertions): <code>array-functions.php</code> (23), <code>array-search.php</code> (20), <code>mb-convert-encoding-php8.php</code> (18), <code>sscanf.php</code> (18), <code>get-parent-class.php</code> (12), <code>pr-1244-php-84.php</code> (12), <code>DateTimeDynamicReturnTypes.php</code> (12), <code>DateTimeCreateDynamicReturnTypes.php</code> (10), <code>mb_substitute_character-php8.php</code> (10), <code>get-defined-vars.php</code> (10), <code>bug-3789.php</code> (8), 54 more.</p>
+<p><strong>Fix:</strong> add per-function rules (<code>type_ops/call_site_returns/</code>, stub patches with conditional returns, or the array/function rule tables) one function at a time; each upstream fixture is the spec for its function.</p>
+<p><strong>Cases</strong> (PHPStan <code>nsrt/</code>): the <code>// SKIP</code> lines in <code>array-search.php</code>, <code>array-find-key.php</code>, <code>DateTimeCreateDynamicReturnTypes.php</code> and <code>strtotime-return-type-extensions.php</code>; <code>bug-9341.php</code> and <code>bug-13144.php</code> (unported).</p>
 <h3 id="b821-preg_match-gives-a-generic-array-for-a-pattern-that-is-not-one-plain-literal">B821. <code>preg_match()</code> gives a generic array for a pattern that is not one plain literal<a class="headerlink" href="#b821-preg_match-gives-a-generic-array-for-a-pattern-that-is-not-one-plain-literal" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium · Complexity: Low-Medium</strong></p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">if (preg_match('{' . preg_quote($s) . '(z)}', $s, $m)) {</span>
@@ -5345,6 +5362,20 @@ completion goes through the same path. <code>// SKIP</code> lines in
 <p>Every pow() line in pow.php passes while the matching <code>**</code> line fails, so the operator is resolved by a separate, cruder path (always int|float for ints, no literal folding, no object operand handling). Route <code>**</code> through the pow() rule.</p>
 <p><strong>Fix:</strong> route <code>**</code> through the same rule <code>pow()</code> uses.</p>
 <p><strong>Cases</strong> (PHPStan <code>nsrt/</code>, 31 assertions): <code>pow.php</code> (31).</p>
+<h3 id="b923-arithmetic-on-a-numeric-string-literal-and-a-non-literal-number-widens-to-intfloat">B923. Arithmetic on a numeric-string literal and a non-literal number widens to <code>int|float</code><a class="headerlink" href="#b923-arithmetic-on-a-numeric-string-literal-and-a-non-literal-number-widens-to-intfloat" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Complexity: Low</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-100-1" name="__codelineno-100-1" href="#__codelineno-100-1"></a><span class="x">/** @param '1'|'2'|'3' $digit @param int&lt;1, 14&gt; $offset */</span>
+<a id="__codelineno-100-2" name="__codelineno-100-2" href="#__codelineno-100-2"></a><span class="x">$digit + $offset;   // int|float, should be int&lt;2, 17&gt;</span>
+<a id="__codelineno-100-3" name="__codelineno-100-3" href="#__codelineno-100-3"></a><span class="x">'1e3' + $offset;    // int|float, should be float</span>
+</code></pre></div>
+<p>A single numeric-string literal on both sides folds (<code>'3' + 1</code> is <code>4</code>), but
+a union of them, or one beside a non-literal <code>int</code>, is read as a plain
+<code>numeric-string</code>, which may hold a float. Each literal decides whether it
+is an integer or a float string, so the result is an <code>int</code> range for
+integer strings and a <code>float</code> for the rest.</p>
+<p><strong>Fix:</strong> read each numeric-string literal operand as the <code>int</code> or <code>float</code>
+it converts to before the arithmetic rules combine the operands.</p>
+<p><strong>Cases</strong> (PHPStan <code>nsrt/</code>): the <code>// SKIP</code> lines in <code>bug-8803.php</code>.</p>
 
 
 
